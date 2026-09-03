@@ -1,13 +1,70 @@
-import React, { useState } from 'react';
-import { FileUp, CheckCircle, ChevronRight, UserPlus, Upload } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { FileUp, CheckCircle, ChevronRight, UserPlus, Upload, Loader2, FileText } from 'lucide-react';
 
 export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState(1);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleNext = (e: React.FormEvent) => {
+  // Form State
+  const [paperId, setPaperId] = useState('');
+  const [title, setTitle] = useState('');
+  const [abstract, setAbstract] = useState('');
+  const [track, setTrack] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleNext = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (step < 3) setStep(step + 1);
-    else onComplete();
+    setError(null);
+
+    if (step < 3) {
+      setStep(step + 1);
+    } else {
+      if (!file) {
+        setError("Please upload a manuscript PDF.");
+        return;
+      }
+      
+      setIsSubmitting(true);
+      try {
+        const formData = new FormData();
+        formData.append('paperId', paperId);
+        formData.append('title', title);
+        formData.append('abstract', abstract);
+        formData.append('track', track);
+        formData.append('file', file);
+
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+        const res = await fetch(`${apiUrl}/api/submissions`, {
+          method: 'POST',
+          body: formData,
+        });
+
+        if (!res.ok) {
+          throw new Error('Failed to submit paper');
+        }
+
+        onComplete();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An error occurred during submission.');
+        setIsSubmitting(false);
+      }
+    }
+  };
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      if (selectedFile.size > 10 * 1024 * 1024) {
+        setError("File size must be less than 10MB");
+        setFile(null);
+        return;
+      }
+      setFile(selectedFile);
+      setError(null);
+    }
   };
 
   return (
@@ -34,6 +91,12 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
         ))}
       </div>
 
+      {error && (
+        <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200">
+          {error}
+        </div>
+      )}
+
       <div className="bg-brand-card rounded-2xl p-8 shadow-xl border border-brand-text/5">
         <form onSubmit={handleNext}>
           {step === 1 && (
@@ -47,6 +110,8 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
                 <label className="block text-sm font-medium mb-1">Paper ID</label>
                 <input 
                   required type="text" 
+                  value={paperId}
+                  onChange={(e) => setPaperId(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
                   placeholder="Your paper ID From CMT portal"
                 />
@@ -56,6 +121,8 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
                 <label className="block text-sm font-medium mb-1">Paper Title</label>
                 <input 
                   required type="text" 
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
                   placeholder="e.g. Advancements in Deep Learning for Healthcare"
                 />
@@ -65,6 +132,8 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
                 <label className="block text-sm font-medium mb-1">Abstract</label>
                 <textarea 
                   required rows={5}
+                  value={abstract}
+                  onChange={(e) => setAbstract(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-none"
                   placeholder="Provide a  summary of your research..."
                 />
@@ -72,7 +141,12 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
 
               <div>
                 <label className="block text-sm font-medium mb-1">Conference Track</label>
-                <select required className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all">
+                <select 
+                  required 
+                  value={track}
+                  onChange={(e) => setTrack(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                >
                   <option value="">Select a track</option>
                   <option value="ai-intelligent-systems">Artificial Intelligence & Intelligent Systems</option>
                   <option value="ml-advanced-analytics">Machine Learning & Advanced Analytics</option>
@@ -119,13 +193,28 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
                 Upload Manuscript
               </h2>
               
-              <div className="border-2 border-dashed border-brand-accent/40 rounded-2xl p-12 text-center bg-brand-accent/5 hover:bg-brand-accent/10 transition-colors cursor-pointer group">
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer group ${
+                  file ? 'border-green-500 bg-green-50' : 'border-brand-accent/40 bg-brand-accent/5 hover:bg-brand-accent/10'
+                }`}
+              >
                 <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm group-hover:scale-110 transition-transform">
-                  <Upload className="w-8 h-8 text-brand-accent" />
+                  {file ? <FileText className="w-8 h-8 text-green-500" /> : <Upload className="w-8 h-8 text-brand-accent" />}
                 </div>
-                <h3 className="text-xl font-bold mb-2">Click to upload or drag and drop</h3>
-                <p className="text-sm text-brand-text/60">PDF format only. Maximum file size 10MB.</p>
-                <input type="file" accept=".pdf" className="hidden" id="file-upload" />
+                <h3 className="text-xl font-bold mb-2">
+                  {file ? 'File Selected' : 'Click to upload or drag and drop'}
+                </h3>
+                <p className="text-sm text-brand-text/60">
+                  {file ? file.name : 'PDF format only. Maximum file size 10MB.'}
+                </p>
+                <input 
+                  type="file" 
+                  accept=".pdf" 
+                  className="hidden" 
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                />
               </div>
               
               <div className="flex items-center gap-2 text-sm text-brand-text/70 bg-white/50 p-4 rounded-lg">
@@ -140,7 +229,8 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
               <button 
                 type="button" 
                 onClick={() => setStep(step - 1)}
-                className="px-6 py-3 rounded-xl font-medium text-brand-text hover:bg-brand-text/5 transition-colors"
+                disabled={isSubmitting}
+                className="px-6 py-3 rounded-xl font-medium text-brand-text hover:bg-brand-text/5 transition-colors disabled:opacity-50"
               >
                 Back
               </button>
@@ -150,10 +240,18 @@ export function SubmissionWizard({ onComplete }: { onComplete: () => void }) {
             
             <button 
               type="submit"
-              className="bg-brand-text text-white px-8 py-3 rounded-xl font-medium hover:bg-brand-accent hover:-translate-y-0.5 transition-all shadow-lg flex items-center gap-2"
+              disabled={isSubmitting}
+              className="bg-brand-text text-white px-8 py-3 rounded-xl font-medium hover:bg-brand-accent hover:-translate-y-0.5 transition-all shadow-lg flex items-center gap-2 disabled:opacity-50 disabled:hover:translate-y-0"
             >
-              {step === 3 ? 'Submit Paper' : 'Continue'}
-              {step !== 3 && <ChevronRight className="w-4 h-4" />}
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" /> Submitting...
+                </>
+              ) : step === 3 ? (
+                'Submit Paper'
+              ) : (
+                <>Continue <ChevronRight className="w-4 h-4" /></>
+              )}
             </button>
           </div>
         </form>
