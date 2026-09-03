@@ -11,6 +11,7 @@
   --font-sans: "Plus Jakarta Sans", "Inter", sans-serif;
   
   --animate-aurora: aurora 10s ease infinite;
+  --animate-marquee: marquee 25s linear infinite;
 
   @keyframes aurora {
     0% {
@@ -22,6 +23,11 @@
     100% {
       background-position: 0% 50%;
     }
+  }
+
+  @keyframes marquee {
+    0% { transform: translateX(0%); }
+    100% { transform: translateX(-50%); }
   }
 }
 

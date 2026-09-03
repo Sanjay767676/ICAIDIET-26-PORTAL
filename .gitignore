@@ -10,3 +10,9 @@ coverage/
 # Cloudflare
 .wrangler/
 .dev.vars
+# wrangler.toml contains account_id / database_id / secrets. Not committed.
+backend/wrangler.toml
+backend/wrangler.toml.example
+
+# Redundant top-level assets copy (source of truth is user-portal/src/assets/)
+user-portal/assets/

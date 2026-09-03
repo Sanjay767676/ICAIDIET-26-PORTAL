@@ -1,37 +1,54 @@
 import React from 'react';
-import { ArrowRight, Calendar, MapPin } from 'lucide-react';
+import { ArrowRight } from 'lucide-react';
+import wileyLogoBlack from '../../assets/images/WILEY(BLACK).png';
+import scopusLogo from '../../assets/images/scopus.png';
+import snsctLogo from '../../assets/images/SNSCT.png';
 
 export function HeroSection({ onStart }: { onStart: () => void }) {
   return (
     <div className="relative overflow-hidden">
+      {/* Announcement Banner */}
+      <div className="absolute top-0 left-0 w-full bg-[#000000] border-y border-[#000000] py-2.5 overflow-hidden z-40">
+        <div className="flex w-max animate-marquee items-center gap-12 px-4">
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="flex items-center gap-12 whitespace-nowrap">
+              <span className="text-[#FFFFFF] font-serif font-semibold uppercase tracking-widest text-[16px]">Publishing Partner</span>
+              <img src={wileyLogoBlack} alt="Wiley" className="h-10 md:h-12 object-contain bg-white px-2 py-1 rounded" />
+              <span className="text-[#FFFFFF]">|</span>
+              <span className="text-[#FFFFFF] font-serif font-semibold uppercase tracking-widest text-[16px]">Indexed In</span>
+              <img src={scopusLogo} alt="Scopus" className="h-10 md:h-12 object-contain bg-white px-2 py-1 rounded" />
+              <span className="text-[#FFFFFF]">|</span>
+              <span className="text-[#FFFFFF] font-serif font-semibold uppercase tracking-widest text-[16px]">November 20<sup className="lowercase">th</sup> & 21<sup className="lowercase">st</sup> 2026</span>
+              <span className="text-[#FFFFFF]">|</span>
+              <div className="flex items-center gap-2">
+                <img src={snsctLogo} alt="SNSCT" className="h-6 md:h-8 object-contain bg-white px-1 py-1 rounded" />
+                <span className="text-[#FFFFFF] font-serif font-semibold uppercase tracking-widest text-[16px]">SNS College Of Technology</span>
+              </div>
+              <span className="text-[#FFFFFF]">|</span>
+            </div>
+          ))}
+        </div>
+      </div>
 
-
-      <div className="container mx-auto px-4 py-24 md:py-32 relative z-10">
+      <div className="container mx-auto px-4 py-32 md:py-40 relative z-10">
         <div className="max-w-4xl mx-auto text-center">
-
-
-          <h1 className="text-5xl md:text-7xl font-serif font-bold tracking-tight mb-6">
-            Welcome to{' '}
-            <span className="block mt-2">
-              ICAIDIET'26
-            </span>
+          <h1 className="text-4xl md:text-5xl lg:text-6xl font-serif font-bold tracking-tight mb-8 leading-tight">
+            International Conference on AI-Driven Innovation
+            <span className="block mt-2">in Engineering and Technology</span>
           </h1>
 
-          <p className="text-xl md:text-2xl text-brand-text/80 mb-10 max-w-2xl mx-auto font-medium">
-            International Conference on AI-Driven Innovation in Engineering and Technology
+          <p className="text-xl md:text-2xl font-serif font-bold text-brand-text/90 mb-4">On</p>
+          
+          <p className="text-2xl md:text-3xl font-serif font-bold text-brand-text mb-2">
+            20<sup>th</sup> & 21<sup>st</sup> November 2026
           </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-6 mb-12 text-brand-text/70">
-            <div className="flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-brand-accent" />
-              <span>August 15-17, 2026</span>
-            </div>
-            <div className="hidden sm:block w-1.5 h-1.5 rounded-full bg-brand-text/20" />
-            <div className="flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-brand-accent" />
-              <span>Virtual & London, UK</span>
-            </div>
-          </div>
+          <p className="text-lg md:text-xl font-serif text-brand-text/80 mb-6">
+            (Hybrid Mode)
+          </p>
+          
+          <p className="text-2xl md:text-3xl font-serif font-bold text-brand-text mb-12">
+            SNS - AI Campus
+          </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button 
@@ -47,8 +64,6 @@ export function HeroSection({ onStart }: { onStart: () => void }) {
           </div>
         </div>
       </div>
-
-
     </div>
   );
 }
