@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-bg: #FFFFFF;
-  --color-brand-card: #FFFFFF;
-  --color-brand-text: #000000;
-  --color-brand-accent: #000000;
+  --color-brand-bg: #fdf08a; /* Light yellow background */
+  --color-brand-card: #ffbf00; /* Amber-yellow UI blocks */
+  --color-brand-text: #000000; /* Black text for contrast */
+  --color-brand-accent: #ffbf00; /* Amber accent for buttons, etc. */
   --color-brand-footer: #000000;
   
   --font-serif: "Libre Baskerville", serif;

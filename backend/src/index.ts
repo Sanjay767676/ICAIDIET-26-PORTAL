@@ -239,6 +239,7 @@ app.post('/api/submissions', async (c) => {
 
     const formData = await c.req.parseBody();
 
+    const paperId = (formData['paperId'] as string || '').trim();
     const title = (formData['title'] as string || '').trim();
     const abstract = (formData['abstract'] as string || '').trim();
     const track = (formData['track'] as string || '').trim();
@@ -247,11 +248,51 @@ app.post('/api/submissions', async (c) => {
     const keywords = (formData['keywords'] as string || '').trim();
     const file = formData['file'] as File;
 
+    // Multi-author support: a JSON array of { first_name, last_name, phone, email, college }.
+    // The first entry is the primary author. Optional for backward compatibility.
+    let authors: { first_name: string; last_name: string; phone: string; email: string; college: string }[] = [];
+    try {
+      const rawAuthors = (formData['authors'] as string || '').trim();
+      if (rawAuthors) {
+        const parsed = JSON.parse(rawAuthors);
+        if (Array.isArray(parsed)) {
+          authors = parsed.map((a: any) => ({
+            first_name: String(a?.first_name || '').trim(),
+            last_name: String(a?.last_name || '').trim(),
+            phone: String(a?.phone || '').trim(),
+            email: String(a?.email || '').trim(),
+            college: String(a?.college || '').trim(),
+          }));
+        }
+      }
+    } catch {
+      return c.json({ success: false, error: 'Invalid authors data.' }, 400);
+    }
+
     if (!title || !abstract || !track) {
       return c.json({ success: false, error: 'Missing required fields: title, abstract, and track are required.' }, 400);
     }
     if (!authorName || !authorEmail) {
       return c.json({ success: false, error: 'Primary author name and email are required.' }, 400);
+    }
+
+    // Validate author data on the server too.
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const hasAuthors = authors.length > 0;
+    for (let i = 0; i < authors.length; i++) {
+      const a = authors[i];
+      if (!a.first_name || !a.last_name) {
+        return c.json({ success: false, error: `Author ${i + 1}: first and last name are required.` }, 400);
+      }
+      if (!a.phone) {
+        return c.json({ success: false, error: `Author ${i + 1}: a phone number is required.` }, 400);
+      }
+      if (!emailRegex.test(a.email)) {
+        return c.json({ success: false, error: `Author ${i + 1}: a valid email address is required.` }, 400);
+      }
+      if (!a.college) {
+        return c.json({ success: false, error: `Author ${i + 1}: a college/institution is required.` }, 400);
+      }
     }
 
     // Server-side file validation (extension + content-type + size).
@@ -279,14 +320,15 @@ app.post('/api/submissions', async (c) => {
       uploaded = true;
 
       // 2. Insert into D1 (submission + file) atomically via batch.
-      await c.env.DB.batch([
+      const batchStatements: D1PreparedStatement[] = [
         c.env.DB.prepare(
           `INSERT INTO submissions
-            (id, submission_code, title, abstract, keywords, track, author_name, author_email, user_id, status, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            (id, submission_code, paper_id, title, abstract, keywords, track, author_name, author_email, user_id, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
           submissionId,
           submissionCode,
+          paperId,
           title,
           abstract,
           keywords || track,
@@ -312,7 +354,40 @@ app.post('/api/submissions', async (c) => {
           file.size,
           now
         ),
-      ]);
+      ];
+
+      // Insert each author. Default to the primary author if no authors array was sent.
+      const authorRows = hasAuthors
+        ? authors
+        : [{
+            first_name: authorName.split(' ').slice(0, -1).join(' ') || authorName.split(' ')[0] || '',
+            last_name: authorName.split(' ').slice(-1)[0] || '',
+            phone: '',
+            email: authorEmail,
+            college: '',
+          }];
+
+      authorRows.forEach((a, idx) => {
+        batchStatements.push(
+          c.env.DB.prepare(
+            `INSERT INTO authors
+              (id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            crypto.randomUUID(),
+            submissionId,
+            idx === 0 ? 1 : 0,
+            a.first_name,
+            a.last_name,
+            a.phone,
+            a.email,
+            a.college,
+            now
+          )
+        );
+      });
+
+      await c.env.DB.batch(batchStatements);
 
       return c.json({
         success: true,
@@ -349,12 +424,33 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.title, s.track, s.status, s.author_name, s.author_email, s.created_at
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at
        FROM submissions s
        ORDER BY s.created_at DESC`
     ).all();
 
-    return c.json({ success: true, submissions: results });
+    // Load authors for all returned submissions in one query and group them.
+    const submissions = results as any[];
+    let authorsBySubmission: Record<string, any[]> = {};
+    if (submissions.length > 0) {
+      const ids = submissions.map((s: any) => s.id as string);
+      const placeholders = ids.map(() => '?').join(',');
+      const authorRes = await c.env.DB.prepare(
+        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+         FROM authors
+         WHERE submission_id IN (${placeholders})
+         ORDER BY is_primary DESC, created_at ASC`
+      ).bind(...ids).all();
+      authorsBySubmission = (authorRes.results as any[] || []).reduce((acc: any, a: any) => {
+        const sid = a.submission_id;
+        (acc[sid] = acc[sid] || []).push(a);
+        return acc;
+      }, {});
+    }
+
+    const enriched = submissions.map((s: any) => ({ ...s, authors: authorsBySubmission[s.id] || [] }));
+
+    return c.json({ success: true, submissions: enriched });
   } catch (error) {
     console.error('Fetch error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);

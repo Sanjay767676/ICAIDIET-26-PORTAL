@@ -3,15 +3,30 @@ import { Eye, AlertCircle, RefreshCw, LogOut } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
+interface Author {
+  id: string;
+  submission_id: string;
+  is_primary: number;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email: string;
+  college: string;
+  created_at: string;
+}
+
 interface Submission {
   id: string;
   submission_code: string;
+  paper_id: string;
   title: string;
+  abstract: string;
   track: string;
   author_name: string;
   author_email: string;
   status: string;
   created_at: string;
+  authors?: Author[];
 }
 
 interface FileView {
@@ -61,8 +76,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
     <div className="flex-1 flex items-center justify-center p-4 py-20">
       <div className="bg-brand-card w-full max-w-md rounded-2xl p-8 shadow-xl border border-brand-text/5">
         <div className="text-center mb-8">
-          <h2 className="font-serif text-3xl font-bold mb-2">Admin Sign In</h2>
-          <p className="text-brand-text/70 text-sm">Restricted access. Authorized personnel only.</p>
+          <h2 className="font-serif text-3xl font-bold mb-2">Admin portal</h2>
         </div>
 
         {error && (
@@ -82,7 +96,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               className="w-full px-4 py-2 rounded-lg bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-              placeholder="snsct"
+              placeholder="Enter Your username"
             />
           </div>
           <div>
@@ -93,7 +107,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-2 rounded-lg bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-              placeholder="••••••••"
+              placeholder="Enter Your Password"
             />
           </div>
           <button
@@ -252,9 +266,10 @@ export default function App() {
     return (
       <div className="min-h-screen flex flex-col font-sans text-brand-text bg-brand-bg">
         <div className="flex-1 flex flex-col">
-          <header className="border-b border-brand-text/10 bg-white">
+          <header className="border-b border-brand-text/10 bg-[#fdf08a]">
             <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-              <h1 className="font-serif font-bold text-2xl tracking-tight">ICAIDIET'26 Admin</h1>
+              <h1 className="font-serif font-bold text-xl tracking-tight">ADMIN of ICAIDIET'26
+              </h1>
             </div>
           </header>
           <LoginScreen onLogin={handleLogin} />
@@ -323,7 +338,8 @@ export default function App() {
           <table className="w-full text-left border-collapse">
             <thead>
               <tr className="bg-stone-50 border-b border-stone-200">
-                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Paper Title</th>
+                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Paper</th>
+                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">CMT Paper ID</th>
                 <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Track</th>
                 <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Primary Author</th>
                 <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Status</th>
@@ -333,11 +349,11 @@ export default function App() {
             <tbody className="divide-y divide-stone-200">
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-stone-500">Loading submissions...</td>
+                  <td colSpan={6} className="py-8 text-center text-stone-500">Loading submissions...</td>
                 </tr>
               ) : submissions.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-8 text-center text-stone-500">No submissions found.</td>
+                  <td colSpan={6} className="py-8 text-center text-stone-500">No submissions found.</td>
                 </tr>
               ) : (
                 submissions.map((sub) => (
@@ -345,25 +361,55 @@ export default function App() {
                     <td className="py-4 px-6 font-medium text-stone-900">
                       {sub.title}
                       <div className="text-xs text-stone-500 font-normal mt-0.5">{sub.submission_code}</div>
+                      {sub.abstract && (
+                        <div className="text-xs text-stone-400 font-normal mt-1 line-clamp-2 max-w-xs">
+                          {sub.abstract}
+                        </div>
+                      )}
                     </td>
+                    <td className="py-4 px-6 text-sm text-stone-600">{sub.paper_id || '—'}</td>
                     <td className="py-4 px-6 text-sm text-stone-600">{sub.track || '—'}</td>
                     <td className="py-4 px-6 text-sm text-stone-600">
-                      {sub.author_name || 'N/A'}
-                      {sub.author_email && (
-                        <div className="text-xs text-stone-400 font-normal">{sub.author_email}</div>
+                      {sub.authors && sub.authors.length > 0 ? (
+                        <div className="space-y-2">
+                          {sub.authors.map((a) => (
+                            <div key={a.id}>
+                              <div className="flex items-center gap-1.5 font-medium text-stone-800">
+                                {a.is_primary === 1 && (
+                                  <span className="text-[10px] bg-brand-accent/10 text-brand-accent px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">
+                                    Primary
+                                  </span>
+                                )}
+                                {a.first_name} {a.last_name}
+                              </div>
+                              <div className="text-xs text-stone-500 font-normal">
+                                {a.email}
+                                {a.phone ? ` · ${a.phone}` : ''}
+                                <br />
+                                {a.college}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <>
+                          {sub.author_name || 'N/A'}
+                          {sub.author_email && (
+                            <div className="text-xs text-stone-400 font-normal">{sub.author_email}</div>
+                          )}
+                        </>
                       )}
                     </td>
                     <td className="py-4 px-6">
                       <span
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                          sub.status === 'ACCEPTED'
-                            ? 'bg-green-100 text-green-800'
-                            : sub.status === 'REJECTED'
-                              ? 'bg-red-100 text-red-800'
-                              : sub.status === 'UNDER_REVIEW'
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-amber-100 text-amber-800'
-                        }`}
+                        className={`px-2.5 py-1 rounded-full text-xs font-medium ${sub.status === 'ACCEPTED'
+                          ? 'bg-green-100 text-green-800'
+                          : sub.status === 'REJECTED'
+                            ? 'bg-red-100 text-red-800'
+                            : sub.status === 'UNDER_REVIEW'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
                       >
                         {sub.status || 'SUBMITTED'}
                       </span>

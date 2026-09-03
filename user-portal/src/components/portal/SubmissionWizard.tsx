@@ -1,14 +1,16 @@
 import React, { useState, useRef } from 'react';
 import {
-  FileUp,
   CheckCircle,
   ChevronRight,
   ChevronLeft,
   UserPlus,
+  Users,
   Upload,
   Loader2,
   FileText,
 } from 'lucide-react';
+import paperIcon from '../../assets/images/paper.png';
+import infoIcon from '../../assets/images/info.png';
 import { Popup, PopupInfo } from '../../components/Popup';
 
 interface SubmissionWizardProps {
@@ -24,14 +26,32 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
   const [popup, setPopup] = useState<PopupInfo | null>(null);
 
   // Step 1: Details
+  const [paperId, setPaperId] = useState('');
   const [title, setTitle] = useState('');
   const [abstract, setAbstract] = useState('');
   const [track, setTrack] = useState('');
+  const [showPaperIdInfo, setShowPaperIdInfo] = useState(false);
 
-  // Step 2: Author (primary)
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
-  const [authorEmail, setAuthorEmail] = useState('');
+  // Step 2: Authors (multi-author, first is primary)
+  interface AuthorField {
+    first_name: string;
+    last_name: string;
+    phone: string;
+    email: string;
+    college: string;
+    sameAsPrimary: boolean;
+  }
+  const [numAuthors, setNumAuthors] = useState(2);
+  const [authors, setAuthors] = useState<AuthorField[]>(() =>
+    Array.from({ length: 2 }, () => ({
+      first_name: '',
+      last_name: '',
+      phone: '',
+      email: '',
+      college: '',
+      sameAsPrimary: false,
+    }))
+  );
 
   // Step 3: Upload
   const [file, setFile] = useState<File | null>(null);
@@ -42,20 +62,12 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
     e.preventDefault();
 
     if (step === 2) {
-      if (!firstName.trim() || !lastName.trim() || !authorEmail.trim()) {
+      const result = validateAuthors();
+      if (!result.ok) {
         setPopup({
           type: 'error',
-          title: 'Author Required',
-          message: 'Please fill in the primary author\'s first name, last name, and email address before continuing.',
-        });
-        return;
-      }
-      const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(authorEmail.trim());
-      if (!emailOk) {
-        setPopup({
-          type: 'error',
-          title: 'Invalid Email',
-          message: 'Please enter a valid email address (e.g. jane@university.edu).',
+          title: 'Author Details Required',
+          message: result.msg || 'Please complete all author details before continuing.',
         });
         return;
       }
@@ -81,11 +93,27 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
     setIsSubmitting(true);
     try {
       const formData = new FormData();
+      formData.append('paperId', paperId);
       formData.append('title', title);
       formData.append('abstract', abstract);
       formData.append('track', track);
-      formData.append('authorName', `${firstName.trim()} ${lastName.trim()}`);
-      formData.append('authorEmail', authorEmail.trim());
+      formData.append(
+        'authors',
+        JSON.stringify(
+          authors.map((a) => ({
+            first_name: a.first_name.trim(),
+            last_name: a.last_name.trim(),
+            phone: a.phone.trim(),
+            email: a.email.trim(),
+            college: a.college.trim(),
+          }))
+        )
+      );
+      formData.append(
+        'authorName',
+        `${authors[0].first_name.trim()} ${authors[0].last_name.trim()}`
+      );
+      formData.append('authorEmail', authors[0].email.trim());
       formData.append('file', file);
 
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -164,6 +192,52 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
     }
   };
 
+  // Resize the authors list when the dropdown value changes (2-6 total, primary always index 0).
+  const handleNumAuthorsChange = (value: number) => {
+    setNumAuthors(value);
+    setAuthors((prev) => {
+      const next = prev.slice(0, Math.max(1, value));
+      while (next.length < value) {
+        next.push({ first_name: '', last_name: '', phone: '', email: '', college: '', sameAsPrimary: false });
+      }
+      return next;
+    });
+  };
+
+  const updateAuthor = (index: number, field: keyof AuthorField, value: string | boolean) => {
+    setAuthors((prev) => {
+      const next = prev.map((a, i) => (i === index ? { ...a, [field]: value } : a));
+      // When "Same as Primary Author" is ticked on a co-author, copy the primary's college.
+      if (field === 'sameAsPrimary' && value === true && index > 0) {
+        next[index].college = prev[0].college;
+      }
+      // Unticking keeps the copied value but re-enables editing.
+      return next;
+    });
+  };
+
+  const primaryCollege = authors[0]?.college || '';
+
+  const validateAuthors = (): { ok: boolean; msg?: string } => {
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    for (let i = 0; i < authors.length; i++) {
+      const a = authors[i];
+      if (!a.first_name.trim() || !a.last_name.trim()) {
+        return { ok: false, msg: `Author ${i + 1}: please provide both a first and last name.` };
+      }
+      if (!a.phone.trim()) {
+        return { ok: false, msg: `Author ${i + 1}: please provide a phone number.` };
+      }
+      if (!emailRegex.test(a.email.trim())) {
+        return { ok: false, msg: `Author ${i + 1}: please provide a valid email address.` };
+      }
+      if (!a.college.trim()) {
+        return { ok: false, msg: `Author ${i + 1}: please provide a college/institution.` };
+      }
+    }
+    return { ok: true };
+  };
+
   const stepLabel = (num: number) =>
     num === 1 ? 'Details' : num === 2 ? 'Author' : 'Upload';
 
@@ -182,14 +256,12 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
         {[1, 2, 3].map((num) => (
           <div key={num} className="flex-1">
             <div
-              className={`h-2 rounded-full mb-2 transition-colors ${
-                step >= num ? 'bg-brand-accent' : 'bg-brand-text/10'
-              }`}
+              className={`h-2 rounded-full mb-2 transition-colors ${step >= num ? 'bg-brand-text' : 'bg-brand-text/10'
+                }`}
             />
             <span
-              className={`text-sm font-medium ${
-                step >= num ? 'text-brand-accent' : 'text-brand-text/40'
-              }`}
+              className={`text-sm font-medium ${step >= num ? 'text-brand-text' : 'text-brand-text/40'
+                }`}
             >
               Step {num}: {stepLabel(num)}
             </span>
@@ -202,9 +274,45 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
           {step === 1 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h2 className="text-2xl font-serif font-bold mb-6 flex items-center gap-2">
-                <FileUp className="w-6 h-6 text-brand-accent" />
+                <img src={paperIcon} alt="Paper" className="w-6 h-6 object-contain" />
                 Paper Details
               </h2>
+
+              <div>
+                <label className="block text-sm font-medium mb-1 flex items-center gap-2">
+                  Paper ID
+                  <span className="relative inline-flex items-center">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      aria-label="What is a Paper ID?"
+                      onClick={() => setShowPaperIdInfo(!showPaperIdInfo)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setShowPaperIdInfo(!showPaperIdInfo);
+                        }
+                      }}
+                      className="flex items-center justify-center w-5 h-5 rounded-full cursor-pointer select-none hover:opacity-80 transition-opacity"
+                    >
+                      <img src={infoIcon} alt="" className="w-4 h-4" draggable={false} />
+                    </span>
+                    {showPaperIdInfo && (
+                      <span className="absolute left-0 top-full mt-2 z-20 w-72 max-w-[80vw] bg-stone-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg whitespace-normal">
+                        Your paper ID from the CMT Portal. You can find it after submitting your paper through the CMT
+                        (Conference Management Tool) system.
+                      </span>
+                    )}
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={paperId}
+                  onChange={(e) => setPaperId(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
+                  placeholder="Your paper ID in CMT"
+                />
+              </div>
 
               <div>
                 <label className="block text-sm font-medium mb-1">Paper Title</label>
@@ -254,44 +362,103 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
 
           {step === 2 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              <h2 className="text-2xl font-serif font-bold mb-6 flex items-center gap-2">
+              <h2 className="text-2xl font-serif font-bold mb-4 flex items-center gap-2">
                 <UserPlus className="w-6 h-6 text-brand-accent" />
-                Primary Author
+                Authors
               </h2>
               <p className="text-sm text-brand-text/70 mb-4">
-                Provide the primary (corresponding) author's details.
+                Add up to 6 authors. The first author is the primary (corresponding) author.
               </p>
 
-              <div className="space-y-4">
-                <div className="flex gap-4 items-center bg-white/50 p-4 rounded-xl border border-white/40">
-                  <div className="flex-1 grid grid-cols-2 gap-4">
-                    <input
-                      type="text"
-                      placeholder="First Name"
-                      required
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Last Name"
-                      required
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
-                    />
-                    <input
-                      type="email"
-                      placeholder="Email Address"
-                      required
-                      value={authorEmail}
-                      onChange={(e) => setAuthorEmail(e.target.value)}
-                      className="col-span-2 px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
-                    />
-                  </div>
-                </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Number of Authors</label>
+                <select
+                  value={numAuthors}
+                  onChange={(e) => handleNumAuthorsChange(parseInt(e.target.value, 10))}
+                  className="w-full sm:w-64 px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                >
+                  {[2, 3, 4, 5, 6].map((n) => (
+                    <option key={n} value={n}>
+                      {n} Author{n > 1 ? 's' : ''}
+                    </option>
+                  ))}
+                </select>
               </div>
+
+              {authors.map((author, idx) => {
+                const isPrimary = idx === 0;
+                const sameAsPrimary = isPrimary ? false : author.sameAsPrimary;
+                return (
+                  <div
+                    key={idx}
+                    className="bg-white/50 p-5 rounded-xl border border-white/40 space-y-4"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Users className="w-4 h-4 text-brand-accent" />
+                      <h3 className="font-medium text-brand-text">
+                        {isPrimary ? 'Primary Author' : `Author ${idx + 1}`}
+                      </h3>
+                      {isPrimary && (
+                        <span className="text-xs bg-brand-accent/10 text-brand-accent px-2 py-0.5 rounded-full font-medium">
+                          Corresponding
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <input
+                        type="text"
+                        placeholder="First Name"
+                        value={author.first_name}
+                        onChange={(e) => updateAuthor(idx, 'first_name', e.target.value)}
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                      />
+                      <input
+                        type="text"
+                        placeholder="Last Name"
+                        value={author.last_name}
+                        onChange={(e) => updateAuthor(idx, 'last_name', e.target.value)}
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                      />
+                      <input
+                        type="tel"
+                        placeholder="Phone Number"
+                        value={author.phone}
+                        onChange={(e) => updateAuthor(idx, 'phone', e.target.value)}
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                      />
+                      <input
+                        type="email"
+                        placeholder="Email ID"
+                        value={author.email}
+                        onChange={(e) => updateAuthor(idx, 'email', e.target.value)}
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                      />
+                      <div className="sm:col-span-2">
+                        <input
+                          type="text"
+                          placeholder="College"
+                          value={author.college}
+                          disabled={sameAsPrimary}
+                          onChange={(e) => updateAuthor(idx, 'college', e.target.value)}
+                          className="w-full px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 disabled:bg-stone-100 disabled:text-stone-400"
+                        />
+                        {!isPrimary && (
+                          <label className="flex items-center gap-2 mt-2 text-sm text-brand-text/70 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={sameAsPrimary}
+                              onChange={(e) => updateAuthor(idx, 'sameAsPrimary', e.target.checked)}
+                              className="w-4 h-4 accent-brand-accent"
+                            />
+                            Same as primary author's college
+                          </label>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
@@ -304,11 +471,10 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
 
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer group ${
-                  file
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-brand-accent/40 bg-brand-accent/5 hover:bg-brand-accent/10'
-                }`}
+                className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer group ${file
+                  ? 'border-green-500 bg-green-50'
+                  : 'border-brand-accent/40 bg-brand-accent/5 hover:bg-brand-accent/10'
+                  }`}
               >
                 <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm group-hover:scale-110 transition-transform">
                   {file ? (
