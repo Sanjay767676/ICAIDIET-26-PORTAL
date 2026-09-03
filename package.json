@@ -1,0 +1,9 @@
+{
+  "name": "icaidiet26-monorepo",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "user-portal",
+    "admin-portal"
+  ]
+}

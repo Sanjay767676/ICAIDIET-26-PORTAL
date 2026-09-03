@@ -1,0 +1,6 @@
+{
+  "name": "OpenConf - Conference Submission Portal",
+  "description": "Minimalist, production-oriented conference paper submission and administration portal with Cloudflare D1/R2 compatible architecture, role-based access control, server-side pagination and filtering, and secure two-file upload.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
