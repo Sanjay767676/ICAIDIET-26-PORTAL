@@ -1,7 +1,8 @@
-import React from 'react';
+import type { ReactNode } from 'react';
+import { Show, SignInButton, UserButton } from '@clerk/react';
 
 interface MainLayoutProps {
-  children: React.ReactNode;
+  children: ReactNode;
 }
 
 export function MainLayout({ children }: MainLayoutProps) {
@@ -13,7 +14,18 @@ export function MainLayout({ children }: MainLayoutProps) {
             <span className="font-serif font-bold text-xl tracking-tight">ICAIDIET'26</span>
           </div>
 
-
+          <div className="flex items-center gap-3">
+            <Show when="signed-out">
+              <SignInButton mode="modal">
+                <button className="px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent hover:-translate-y-0.5 transition-all shadow">
+                  Sign In
+                </button>
+              </SignInButton>
+            </Show>
+            <Show when="signed-in">
+              <UserButton afterSignOutUrl="/" />
+            </Show>
+          </div>
         </div>
       </header>
 

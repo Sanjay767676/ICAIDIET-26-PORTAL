@@ -195,7 +195,7 @@ export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
-  const [stats, setStats] = useState({ total: 0, accepted: 0, rejected: 0, submitted: 0 });
+  const [stats, setStats] = useState({ total: 0, accepted: 0, rejected: 0, submitted: 0, underReview: 0, revisionRequired: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
@@ -239,6 +239,8 @@ export default function App() {
         accepted: list.filter((s) => s.status === 'ACCEPTED').length,
         rejected: list.filter((s) => s.status === 'REJECTED').length,
         submitted: list.filter((s) => s.status === 'SUBMITTED').length,
+        underReview: list.filter((s) => s.status === 'UNDER_REVIEW').length,
+        revisionRequired: list.filter((s) => s.status === 'REVISION_REQUIRED').length,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load submissions.');
@@ -307,7 +309,7 @@ export default function App() {
           </button>
         </div>
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
             <div className="text-3xl font-bold font-serif">{stats.total}</div>
             <div className="text-sm text-stone-500 mt-1">Total</div>
@@ -323,6 +325,14 @@ export default function App() {
           <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
             <div className="text-3xl font-bold font-serif text-red-600">{stats.rejected}</div>
             <div className="text-sm text-stone-500 mt-1">Rejected</div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
+            <div className="text-3xl font-bold font-serif text-blue-600">{stats.underReview}</div>
+            <div className="text-sm text-stone-500 mt-1">Under Review</div>
+          </div>
+          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
+            <div className="text-3xl font-bold font-serif text-purple-600">{stats.revisionRequired}</div>
+            <div className="text-sm text-stone-500 mt-1">Revision Required</div>
           </div>
         </div>
 

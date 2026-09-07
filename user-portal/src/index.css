@@ -2,7 +2,7 @@
 
 @theme {
   --color-brand-bg: #fdf08a; /* Light yellow background */
-  --color-brand-card: #ffbf00; /* Amber‑yellow UI blocks */
+  --color-brand-card: #ffbf00; /* Amber-yellow UI blocks */
   --color-brand-text: #000000; /* Black text for contrast */
   --color-brand-accent: #ffbf00; /* Amber accent for buttons, etc. */
   --color-brand-footer: #000000;
@@ -10,7 +10,7 @@
   --font-serif: "Libre Baskerville", serif;
   --font-sans: "Plus Jakarta Sans", "Inter", sans-serif;
 
-  --animate-auraur: aurora 10s ease infinite;
+  --animate-aurora: aurora 10s ease infinite;
   --animate-marquee: marquee 25s linear infinite;
 
   @keyframes aurora {

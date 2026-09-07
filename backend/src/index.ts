@@ -1,13 +1,20 @@
-import { Hono } from 'hono';
+import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
+import { verifyToken as clerkVerifyToken } from '@clerk/backend';
 
 type Bindings = {
   DB: D1Database;
   BUCKET: R2Bucket;
   AUTH_SECRET: string;
+  CLERK_SECRET_KEY: string;
 };
 
-type AppEnv = { Bindings: Bindings };
+type Variables = {
+  clerkUserId: string;
+  clerkEmail: string;
+};
+
+type AppEnv = { Bindings: Bindings; Variables: Variables };
 
 const app = new Hono<AppEnv>();
 
@@ -16,8 +23,6 @@ const app = new Hono<AppEnv>();
 // ------------------------------------------------------------------
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-// Allowed file types. Client only advertises PDF, but DOC/DOCX are also
-// accepted server-side as valid manuscript formats.
 const ALLOWED_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
   '.doc': ['application/msword'],
@@ -30,19 +35,16 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:8787',
 ];
 
-// Best-effort in-memory rate limiter (per isolate). Not a hard guarantee
-// across many Cloudflare isolates, but adds a basic abuse barrier.
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
 function getEnvOrigin(c: any): string {
-  const raw = (c.env.ALLOWED_ORIGINS as string) || '';
-  return raw;
+  return (c.env.ALLOWED_ORIGINS as string) || '';
 }
 
 function corsOrigins(c: any): string[] {
   const extra = getEnvOrigin(c)
     .split(',')
-    .map((s) => s.trim())
+    .map((s: string) => s.trim())
     .filter(Boolean);
   return [...DEFAULT_ALLOWED_ORIGINS, ...extra];
 }
@@ -56,7 +58,6 @@ app.use('*', (c, next) => {
 // Helpers
 // ------------------------------------------------------------------
 
-// SHA-256 hash of a string (hex). Used to verify the admin password.
 async function sha256Hex(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest('SHA-256', data);
@@ -80,7 +81,11 @@ function base64UrlDecode(str: string): Uint8Array {
 }
 
 async function getAuthSecret(c: any): Promise<string> {
-  return c.env.AUTH_SECRET || 'icaidiet-dev-secret-change-me';
+  const secret = c.env.AUTH_SECRET;
+  if (!secret) {
+    throw new Error('AUTH_SECRET environment variable is not set. Configure it via wrangler secret put AUTH_SECRET.');
+  }
+  return secret;
 }
 
 // Sign the admin token (HMAC-SHA256). Payload = { exp, sub }.
@@ -99,7 +104,6 @@ async function signToken(c: any, subject: string, ttlSeconds: number): Promise<s
   return `${payload}.${sig}`;
 }
 
-// Verify a token. Returns true + subject if valid and not expired.
 async function verifyToken(c: any, token: string): Promise<{ ok: boolean; subject?: string }> {
   try {
     const parts = token.split('.');
@@ -122,6 +126,50 @@ async function verifyToken(c: any, token: string): Promise<{ ok: boolean; subjec
   }
 }
 
+// ------------------------------------------------------------------
+// Clerk JWT Verification (via @clerk/backend SDK)
+// ------------------------------------------------------------------
+
+async function verifyClerkJwt(c: Context<AppEnv>, rawToken: string): Promise<{ ok: boolean; userId?: string; email?: string }> {
+  try {
+    const token = (rawToken || '').trim();
+    if (!token) return { ok: false };
+
+    const secretKey = c.env.CLERK_SECRET_KEY;
+    if (!secretKey) {
+      console.error('CLERK_SECRET_KEY is not configured.');
+      return { ok: false };
+    }
+
+    const result = await clerkVerifyToken(token, { secretKey });
+    return {
+      ok: true,
+      userId: result.sub,
+      email: (result as any).email || (result as any).email_address || '',
+    };
+  } catch (err) {
+    console.error('Clerk JWT verification failed:', err);
+    return { ok: false };
+  }
+}
+
+// Middleware: require Clerk auth
+async function requireClerkAuth(c: Context<AppEnv>, next: () => Promise<void>) {
+  const header = c.req.header('Authorization') || '';
+  if (!header.startsWith('Bearer ')) {
+    return c.json({ success: false, error: 'Authentication required. Please sign in.' }, 401);
+  }
+  const token = header.slice('Bearer '.length).trim();
+  const result = await verifyClerkJwt(c, token);
+  if (!result.ok || !result.userId) {
+    return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+  }
+  // Attach userId to context for downstream handlers
+  c.set('clerkUserId', result.userId);
+  c.set('clerkEmail', result.email || '');
+  return next();
+}
+
 function getBearer(c: any): string | null {
   const header = c.req.header('Authorization') || '';
   if (!header.startsWith('Bearer ')) return null;
@@ -132,7 +180,6 @@ function clientIp(c: any): string {
   return c.req.header('CF-Connecting-IP') || c.req.header('x-forwarded-for') || 'unknown';
 }
 
-// Simple sliding-window rate limiter. Limit per minute.
 function rateLimit(c: any, key: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
   const fullKey = `${clientIp(c)}:${key}`;
@@ -145,11 +192,9 @@ function rateLimit(c: any, key: string, limit: number, windowMs: number): boolea
   return bucket.count <= limit;
 }
 
-// Determine the manuscript file allowed based on extension + content-type.
 function validateFile(file: File): { ok: boolean; reason?: string } {
   if (!file || !file.name) return { ok: false, reason: 'No file uploaded.' };
 
-  // Check the extension.
   const lower = file.name.toLowerCase();
   const extEntry = Object.entries(ALLOWED_TYPES).find(([ext]) => lower.endsWith(ext));
   if (!extEntry) {
@@ -158,8 +203,6 @@ function validateFile(file: File): { ok: boolean; reason?: string } {
 
   const allowedMimes = extEntry[1];
   const declaredType = (file.type || '').toLowerCase();
-
-  // If the browser declares a content-type, it must match the extension.
   if (declaredType && !allowedMimes.includes(declaredType)) {
     return { ok: false, reason: 'File content type does not match its extension.' };
   }
@@ -182,13 +225,13 @@ function sanitizeFilename(name: string): string {
 app.get('/api/health', (c) => {
   return c.json({
     status: 'ok',
-    service: 'OpenConf Cloudflare API',
+    service: 'ICAIDIET Cloudflare API',
     timestamp: new Date().toISOString(),
   });
 });
 
 // ------------------------------------------------------------------
-// Admin Login (username: snsct, password: admin123)
+// Admin Login (username: snsadmin, password: admin123)
 // ------------------------------------------------------------------
 app.post('/api/admin/login', async (c) => {
   try {
@@ -204,7 +247,6 @@ app.post('/api/admin/login', async (c) => {
       `SELECT id, email, password_hash, role FROM users WHERE email = ? AND role = 'ADMIN'`
     ).bind(`${username}@snsct.edu`).first() as any;
 
-    // Accept the explicit admin credential set (snsct / admin123) stored in DB.
     if (!stored) {
       return c.json({ success: false, error: 'Invalid username or password.' }, 401);
     }
@@ -229,13 +271,84 @@ app.post('/api/admin/login', async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Create Submission (File Upload to R2 + DB Insert to D1)
+// Clerk: Sync user profile from webhook / manual call
+// Called by the frontend after Clerk sign-up/sign-in to ensure
+// the user exists in our D1 database.
 // ------------------------------------------------------------------
-app.post('/api/submissions', async (c) => {
+app.post('/api/users/sync', async (c) => {
+  try {
+    const header = c.req.header('Authorization') || '';
+    if (!header.startsWith('Bearer ')) {
+      return c.json({ success: false, error: 'Authentication required.' }, 401);
+    }
+    const clerkToken = header.slice('Bearer '.length).trim();
+    const authResult = await verifyClerkJwt(c, clerkToken);
+    if (!authResult.ok || !authResult.userId) {
+      return c.json({ success: false, error: 'Invalid authentication token.' }, 401);
+    }
+
+    const clerkId = authResult.userId;
+    const email = authResult.email || '';
+
+    const body = await c.req.json().catch(() => null);
+    const name = (body?.name || '').trim() || email.split('@')[0] || 'User';
+
+    // Check if user already exists by clerk_id
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM user_profiles WHERE clerk_id = ?`
+    ).bind(clerkId).first() as any;
+
+    if (existing) {
+      // Update last login
+      await c.env.DB.prepare(
+        `UPDATE user_profiles SET updated_at = datetime('now') WHERE clerk_id = ?`
+      ).bind(clerkId).run();
+      return c.json({ success: true, user_id: existing.id });
+    }
+
+    // Create new user + profile
+    const userId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, name, email, 'clerk-managed', 'USER', now, now),
+      c.env.DB.prepare(
+        `INSERT INTO user_profiles (id, user_id, institution, department, country, phone, clerk_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(crypto.randomUUID(), userId, '', '', '', '', clerkId, now, now),
+    ]);
+
+    return c.json({ success: true, user_id: userId });
+  } catch (error) {
+    console.error('User sync error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Create Submission (requires Clerk auth)
+// ------------------------------------------------------------------
+app.post('/api/submissions', requireClerkAuth, async (c) => {
   try {
     if (!rateLimit(c, 'submit', 10, 60000)) {
       return c.json({ success: false, error: 'Too many submission attempts. Please try again later.' }, 429);
     }
+
+    const clerkUserId = c.get('clerkUserId') as string;
+
+    // Resolve the internal user_id from clerk_id
+    const userProfile = await c.env.DB.prepare(
+      `SELECT user_id FROM user_profiles WHERE clerk_id = ?`
+    ).bind(clerkUserId).first() as any;
+
+    if (!userProfile) {
+      return c.json({ success: false, error: 'User profile not found. Please sign in again.' }, 401);
+    }
+
+    const userId = userProfile.user_id;
 
     const formData = await c.req.parseBody();
 
@@ -248,8 +361,6 @@ app.post('/api/submissions', async (c) => {
     const keywords = (formData['keywords'] as string || '').trim();
     const file = formData['file'] as File;
 
-    // Multi-author support: a JSON array of { first_name, last_name, phone, email, college }.
-    // The first entry is the primary author. Optional for backward compatibility.
     let authors: { first_name: string; last_name: string; phone: string; email: string; college: string }[] = [];
     try {
       const rawAuthors = (formData['authors'] as string || '').trim();
@@ -276,7 +387,6 @@ app.post('/api/submissions', async (c) => {
       return c.json({ success: false, error: 'Primary author name and email are required.' }, 400);
     }
 
-    // Validate author data on the server too.
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const hasAuthors = authors.length > 0;
     for (let i = 0; i < authors.length; i++) {
@@ -295,7 +405,6 @@ app.post('/api/submissions', async (c) => {
       }
     }
 
-    // Server-side file validation (extension + content-type + size).
     if (!file) {
       return c.json({ success: false, error: 'A manuscript file is required.' }, 400);
     }
@@ -304,7 +413,6 @@ app.post('/api/submissions', async (c) => {
       return c.json({ success: false, error: fileCheck.reason }, 400);
     }
 
-    // Generate a unique, server-controlled submission code.
     const submissionId = crypto.randomUUID();
     const submissionCode = `SUB-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const now = new Date().toISOString();
@@ -313,13 +421,11 @@ app.post('/api/submissions', async (c) => {
 
     let uploaded = false;
     try {
-      // 1. Upload to R2.
       await c.env.BUCKET.put(fileKey, file.stream(), {
         httpMetadata: { contentType: file.type || 'application/octet-stream' },
       });
       uploaded = true;
 
-      // 2. Insert into D1 (submission + file) atomically via batch.
       const batchStatements: D1PreparedStatement[] = [
         c.env.DB.prepare(
           `INSERT INTO submissions
@@ -335,7 +441,7 @@ app.post('/api/submissions', async (c) => {
           track,
           authorName,
           authorEmail,
-          'admin-snsct',
+          userId,
           'SUBMITTED',
           now,
           now
@@ -356,7 +462,6 @@ app.post('/api/submissions', async (c) => {
         ),
       ];
 
-      // Insert each author. Default to the primary author if no authors array was sent.
       const authorRows = hasAuthors
         ? authors
         : [{
@@ -396,7 +501,6 @@ app.post('/api/submissions', async (c) => {
         submission_code: submissionCode,
       });
     } catch (dbError) {
-      // If the DB write failed, clean up the uploaded file so we don't orphan it.
       if (uploaded) {
         await c.env.BUCKET.delete(fileKey).catch(() => {});
       }
@@ -410,7 +514,7 @@ app.post('/api/submissions', async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Admin: Get all submissions (requires Bearer token)
+// Admin: Get all submissions (requires admin Bearer token)
 // ------------------------------------------------------------------
 app.get('/api/admin/submissions', async (c) => {
   try {
@@ -429,7 +533,6 @@ app.get('/api/admin/submissions', async (c) => {
        ORDER BY s.created_at DESC`
     ).all();
 
-    // Load authors for all returned submissions in one query and group them.
     const submissions = results as any[];
     let authorsBySubmission: Record<string, any[]> = {};
     if (submissions.length > 0) {
@@ -458,9 +561,7 @@ app.get('/api/admin/submissions', async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Admin: Stream a manuscript file (requires Bearer token)
-// Streams the R2 object through the Worker so files are never publicly
-// exposed. The admin portal requests this URL in an authed iframe/request.
+// Admin: Stream a manuscript file (requires admin Bearer token)
 // ------------------------------------------------------------------
 app.get('/api/admin/submissions/:id/file', async (c) => {
   try {

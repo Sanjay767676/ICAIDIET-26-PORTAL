@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   CheckCircle,
   ChevronRight,
@@ -11,16 +11,17 @@ import {
 } from 'lucide-react';
 import paperIcon from '../../assets/images/paper.png';
 import infoIcon from '../../assets/images/info.png';
-import { Popup, PopupInfo } from '../../components/Popup';
+import { Popup, PopupInfo } from '../Popup';
 
 interface SubmissionWizardProps {
   onComplete: () => void;
   onBack: () => void;
+  getToken: (options?: { skipCache?: boolean; template?: string } | undefined) => Promise<string | null>;
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) {
+export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWizardProps) {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [popup, setPopup] = useState<PopupInfo | null>(null);
@@ -58,6 +59,25 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Sync the Clerk user profile to the backend on mount
+  useEffect(() => {
+    const syncUser = async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+        await fetch(`${apiUrl}/api/users/sync`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({}),
+        });
+      } catch {
+        // Non-fatal; the profile sync is best-effort.
+      }
+    };
+    syncUser();
+  }, [getToken]);
+
   const handleNext = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -66,7 +86,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
       if (!result.ok) {
         setPopup({
           type: 'error',
-          title: 'Author Details Required',
+          title: 'Validation Error',
           message: result.msg || 'Please complete all author details before continuing.',
         });
         return;
@@ -117,8 +137,19 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
       formData.append('file', file);
 
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+      const token = await getToken();
+      if (!token) {
+        setPopup({
+          type: 'error',
+          title: 'Authentication Required',
+          message: 'Please sign in before submitting your paper.',
+        });
+        setIsSubmitting(false);
+        return;
+      }
       const res = await fetch(`${apiUrl}/api/submissions`, {
         method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
         body: formData,
       });
 
@@ -309,7 +340,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                   type="text"
                   value={paperId}
                   onChange={(e) => setPaperId(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
+                  className="w-full px-4 py-3 rounded-xl bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
                   placeholder="Your paper ID in CMT"
                 />
               </div>
@@ -321,7 +352,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                   type="text"
                   value={title}
                   onChange={(e) => setTitle(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
+                  className="w-full px-4 py-3 rounded-xl bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
                   placeholder="e.g. Advancements in Deep Learning for Healthcare"
                 />
               </div>
@@ -333,7 +364,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                   rows={5}
                   value={abstract}
                   onChange={(e) => setAbstract(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-none"
+                  className="w-full px-4 py-3 rounded-xl bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-none"
                   placeholder="Provide a summary of your research..."
                 />
               </div>
@@ -344,7 +375,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                   required
                   value={track}
                   onChange={(e) => setTrack(e.target.value)}
-                  className="w-full px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                  className="w-full px-4 py-3 rounded-xl bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
                 >
                   <option value="">Select a track</option>
                   <option value="ai-intelligent-systems">Artificial Intelligence &amp; Intelligent Systems</option>
@@ -375,7 +406,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                 <select
                   value={numAuthors}
                   onChange={(e) => handleNumAuthorsChange(parseInt(e.target.value, 10))}
-                  className="w-full sm:w-64 px-4 py-3 rounded-xl bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                  className="w-full sm:w-64 px-4 py-3 rounded-xl bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
                 >
                   {[2, 3, 4, 5, 6].map((n) => (
                     <option key={n} value={n}>
@@ -391,7 +422,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                 return (
                   <div
                     key={idx}
-                    className="bg-white/50 p-5 rounded-xl border border-white/40 space-y-4"
+                    className="bg-white p-5 rounded-xl border border-white/40 space-y-4"
                   >
                     <div className="flex items-center gap-2">
                       <Users className="w-4 h-4 text-brand-accent" />
@@ -411,28 +442,28 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                         placeholder="First Name"
                         value={author.first_name}
                         onChange={(e) => updateAuthor(idx, 'first_name', e.target.value)}
-                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
                       />
                       <input
                         type="text"
                         placeholder="Last Name"
                         value={author.last_name}
                         onChange={(e) => updateAuthor(idx, 'last_name', e.target.value)}
-                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
                       />
                       <input
                         type="tel"
                         placeholder="Phone Number"
                         value={author.phone}
-                        onChange={(e) => updateAuthor(idx, 'phone', e.target.value)}
-                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                        onChange={(e) => updateAuthor(idx, 'phone', e.target.value.replace(/[^0-9+\-\s()]/g, ''))}
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
                       />
                       <input
                         type="email"
                         placeholder="Email ID"
                         value={author.email}
                         onChange={(e) => updateAuthor(idx, 'email', e.target.value)}
-                        className="px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
+                        className="px-4 py-2 rounded-lg bg-white outline-none border border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
                       />
                       <div className="sm:col-span-2">
                         <input
@@ -441,7 +472,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                           value={author.college}
                           disabled={sameAsPrimary}
                           onChange={(e) => updateAuthor(idx, 'college', e.target.value)}
-                          className="w-full px-4 py-2 rounded-lg bg-white outline-none border border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 disabled:bg-stone-100 disabled:text-stone-400"
+                          className="w-full px-4 py-2 rounded-lg bg-white outline-none border border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 disabled:bg-white disabled:text-stone-400"
                         />
                         {!isPrimary && (
                           <label className="flex items-center gap-2 mt-2 text-sm text-brand-text/70 cursor-pointer select-none">
@@ -471,9 +502,9 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
 
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer group ${file
+                className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer group shadow-sm ${file
                   ? 'border-green-500 bg-green-50'
-                  : 'border-brand-accent/40 bg-brand-accent/5 hover:bg-brand-accent/10'
+                  : 'border-stone-300 bg-white hover:bg-stone-50'
                   }`}
               >
                 <div className="bg-white w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm group-hover:scale-110 transition-transform">
@@ -499,10 +530,7 @@ export function SubmissionWizard({ onComplete, onBack }: SubmissionWizardProps) 
                 />
               </div>
 
-              <div className="flex items-center gap-2 text-sm text-brand-text/70 bg-white/50 p-4 rounded-lg">
-                <CheckCircle className="w-5 h-5 text-green-600" />
-                <span>I confirm that this submission complies with the IEEE formatting guidelines.</span>
-              </div>
+
             </div>
           )}
 

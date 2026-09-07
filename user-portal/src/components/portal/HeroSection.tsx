@@ -1,4 +1,3 @@
-import React from 'react';
 import { ArrowRight } from 'lucide-react';
 import wileyLogo from '../../assets/images/WILEY(BLACK).png';
 import scopusLogo from '../../assets/images/scopus.png';
