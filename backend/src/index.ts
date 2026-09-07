@@ -176,6 +176,87 @@ function getBearer(c: any): string | null {
   return header.slice('Bearer '.length).trim();
 }
 
+// A profile is "complete" (submission-ready) when all required fields are filled.
+function isProfileComplete(p: any): boolean {
+  if (!p) return false;
+  return ['institution', 'department', 'country', 'phone'].every(
+    (k) => String(p[k] || '').trim() !== ''
+  );
+}
+
+// Resolve a signed-in user's internal user row + profile.
+// Strong link first (user_profiles.clerk_id), then fallback by email.
+async function resolveUserProfile(
+  c: Context<AppEnv>,
+  clerkUserId: string,
+  clerkEmail: string
+): Promise<any | null> {
+  const byClerk = await c.env.DB.prepare(
+    `SELECT p.id AS profile_id, p.user_id, p.institution, p.department, p.country, p.phone, p.clerk_id,
+            u.name, u.email
+     FROM user_profiles p
+     JOIN users u ON u.id = p.user_id
+     WHERE p.clerk_id = ?`
+  ).bind(clerkUserId).first() as any;
+  if (byClerk) return byClerk;
+
+  if (clerkEmail) {
+    const user = await c.env.DB.prepare(`SELECT id, name, email FROM users WHERE email = ?`)
+      .bind(clerkEmail).first() as any;
+    if (user) {
+      const byUser = await c.env.DB.prepare(
+        `SELECT p.id AS profile_id, p.user_id, p.institution, p.department, p.country, p.phone, p.clerk_id,
+                u.name, u.email
+         FROM user_profiles p
+         JOIN users u ON u.id = p.user_id
+         WHERE p.user_id = ?`
+      ).bind(user.id).first() as any;
+      if (byUser) return byUser;
+    }
+  }
+
+  return null;
+}
+
+// Ensure a users row exists for a Clerk identity and return its internal id.
+// No profile is required to submit a paper.
+async function ensureUserForClerk(c: Context<AppEnv>, clerkUserId: string, clerkEmail: string): Promise<string> {
+  // Legacy: previously-created users may be linked via user_profiles.clerk_id.
+  const legacy = await c.env.DB.prepare(
+    `SELECT user_id FROM user_profiles WHERE clerk_id = ? LIMIT 1`
+  ).bind(clerkUserId).first() as any;
+  if (legacy?.user_id) return legacy.user_id;
+
+  if (clerkEmail) {
+    const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+      .bind(clerkEmail).first() as any;
+    if (existing?.id) return existing.id;
+
+    const userId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const name = clerkEmail.split('@')[0] || 'User';
+    await c.env.DB.prepare(
+      `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(userId, name, clerkEmail, 'clerk-managed', 'USER', now, now).run();
+    return userId;
+  }
+
+  // No email on the token: fall back to a per-Clerk-user identifier.
+  const fallbackEmail = `${clerkUserId}@clerk.local`;
+  const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+    .bind(fallbackEmail).first() as any;
+  if (existing?.id) return existing.id;
+
+  const userId = crypto.randomUUID();
+  const now = new Date().toISOString();
+  await c.env.DB.prepare(
+    `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(userId, 'User', fallbackEmail, 'clerk-managed', 'USER', now, now).run();
+  return userId;
+}
+
 function clientIp(c: any): string {
   return c.req.header('CF-Connecting-IP') || c.req.header('x-forwarded-for') || 'unknown';
 }
@@ -243,9 +324,14 @@ app.post('/api/admin/login', async (c) => {
       return c.json({ success: false, error: 'Username and password are required.' }, 400);
     }
 
+    // Accept either the username ("admin" -> admin@snsct.org) or a full email address.
+    const email = username.includes('@')
+      ? username.toLowerCase()
+      : `${username.toLowerCase()}@snsct.org`;
+
     const stored = await c.env.DB.prepare(
       `SELECT id, email, password_hash, role FROM users WHERE email = ? AND role = 'ADMIN'`
-    ).bind(`${username}@snsct.edu`).first() as any;
+    ).bind(email).first() as any;
 
     if (!stored) {
       return c.json({ success: false, error: 'Invalid username or password.' }, 401);
@@ -262,7 +348,7 @@ app.post('/api/admin/login', async (c) => {
       success: true,
       message: 'Login successful.',
       token,
-      user: { id: stored.id, name: 'SNSCT Admin', email: stored.email, role: stored.role },
+      user: { id: stored.id, name: stored.name, email: stored.email, role: stored.role },
     });
   } catch (error) {
     console.error('Login error:', error);
@@ -271,9 +357,10 @@ app.post('/api/admin/login', async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Clerk: Sync user profile from webhook / manual call
-// Called by the frontend after Clerk sign-up/sign-in to ensure
-// the user exists in our D1 database.
+// Clerk: Ensure the user exists in our D1 database.
+// Called by the frontend after Clerk sign-up/sign-in.
+// Only creates the users row; the profile row is created when the
+// user fills out their profile (POST /api/users/profile).
 // ------------------------------------------------------------------
 app.post('/api/users/sync', async (c) => {
   try {
@@ -288,42 +375,148 @@ app.post('/api/users/sync', async (c) => {
     }
 
     const clerkId = authResult.userId;
-    const email = authResult.email || '';
-
     const body = await c.req.json().catch(() => null);
+    const email = (body?.email || authResult.email || '').trim().toLowerCase();
+    if (!email) {
+      return c.json({ success: false, error: 'A valid email is required.' }, 400);
+    }
     const name = (body?.name || '').trim() || email.split('@')[0] || 'User';
 
-    // Check if user already exists by clerk_id
     const existing = await c.env.DB.prepare(
-      `SELECT id FROM user_profiles WHERE clerk_id = ?`
-    ).bind(clerkId).first() as any;
+      `SELECT id FROM users WHERE email = ?`
+    ).bind(email).first() as any;
 
     if (existing) {
-      // Update last login
       await c.env.DB.prepare(
-        `UPDATE user_profiles SET updated_at = datetime('now') WHERE clerk_id = ?`
-      ).bind(clerkId).run();
+        `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(name, existing.id).run();
       return c.json({ success: true, user_id: existing.id });
     }
 
-    // Create new user + profile
     const userId = crypto.randomUUID();
     const now = new Date().toISOString();
 
-    await c.env.DB.batch([
-      c.env.DB.prepare(
-        `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(userId, name, email, 'clerk-managed', 'USER', now, now),
-      c.env.DB.prepare(
-        `INSERT INTO user_profiles (id, user_id, institution, department, country, phone, clerk_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(crypto.randomUUID(), userId, '', '', '', '', clerkId, now, now),
-    ]);
+    await c.env.DB.prepare(
+      `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(userId, name, email, 'clerk-managed', 'USER', now, now).run();
 
     return c.json({ success: true, user_id: userId });
   } catch (error) {
     console.error('User sync error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// User: Get the signed-in user's profile + completeness status.
+// Used for gating submissions and for the "My Profile" page.
+// ------------------------------------------------------------------
+app.get('/api/users/me', requireClerkAuth, async (c) => {
+  try {
+    const clerkUserId = c.get('clerkUserId') as string;
+    const clerkEmail = (c.get('clerkEmail') || '').trim();
+
+    const profile = await resolveUserProfile(c, clerkUserId, clerkEmail);
+
+    return c.json({
+      success: true,
+      hasProfile: isProfileComplete(profile),
+      profile: profile
+        ? {
+            id: profile.profile_id,
+            user_id: profile.user_id,
+            name: profile.name || '',
+            email: profile.email || clerkEmail,
+            institution: profile.institution || '',
+            department: profile.department || '',
+            country: profile.country || '',
+            phone: profile.phone || '',
+          }
+        : null,
+    });
+  } catch (error) {
+    console.error('Fetch profile error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// User: Create or update the signed-in user's profile.
+// Submission is only allowed once this returns hasProfile = true.
+// ------------------------------------------------------------------
+app.post('/api/users/profile', requireClerkAuth, async (c) => {
+  try {
+    const clerkUserId = c.get('clerkUserId') as string;
+    const tokenEmail = (c.get('clerkEmail') || '').trim();
+
+    const body = await c.req.json().catch(() => null);
+    const institution = (body?.institution || '').trim();
+    const department = (body?.department || '').trim();
+    const country = (body?.country || '').trim();
+    const phone = (body?.phone || '').trim();
+
+    if (!institution || !department || !country || !phone) {
+      return c.json({ success: false, error: 'All profile fields are required.' }, 400);
+    }
+
+    const email = (body?.email || tokenEmail || '').trim().toLowerCase();
+    if (!email) {
+      return c.json({ success: false, error: 'A valid email is required.' }, 400);
+    }
+    const name = (body?.name || '').trim() || email.split('@')[0] || 'User';
+
+    // Ensure the users row exists
+    let user = await c.env.DB.prepare(`SELECT id, name FROM users WHERE email = ?`)
+      .bind(email).first() as any;
+    if (!user) {
+      const userId = crypto.randomUUID();
+      const now = new Date().toISOString();
+      await c.env.DB.prepare(
+        `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      ).bind(userId, name, email, 'clerk-managed', 'USER', now, now).run();
+      user = { id: userId };
+    } else {
+      await c.env.DB.prepare(
+        `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
+      ).bind(name, user.id).run();
+    }
+
+    // Upsert the profile row (link via clerk_id, fallback to user_id for legacy rows)
+    let profile = await c.env.DB.prepare(`SELECT id FROM user_profiles WHERE clerk_id = ?`)
+      .bind(clerkUserId).first() as any;
+    if (!profile) {
+      profile = await c.env.DB.prepare(`SELECT id FROM user_profiles WHERE user_id = ?`)
+        .bind(user.id).first() as any;
+    }
+
+    const now = new Date().toISOString();
+    let profileId: string;
+    if (profile) {
+      await c.env.DB.prepare(
+        `UPDATE user_profiles
+         SET institution = ?, department = ?, country = ?, phone = ?, clerk_id = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(institution, department, country, phone, clerkUserId, now, profile.id).run();
+      profileId = profile.id;
+    } else {
+      profileId = crypto.randomUUID();
+      await c.env.DB.prepare(
+        `INSERT INTO user_profiles (id, user_id, institution, department, country, phone, clerk_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(profileId, user.id, institution, department, country, phone, clerkUserId, now, now).run();
+    }
+
+    const saved = await c.env.DB.prepare(
+      `SELECT p.id, p.user_id, p.institution, p.department, p.country, p.phone, u.name, u.email
+       FROM user_profiles p JOIN users u ON u.id = p.user_id
+       WHERE p.id = ?`
+    ).bind(profileId).first() as any;
+
+    return c.json({ success: true, hasProfile: true, profile: saved });
+  } catch (error) {
+    console.error('Save profile error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -338,17 +531,10 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
     }
 
     const clerkUserId = c.get('clerkUserId') as string;
+    const clerkEmail = (c.get('clerkEmail') || '').trim();
 
-    // Resolve the internal user_id from clerk_id
-    const userProfile = await c.env.DB.prepare(
-      `SELECT user_id FROM user_profiles WHERE clerk_id = ?`
-    ).bind(clerkUserId).first() as any;
-
-    if (!userProfile) {
-      return c.json({ success: false, error: 'User profile not found. Please sign in again.' }, 401);
-    }
-
-    const userId = userProfile.user_id;
+    // Every signed-in Clerk user may submit; no profile is required.
+    const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const formData = await c.req.parseBody();
 
@@ -360,6 +546,7 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
     const authorEmail = (formData['authorEmail'] as string || '').trim();
     const keywords = (formData['keywords'] as string || '').trim();
     const file = formData['file'] as File;
+    const plagiarismFile = formData['plagiarismFile'] as File;
 
     let authors: { first_name: string; last_name: string; phone: string; email: string; college: string }[] = [];
     try {
@@ -413,18 +600,31 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: fileCheck.reason }, 400);
     }
 
+    if (!plagiarismFile) {
+      return c.json({ success: false, error: 'A plagiarism report file is required.' }, 400);
+    }
+    const plagCheck = validateFile(plagiarismFile);
+    if (!plagCheck.ok) {
+      return c.json({ success: false, error: `Plagiarism report: ${plagCheck.reason}` }, 400);
+    }
+
     const submissionId = crypto.randomUUID();
     const submissionCode = `SUB-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const now = new Date().toISOString();
-    const safeFilename = sanitizeFilename(file.name);
-    const fileKey = `submissions/${submissionId}-${safeFilename}`;
+    const paperKey = `submissions/${submissionId}-PAPER-${sanitizeFilename(file.name)}`;
+    const plagKey = `submissions/${submissionId}-PLAGIARISM-${sanitizeFilename(plagiarismFile.name)}`;
 
-    let uploaded = false;
+    const uploadedKeys: string[] = [];
     try {
-      await c.env.BUCKET.put(fileKey, file.stream(), {
+      await c.env.BUCKET.put(paperKey, file.stream(), {
         httpMetadata: { contentType: file.type || 'application/octet-stream' },
       });
-      uploaded = true;
+      uploadedKeys.push(paperKey);
+
+      await c.env.BUCKET.put(plagKey, plagiarismFile.stream(), {
+        httpMetadata: { contentType: plagiarismFile.type || 'application/octet-stream' },
+      });
+      uploadedKeys.push(plagKey);
 
       const batchStatements: D1PreparedStatement[] = [
         c.env.DB.prepare(
@@ -455,9 +655,23 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
           submissionId,
           'MANUSCRIPT',
           file.name,
-          fileKey,
+          paperKey,
           file.type || 'application/octet-stream',
           file.size,
+          now
+        ),
+        c.env.DB.prepare(
+          `INSERT INTO submission_files
+            (id, submission_id, file_type, original_filename, storage_key, mime_type, file_size, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          submissionId,
+          'PLAGIARISM',
+          plagiarismFile.name,
+          plagKey,
+          plagiarismFile.type || 'application/octet-stream',
+          plagiarismFile.size,
           now
         ),
       ];
@@ -501,8 +715,9 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
         submission_code: submissionCode,
       });
     } catch (dbError) {
-      if (uploaded) {
-        await c.env.BUCKET.delete(fileKey).catch(() => {});
+      // Best-effort cleanup of any uploaded file(s) if the DB write failed.
+      for (const k of uploadedKeys) {
+        await c.env.BUCKET.delete(k).catch(() => {});
       }
       console.error('Submission DB error:', dbError);
       return c.json({ success: false, error: 'Could not save your submission. Please try again.' }, 500);
@@ -528,7 +743,11 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file
        FROM submissions s
        ORDER BY s.created_at DESC`
     ).all();
@@ -561,7 +780,8 @@ app.get('/api/admin/submissions', async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Admin: Stream a manuscript file (requires admin Bearer token)
+// Admin: Stream a submission file (paper or plagiarism report)
+// Requires admin Bearer token. Use ?type=MANUSCRIPT (default) or ?type=PLAGIARISM.
 // ------------------------------------------------------------------
 app.get('/api/admin/submissions/:id/file', async (c) => {
   try {
@@ -575,18 +795,27 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
     }
 
     const submissionId = c.req.param('id');
+    let docType = (c.req.query('type') || '').toUpperCase();
+    if (docType !== 'PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
+
     const file = await c.env.DB.prepare(
       `SELECT storage_key, original_filename, mime_type FROM submission_files
-       WHERE submission_id = ? AND file_type = 'MANUSCRIPT' LIMIT 1`
-    ).bind(submissionId).first() as any;
+       WHERE submission_id = ? AND file_type = ? LIMIT 1`
+    ).bind(submissionId, docType).first() as any;
 
     if (!file) {
-      return c.json({ success: false, error: 'No manuscript file found for this submission.' }, 404);
+      return c.json({
+        success: false,
+        error:
+          docType === 'PLAGIARISM'
+            ? 'No plagiarism report found for this submission.'
+            : 'No manuscript file found for this submission.',
+      }, 404);
     }
 
     const object = await c.env.BUCKET.get(file.storage_key);
     if (!object) {
-      return c.json({ success: false, error: 'The manuscript file could not be found in storage.' }, 404);
+      return c.json({ success: false, error: 'The file could not be found in storage.' }, 404);
     }
 
     const mime = file.mime_type || 'application/octet-stream';
@@ -603,6 +832,61 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
   } catch (error) {
     console.error('File stream error:', error);
     return c.json({ success: false, error: 'Could not load the manuscript file.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// User: Get the signed-in user's own submissions only.
+// ------------------------------------------------------------------
+app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
+  try {
+    const clerkUserId = c.get('clerkUserId') as string;
+    const clerkEmail = (c.get('clerkEmail') || '').trim();
+
+    const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at,
+              (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count
+       FROM submissions s
+       WHERE s.user_id = ?
+       ORDER BY s.created_at DESC`
+    ).bind(userId).all();
+
+    return c.json({ success: true, submissions: results as any[] });
+  } catch (error) {
+    console.error('Fetch my submissions error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Get all users + profiles (requires admin Bearer token)
+// ------------------------------------------------------------------
+app.get('/api/admin/users', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT u.id, u.name, u.email, u.role, u.created_at,
+              p.institution, p.department, p.country, p.phone,
+              (SELECT COUNT(*) FROM submissions s WHERE s.user_id = u.id) AS submission_count
+       FROM users u
+       LEFT JOIN user_profiles p ON p.user_id = u.id
+       ORDER BY u.created_at DESC`
+    ).all();
+
+    return c.json({ success: true, users: results as any[] });
+  } catch (error) {
+    console.error('Fetch users error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
 

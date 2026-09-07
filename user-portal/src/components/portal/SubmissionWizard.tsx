@@ -8,6 +8,7 @@ import {
   Upload,
   Loader2,
   FileText,
+  ShieldCheck,
 } from 'lucide-react';
 import paperIcon from '../../assets/images/paper.png';
 import infoIcon from '../../assets/images/info.png';
@@ -17,11 +18,12 @@ interface SubmissionWizardProps {
   onComplete: () => void;
   onBack: () => void;
   getToken: (options?: { skipCache?: boolean; template?: string } | undefined) => Promise<string | null>;
+  clerkUser?: any;
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
-export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWizardProps) {
+export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: SubmissionWizardProps) {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [popup, setPopup] = useState<PopupInfo | null>(null);
@@ -56,8 +58,10 @@ export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWiz
 
   // Step 3: Upload
   const [file, setFile] = useState<File | null>(null);
+  const [plagiarismFile, setPlagiarismFile] = useState<File | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const plagiarismInputRef = useRef<HTMLInputElement>(null);
 
   // Sync the Clerk user profile to the backend on mount
   useEffect(() => {
@@ -69,14 +73,34 @@ export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWiz
         await fetch(`${apiUrl}/api/users/sync`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({}),
+          body: JSON.stringify({
+            name: clerkUser?.fullName || '',
+            email: clerkUser?.primaryEmailAddress?.emailAddress || '',
+          }),
         });
       } catch {
         // Non-fatal; the profile sync is best-effort.
       }
     };
     syncUser();
-  }, [getToken]);
+  }, [getToken, clerkUser]);
+
+  // Pre-fill the primary author from the signed-in Clerk account.
+  useEffect(() => {
+    if (!clerkUser) return;
+    const email = clerkUser.primaryEmailAddress?.emailAddress || '';
+    const parts = (clerkUser.fullName || '').trim().split(/\s+/);
+    setAuthors((prev) => {
+      const next = [...prev];
+      if (!prev[0].first_name && !prev[0].last_name && parts.length) {
+        next[0] = { ...prev[0], first_name: parts[0] || '', last_name: parts.slice(1).join(' ') || '' };
+      }
+      if (!prev[0].email && email) {
+        next[0] = { ...next[0], email };
+      }
+      return next;
+    });
+  }, [clerkUser]);
 
   const handleNext = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -99,6 +123,14 @@ export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWiz
           type: 'error',
           title: 'Manuscript Required',
           message: 'Please upload a manuscript PDF before submitting. Maximum file size is 10MB.',
+        });
+        return;
+      }
+      if (!plagiarismFile) {
+        setPopup({
+          type: 'error',
+          title: 'Plagiarism Report Required',
+          message: 'Please upload the plagiarism report PDF before submitting. Maximum file size is 10MB.',
         });
         return;
       }
@@ -135,6 +167,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWiz
       );
       formData.append('authorEmail', authors[0].email.trim());
       formData.append('file', file);
+      formData.append('plagiarismFile', plagiarismFile);
 
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
       const token = await getToken();
@@ -220,6 +253,33 @@ export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWiz
         return;
       }
       setFile(selectedFile);
+    }
+  };
+
+  const handlePlagiarismChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      if (selectedFile.size > MAX_FILE_SIZE) {
+        setPopup({
+          type: 'error',
+          title: 'File Too Large',
+          message: 'The plagiarism report is larger than 10MB. Please choose a smaller PDF.',
+        });
+        setPlagiarismFile(null);
+        e.target.value = '';
+        return;
+      }
+      if (!/\.pdf$/i.test(selectedFile.name)) {
+        setPopup({
+          type: 'error',
+          title: 'Invalid File Type',
+          message: 'Please upload the plagiarism report as a PDF.',
+        });
+        setPlagiarismFile(null);
+        e.target.value = '';
+        return;
+      }
+      setPlagiarismFile(selectedFile);
     }
   };
 
@@ -341,7 +401,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWiz
                   value={paperId}
                   onChange={(e) => setPaperId(e.target.value)}
                   className="w-full px-4 py-3 rounded-xl bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all text-lg"
-                  placeholder="Your paper ID in CMT"
+                  placeholder="Your paper ID in CMT or Enter NA if you don't have one"
                 />
               </div>
 
@@ -528,6 +588,50 @@ export function SubmissionWizard({ onComplete, onBack, getToken }: SubmissionWiz
                   ref={fileInputRef}
                   onChange={handleFileChange}
                 />
+              </div>
+
+
+              <div>
+                <h3 className="text-xl font-serif font-bold mb-2 flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-brand-accent" />
+                  Plagiarism Report
+                </h3>
+                <p className="text-sm text-brand-text/60 mb-3">
+                  Upload the plagiarism/verification report for this paper (e.g. Turnitin/iThenticate). PDF only.
+                </p>
+                <div
+                  onClick={() => plagiarismInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center transition-colors cursor-pointer group shadow-sm ${plagiarismFile
+                    ? 'border-green-500 bg-green-50'
+                    : 'border-stone-300 bg-white hover:bg-stone-50'
+                    }`}
+                >
+                  <div className="bg-white w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm group-hover:scale-110 transition-transform">
+                    {plagiarismFile ? (
+                      <FileText className="w-7 h-7 text-green-500" />
+                    ) : (
+                      <ShieldCheck className="w-7 h-7 text-brand-accent" />
+                    )}
+                  </div>
+                  <h4 className="text-lg font-bold mb-1">
+                    {plagiarismFile ? 'Report Selected' : 'Click to upload the plagiarism report'}
+                  </h4>
+                  <p className="text-sm text-brand-text/60">
+                    {plagiarismFile ? plagiarismFile.name : 'PDF format only. Maximum file size 10MB.'}
+                  </p>
+                  {plagiarismFile && (
+                    <p className="text-xs text-brand-text/50 mt-1">
+                      {(plagiarismFile.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  )}
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    className="hidden"
+                    ref={plagiarismInputRef}
+                    onChange={handlePlagiarismChange}
+                  />
+                </div>
               </div>
 
 

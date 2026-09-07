@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, RefreshCw, LogOut } from 'lucide-react';
+import { Eye, AlertCircle, RefreshCw, LogOut, Download } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -26,6 +26,8 @@ interface Submission {
   author_email: string;
   status: string;
   created_at: string;
+  manuscript_file?: string | null;
+  plagiarism_file?: string | null;
   authors?: Author[];
 }
 
@@ -33,7 +35,21 @@ interface FileView {
   open: boolean;
   url?: string;
   filename?: string;
+  kind?: 'paper' | 'plagiarism';
   error?: string;
+}
+
+interface PortalUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  created_at: string;
+  institution: string;
+  department: string;
+  country: string;
+  phone: string;
+  submission_count: number;
 }
 
 // ------------------------------------------------------------------
@@ -147,6 +163,25 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
     loadPdf();
   }, [loadPdf]);
 
+  const downloadPdf = async () => {
+    if (!file.url) return;
+    setError(null);
+    const res = await fetch(file.url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!res.ok) {
+      setError('Could not download this document. It may have been removed.');
+      return;
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = file.filename || (file.kind === 'plagiarism' ? 'plagiarism-report.pdf' : 'manuscript.pdf');
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
@@ -154,9 +189,18 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
         <div className="flex items-center justify-between px-5 py-3 bg-stone-900 text-white">
           <div className="flex items-center gap-2 min-w-0">
             <Eye className="w-4 h-4 shrink-0" />
-            <span className="font-medium truncate">{file.filename || 'Manuscript'}</span>
+            <span className="font-medium truncate">
+              {file.filename || (file.kind === 'plagiarism' ? 'Plagiarism Report' : 'Manuscript')}
+            </span>
           </div>
           <div className="flex items-center gap-2">
+            <button
+              onClick={downloadPdf}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm"
+              aria-label="Download"
+            >
+              <Download className="w-4 h-4" /> Download
+            </button>
             <button
               onClick={() => {
                 setError(null);
@@ -194,7 +238,9 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'users'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [users, setUsers] = useState<PortalUser[]>([]);
   const [stats, setStats] = useState({ total: 0, accepted: 0, rejected: 0, submitted: 0, underReview: 0, revisionRequired: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -212,9 +258,29 @@ export default function App() {
     setToken('');
     setAdminEmail('');
     setSubmissions([]);
+    setUsers([]);
     setPdfView({ open: false });
     sessionStorage.removeItem('icaidiet_admin_token');
     sessionStorage.removeItem('icaidiet_admin_user');
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/users`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to load users.');
+      }
+      setUsers(data.users || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load users.');
+    }
   };
 
   const fetchSubmissions = async () => {
@@ -252,16 +318,22 @@ export default function App() {
   React.useEffect(() => {
     if (token) {
       fetchSubmissions();
+      fetchUsers();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const openPdf = async (id: string, filename: string) => {
-    setPdfView({ open: true, url: `${API_URL}/api/admin/submissions/${id}/file`, filename });
+  const openPdf = (id: string, kind: 'paper' | 'plagiarism', filename: string) => {
+    setPdfView({
+      open: true,
+      url: `${API_URL}/api/admin/submissions/${id}/file?type=${kind === 'plagiarism' ? 'PLAGIARISM' : 'MANUSCRIPT'}`,
+      filename,
+      kind,
+    });
   };
 
   const closePdf = () => {
-    setPdfView({ open: false, url: undefined, filename: undefined, error: undefined });
+    setPdfView({ open: false, url: undefined, filename: undefined, kind: undefined, error: undefined });
   };
 
   if (!token) {
@@ -298,10 +370,33 @@ export default function App() {
       </header>
 
       <main className="container mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-3xl font-bold font-serif">Submissions</h2>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <div>
+            <h2 className="text-3xl font-bold font-serif mb-2">Admin Dashboard</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setActiveTab('submissions')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === 'submissions' ? 'bg-stone-900 text-white' : 'bg-white text-stone-700 hover:bg-stone-100'
+                }`}
+              >
+                Submissions
+              </button>
+              <button
+                onClick={() => setActiveTab('users')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  activeTab === 'users' ? 'bg-stone-900 text-white' : 'bg-white text-stone-700 hover:bg-stone-100'
+                }`}
+              >
+                Users
+              </button>
+            </div>
+          </div>
           <button
-            onClick={fetchSubmissions}
+            onClick={() => {
+              fetchSubmissions();
+              fetchUsers();
+            }}
             disabled={loading}
             className="px-4 py-2 bg-stone-900 text-white rounded-lg text-sm font-medium hover:bg-stone-700 transition-colors disabled:opacity-50 flex items-center gap-2"
           >
@@ -309,6 +404,8 @@ export default function App() {
           </button>
         </div>
 
+        {activeTab === 'submissions' && (
+          <>
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
           <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
             <div className="text-3xl font-bold font-serif">{stats.total}</div>
@@ -425,12 +522,22 @@ export default function App() {
                       </span>
                     </td>
                     <td className="py-4 px-6 text-right">
-                      <button
-                        onClick={() => openPdf(sub.id, sub.title)}
-                        className="inline-flex items-center gap-1.5 text-stone-900 font-medium text-sm hover:underline"
-                      >
-                        <Eye className="w-4 h-4" /> View PDF
-                      </button>
+                      <div className="flex items-center justify-end gap-3">
+                        <button
+                          onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                          title={sub.manuscript_file || 'Paper PDF'}
+                          className="inline-flex items-center gap-1.5 text-stone-900 font-medium text-sm hover:underline"
+                        >
+                          <Eye className="w-4 h-4" /> View Paper
+                        </button>
+                        <button
+                          onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                          title={sub.plagiarism_file || 'Plagiarism report'}
+                          className="inline-flex items-center gap-1.5 text-brand-accent font-medium text-sm hover:underline"
+                        >
+                          <Eye className="w-4 h-4" /> Plagiarism Report
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -438,6 +545,55 @@ export default function App() {
             </tbody>
           </table>
         </div>
+          </>
+        )}
+
+        {activeTab === 'users' && (
+          <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-stone-50 border-b border-stone-200">
+                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">User</th>
+                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Institution</th>
+                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Department</th>
+                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Country</th>
+                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Phone</th>
+                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider text-center">Submissions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-stone-200">
+                {users.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-stone-500">
+                      {loading ? 'Loading users...' : 'No registered users yet.'}
+                    </td>
+                  </tr>
+                ) : (
+                  users.map((u) => (
+                    <tr key={u.id} className="hover:bg-stone-50 transition-colors">
+                      <td className="py-4 px-6">
+                        <div className="font-medium text-stone-900">{u.name || '—'}</div>
+                        <div className="text-xs text-stone-500 font-normal mt-0.5">{u.email}</div>
+                        {u.role === 'ADMIN' && (
+                          <span className="inline-block text-[10px] bg-stone-900 text-white px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide mt-1">
+                            Admin
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-4 px-6 text-sm text-stone-600">{u.institution || '—'}</td>
+                      <td className="py-4 px-6 text-sm text-stone-600">{u.department || '—'}</td>
+                      <td className="py-4 px-6 text-sm text-stone-600">{u.country || '—'}</td>
+                      <td className="py-4 px-6 text-sm text-stone-600">{u.phone || '—'}</td>
+                      <td className="py-4 px-6 text-sm text-stone-600 text-center">
+                        {u.submission_count || 0}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
       </main>
 
       {pdfView.open && pdfView.url && <PdfViewer file={pdfView} token={token} onClose={closePdf} />}
