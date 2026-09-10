@@ -730,6 +730,7 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
 
 // ------------------------------------------------------------------
 // Admin: Get all submissions (requires admin Bearer token)
+// Only non-deleted submissions are returned.
 // ------------------------------------------------------------------
 app.get('/api/admin/submissions', async (c) => {
   try {
@@ -743,12 +744,13 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file
        FROM submissions s
+       WHERE s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
     ).all();
 
@@ -775,6 +777,61 @@ app.get('/api/admin/submissions', async (c) => {
     return c.json({ success: true, submissions: enriched });
   } catch (error) {
     console.error('Fetch error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Get soft-deleted submissions for the "Deleted Files" tab.
+// ------------------------------------------------------------------
+app.get('/api/admin/submissions/deleted', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (CASE WHEN s.deleted_at < ? THEN 1 ELSE 0 END) AS expired
+       FROM submissions s
+       WHERE s.deleted_at IS NOT NULL
+       ORDER BY s.deleted_at DESC`
+    ).bind(cutoff).all();
+
+    const submissions = results as any[];
+    let authorsBySubmission: Record<string, any[]> = {};
+    if (submissions.length > 0) {
+      const ids = submissions.map((s: any) => s.id as string);
+      const placeholders = ids.map(() => '?').join(',');
+      const authorRes = await c.env.DB.prepare(
+        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+         FROM authors
+         WHERE submission_id IN (${placeholders})
+         ORDER BY is_primary DESC, created_at ASC`
+      ).bind(...ids).all();
+      authorsBySubmission = (authorRes.results as any[] || []).reduce((acc: any, a: any) => {
+        const sid = a.submission_id;
+        (acc[sid] = acc[sid] || []).push(a);
+        return acc;
+      }, {});
+    }
+
+    const enriched = submissions.map((s: any) => ({ ...s, authors: authorsBySubmission[s.id] || [] }));
+
+    return c.json({ success: true, submissions: enriched });
+  } catch (error) {
+    console.error('Fetch deleted submissions error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -849,7 +906,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at,
               (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count
        FROM submissions s
-       WHERE s.user_id = ?
+       WHERE s.user_id = ? AND s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
     ).bind(userId).all();
 
@@ -861,8 +918,10 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Admin: Delete a submission (requires admin Bearer token)
-// Removes the submission, its authors and file rows, and the R2 objects.
+// Admin: Soft-delete a submission (requires admin Bearer token)
+// Marks the record as deleted so it moves to the "Deleted Files"
+// tab. It can be recovered or is permanently purged after 30 days
+// by the scheduled cron job.
 // ------------------------------------------------------------------
 app.delete('/api/admin/submissions/:id', async (c) => {
   try {
@@ -884,25 +943,55 @@ app.delete('/api/admin/submissions/:id', async (c) => {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
     }
 
-    const fileRes = await c.env.DB.prepare(
-      `SELECT storage_key FROM submission_files WHERE submission_id = ?`
-    ).bind(submissionId).all();
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `UPDATE submissions SET deleted_at = ?, updated_at = ? WHERE id = ?`
+    ).bind(now, now, submissionId).run();
 
-    await c.env.DB.batch([
-      c.env.DB.prepare(`DELETE FROM authors WHERE submission_id = ?`).bind(submissionId),
-      c.env.DB.prepare(`DELETE FROM submission_files WHERE submission_id = ?`).bind(submissionId),
-      c.env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(submissionId),
-    ]);
+    return c.json({ success: true, message: 'Submission moved to Deleted Files.' });
+  } catch (error) {
+    console.error('Soft-delete submission error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
 
-    for (const f of (fileRes.results as any[] || [])) {
-      if (f && f.storage_key) {
-        await c.env.BUCKET.delete(f.storage_key).catch(() => {});
-      }
+// ------------------------------------------------------------------
+// Admin: Recover a soft-deleted submission (requires admin Bearer token)
+// Restores the record to its original place (created_at is unchanged,
+// so the created_at DESC ordering puts it back exactly where it was).
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/:id/recover', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
     }
 
-    return c.json({ success: true, message: 'Submission deleted successfully.' });
+    const submissionId = c.req.param('id');
+
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM submissions WHERE id = ?`
+    ).bind(submissionId).first();
+    if (!existing) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    const now = new Date().toISOString();
+    const result = await c.env.DB.prepare(
+      `UPDATE submissions SET deleted_at = NULL, updated_at = ? WHERE id = ?`
+    ).bind(now, submissionId).run();
+
+    const recovered = result.meta.changes > 0;
+    return c.json({
+      success: recovered,
+      message: recovered ? 'Submission recovered successfully.' : 'Submission could not be recovered.',
+    });
   } catch (error) {
-    console.error('Delete submission error:', error);
+    console.error('Recover submission error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -924,7 +1013,7 @@ app.get('/api/admin/users', async (c) => {
     const { results } = await c.env.DB.prepare(
       `SELECT u.id, u.name, u.email, u.role, u.created_at,
               p.institution, p.department, p.country, p.phone,
-              (SELECT COUNT(*) FROM submissions s WHERE s.user_id = u.id) AS submission_count
+              (SELECT COUNT(*) FROM submissions s WHERE s.user_id = u.id AND s.deleted_at IS NULL) AS submission_count
        FROM users u
        LEFT JOIN user_profiles p ON p.user_id = u.id
        ORDER BY u.created_at DESC`
@@ -937,4 +1026,54 @@ app.get('/api/admin/users', async (c) => {
   }
 });
 
-export default app;
+// ------------------------------------------------------------------
+// Cron: Permanently purge soft-deleted submissions older than 30 days.
+// Removes the DB rows (authors, files, submission) and the R2 objects.
+// ------------------------------------------------------------------
+const PURGE_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+async function purgeExpiredDeleted(env: Bindings) {
+  try {
+    const cutoff = new Date(Date.now() - PURGE_AGE_MS).toISOString();
+
+    const fileRes = await env.DB.prepare(
+      `SELECT storage_key FROM submission_files
+       WHERE submission_id IN (
+         SELECT id FROM submissions WHERE deleted_at IS NOT NULL AND deleted_at < ?
+       )`
+    ).bind(cutoff).all();
+
+    await env.DB.batch([
+      env.DB.prepare(
+        `DELETE FROM authors WHERE submission_id IN (
+           SELECT id FROM submissions WHERE deleted_at IS NOT NULL AND deleted_at < ?
+         )`
+      ).bind(cutoff),
+      env.DB.prepare(
+        `DELETE FROM submission_files WHERE submission_id IN (
+           SELECT id FROM submissions WHERE deleted_at IS NOT NULL AND deleted_at < ?
+         )`
+      ).bind(cutoff),
+      env.DB.prepare(
+        `DELETE FROM submissions WHERE deleted_at IS NOT NULL AND deleted_at < ?`
+      ).bind(cutoff),
+    ]);
+
+    for (const f of (fileRes.results as any[] || [])) {
+      if (f && f.storage_key) {
+        await env.BUCKET.delete(f.storage_key).catch(() => {});
+      }
+    }
+  } catch (error) {
+    console.error('Purge deleted submissions error:', error);
+  }
+}
+
+async function scheduled(_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
+  await purgeExpiredDeleted(env);
+}
+
+export default {
+  fetch: app.fetch,
+  scheduled,
+};

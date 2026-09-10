@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone } from 'lucide-react';
+import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -26,6 +26,7 @@ interface Submission {
   author_email: string;
   status: string;
   created_at: string;
+  deleted_at?: string | null;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
   authors?: Author[];
@@ -345,18 +346,154 @@ function ConfirmDialog({
 }
 
 // ------------------------------------------------------------------
+// More info modal: full record details + PDF actions
+// ------------------------------------------------------------------
+function MoreInfoModal({
+  sub,
+  onView,
+  onClose,
+}: {
+  sub: Submission | null;
+  onView: (id: string, kind: 'paper' | 'plagiarism', filename: string) => void;
+  onClose: () => void;
+}) {
+  if (!sub) return null;
+  const authors = sub.authors || [];
+  return (
+    <div className="fixed inset-0 z-[105] flex items-center justify-center p-2 sm:p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-3xl max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border-2 border-brand-accent overflow-hidden">
+        <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-4 bg-brand-text text-white">
+          <h2 className="font-serif font-bold text-lg sm:text-xl min-w-0 truncate">Submission Details</h2>
+          <button
+            onClick={onClose}
+            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors shrink-0"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Paper Title</div>
+              <h3 className="font-serif text-lg sm:text-xl font-bold leading-snug break-words mt-1">{sub.title}</h3>
+            </div>
+            {statusBadge(sub.status)}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Paper ID</div>
+              <div className="font-semibold break-words mt-0.5">{sub.paper_id || 'NA'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submission Code</div>
+              <div className="font-semibold break-words mt-0.5">{sub.submission_code}</div>
+            </div>
+            <div>
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Track</div>
+              <div className="font-semibold capitalize break-words mt-0.5">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+            </div>
+            <div>
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submitted</div>
+              <div className="font-semibold mt-0.5">{formatDate(sub.created_at) || '—'}</div>
+            </div>
+          </div>
+
+          {sub.abstract && (
+            <div>
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Abstract</div>
+              <p className="text-sm text-brand-text/80 leading-relaxed mt-1 whitespace-pre-line">{sub.abstract}</p>
+            </div>
+          )}
+
+          <div>
+            <div className="flex items-center gap-1.5 text-xs text-brand-text/50 uppercase tracking-wide font-medium mb-2">
+              <Users className="w-3.5 h-3.5" /> Authors ({authors.length || 1})
+            </div>
+            {authors.length === 0 ? (
+              <p className="text-sm text-brand-text/70">
+                {(sub.author_name || 'N/A').split(' ')[0] || 'N/A'} {sub.author_email && `· ${sub.author_email}`}
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {authors.map((a) => (
+                  <div key={a.id} className="bg-brand-bg/50 border border-brand-accent/40 rounded-xl p-3">
+                    <div className="flex flex-wrap items-center gap-2 font-semibold text-brand-text">
+                      <FileText className="w-4 h-4 shrink-0 text-brand-accent" />
+                      <span className="break-words">{a.first_name} {a.last_name}</span>
+                      {a.is_primary === 1 && (
+                        <span className="text-[10px] bg-brand-accent/20 text-brand-accent px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">
+                          Primary
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-sm text-brand-text/70 mt-1 space-y-0.5">
+                      {a.email && (
+                        <div className="flex items-center gap-1.5 break-words">
+                          <span className="shrink-0">✉</span> {a.email}
+                        </div>
+                      )}
+                      {a.phone && (
+                        <div className="flex items-center gap-1.5">
+                          <Phone className="w-3.5 h-3.5 shrink-0" /> {a.phone}
+                        </div>
+                      )}
+                      {a.college && <div className="break-words">{a.college}</div>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">
+          <button
+            onClick={() => onView(sub.id, 'paper', sub.manuscript_file || sub.title)}
+            title={sub.manuscript_file || 'Paper PDF'}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all"
+          >
+            <Eye className="w-4 h-4" /> View Paper
+          </button>
+          <button
+            onClick={() => onView(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+            title={sub.plagiarism_file || 'Plagiarism report'}
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-brand-text rounded-lg text-sm font-medium border border-brand-text/10 hover:bg-brand-text/5 transition-colors"
+          >
+            <Eye className="w-4 h-4" /> Plagiarism Report
+          </button>
+          <button
+            onClick={onClose}
+            className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-brand-text/70 hover:bg-brand-text/5 transition-colors ml-auto"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
 // Main app
 // ------------------------------------------------------------------
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'users'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'users' | 'deleted'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
   const [stats, setStats] = useState({ total: 0, accepted: 0, rejected: 0, submitted: 0, underReview: 0, revisionRequired: 0 });
   const [loading, setLoading] = useState(false);
+  const [deletedLoading, setDeletedLoading] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
+  const [moreInfoTarget, setMoreInfoTarget] = useState<Submission | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -373,6 +510,7 @@ export default function App() {
     setToken('');
     setAdminEmail('');
     setSubmissions([]);
+    setDeletedSubmissions([]);
     setUsers([]);
     setPdfView({ open: false });
     sessionStorage.removeItem('icaidiet_admin_token');
@@ -430,9 +568,58 @@ export default function App() {
     }
   };
 
+  const fetchDeletedSubmissions = async () => {
+    setDeletedLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/deleted`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to load deleted submissions.');
+      }
+      setDeletedSubmissions(data.submissions || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load deleted submissions.');
+    } finally {
+      setDeletedLoading(false);
+    }
+  };
+
+  const handleRecover = async (id: string) => {
+    setRecovering(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${id}/recover`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to recover submission.');
+      }
+      setDeletedSubmissions((prev) => prev.filter((s) => s.id !== id));
+      await Promise.all([fetchSubmissions(), fetchDeletedSubmissions()]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to recover submission.');
+    } finally {
+      setRecovering(false);
+    }
+  };
+
   React.useEffect(() => {
     if (token) {
       fetchSubmissions();
+      fetchDeletedSubmissions();
       fetchUsers();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -471,6 +658,7 @@ export default function App() {
       setSubmissions((prev) => prev.filter((s) => s.id !== deleteTarget.id));
       setStats((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
       setDeleteTarget(null);
+      await fetchDeletedSubmissions();
     } catch (err) {
       setDeleteError(err instanceof Error ? err.message : 'Failed to delete submission.');
     } finally {
@@ -542,17 +730,31 @@ export default function App() {
               >
                 Users
               </button>
+              <button
+                onClick={() => setActiveTab('deleted')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                  activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                }`}
+              >
+                Deleted Files
+                {deletedSubmissions.length > 0 && (
+                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'deleted' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'}`}>
+                    {deletedSubmissions.length}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
           <button
             onClick={() => {
               fetchSubmissions();
+              fetchDeletedSubmissions();
               fetchUsers();
             }}
-            disabled={loading}
+            disabled={loading || deletedLoading}
             className="w-full sm:w-auto px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+            <RefreshCw className={`w-4 h-4 ${loading || deletedLoading ? 'animate-spin' : ''}`} /> Refresh
           </button>
         </div>
 
@@ -640,18 +842,10 @@ export default function App() {
                         <td className="py-4 px-5 align-top">
                           <div className="flex flex-col items-start gap-2">
                             <button
-                              onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
-                              title={sub.manuscript_file || 'Paper PDF'}
+                              onClick={() => setMoreInfoTarget(sub)}
                               className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
                             >
-                              <Eye className="w-4 h-4" /> View Paper
-                            </button>
-                            <button
-                              onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                              title={sub.plagiarism_file || 'Plagiarism report'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
-                            >
-                              <Eye className="w-4 h-4" /> Plagiarism Report
+                              <Eye className="w-4 h-4" /> More Info
                             </button>
                             <button
                               onClick={() => setDeleteTarget(sub)}
@@ -708,18 +902,10 @@ export default function App() {
 
                     <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-brand-accent/40 pt-3">
                       <button
-                        onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
-                        title={sub.manuscript_file || 'Paper PDF'}
+                        onClick={() => setMoreInfoTarget(sub)}
                         className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                       >
-                        <Eye className="w-3.5 h-3.5" /> View Paper
-                      </button>
-                      <button
-                        onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                        title={sub.plagiarism_file || 'Plagiarism report'}
-                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> Plagiarism Report
+                        <Eye className="w-3.5 h-3.5" /> More Info
                       </button>
                       <button
                         onClick={() => setDeleteTarget(sub)}
@@ -831,6 +1017,90 @@ export default function App() {
             </div>
           </>
         )}
+
+        {activeTab === 'deleted' && (
+          <>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <h3 className="font-serif text-xl font-bold">Deleted Files</h3>
+              <p className="text-xs text-brand-text/60">
+                Records are kept for 30 days, then permanently removed. Recover to restore them to the list.
+              </p>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> Error loading deleted submissions: {error}
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {deletedLoading ? (
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  Loading deleted files...
+                </div>
+              ) : deletedSubmissions.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  No deleted files. Deleted submissions will appear here.
+                </div>
+              ) : (
+                deletedSubmissions.map((sub) => {
+                  const deletedAt = sub.deleted_at ? new Date(sub.deleted_at) : null;
+                  const daysLeft = deletedAt
+                    ? Math.max(0, 30 - Math.floor((Date.now() - deletedAt.getTime()) / (24 * 60 * 60 * 1000)))
+                    : 30;
+                  const expired = daysLeft === 0;
+                  return (
+                    <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+                      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="text-xs bg-brand-text text-white px-2 py-0.5 rounded-full font-medium tracking-wide">
+                              {sub.paper_id || 'NA'}
+                            </span>
+                            <span className="text-xs text-brand-text/50">{sub.submission_code}</span>
+                          </div>
+                          <h4 className="font-serif font-bold text-lg mt-2 break-words leading-snug">{sub.title}</h4>
+                          <p className="text-sm text-brand-text/70 mt-1 capitalize break-words">
+                            {sub.track?.replace(/-/g, ' ') || '—'}
+                          </p>
+                        </div>
+                        <div className="shrink-0 flex flex-col items-start lg:items-end gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
+                              expired ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                            }`}
+                          >
+                            {expired ? 'Expired' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
+                          </span>
+                          <span className="text-xs text-brand-text/60">
+                            Deleted {deletedAt ? formatDate(deletedAt.toISOString()) : '—'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-brand-accent/40 pt-3">
+                        <button
+                          onClick={() => handleRecover(sub.id)}
+                          disabled={recovering}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
+                        >
+                          <RotateCcw className={`w-4 h-4 ${recovering ? 'animate-spin' : ''}`} /> Recover
+                        </button>
+                        <button
+                          onClick={() => setMoreInfoTarget(sub)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-brand-text text-sm font-medium border border-brand-text/10 rounded-lg hover:bg-brand-text/5 transition-colors"
+                        >
+                          <Eye className="w-4 h-4" /> More Info
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
       </main>
 
       <footer className="bg-brand-footer text-white py-6 mt-auto">
@@ -848,9 +1118,10 @@ export default function App() {
         title="Delete Submission?"
         message={
           deleteTarget
-            ? `This will permanently delete "${deleteTarget.paper_id || deleteTarget.submission_code}" — ${deleteTarget.title}.\n\nAuthors, file records and uploaded PDFs will be removed. This action cannot be undone.`
+            ? `Move "${deleteTarget.paper_id || deleteTarget.submission_code}" — ${deleteTarget.title} to Deleted Files?\n\nIt will be hidden from the submissions list. You can recover it from the "Deleted Files" tab within 30 days, after which it will be permanently removed.`
             : ''
         }
+        confirmLabel="Delete"
         busy={deleting}
         error={deleteError}
         onConfirm={confirmDelete}
@@ -860,6 +1131,15 @@ export default function App() {
             setDeleteError(null);
           }
         }}
+      />
+
+      <MoreInfoModal
+        sub={moreInfoTarget}
+        onView={(id, kind, filename) => {
+          setMoreInfoTarget(null);
+          openPdf(id, kind, filename);
+        }}
+        onClose={() => setMoreInfoTarget(null)}
       />
     </div>
   );
