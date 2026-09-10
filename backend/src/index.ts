@@ -377,29 +377,17 @@ app.post('/api/users/sync', async (c) => {
     const clerkId = authResult.userId;
     const body = await c.req.json().catch(() => null);
     const email = (body?.email || authResult.email || '').trim().toLowerCase();
-    if (!email) {
-      return c.json({ success: false, error: 'A valid email is required.' }, 400);
-    }
     const name = (body?.name || '').trim() || email.split('@')[0] || 'User';
 
-    const existing = await c.env.DB.prepare(
-      `SELECT id FROM users WHERE email = ?`
-    ).bind(email).first() as any;
-
-    if (existing) {
-      await c.env.DB.prepare(
-        `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
-      ).bind(name, existing.id).run();
-      return c.json({ success: true, user_id: existing.id });
-    }
-
-    const userId = crypto.randomUUID();
-    const now = new Date().toISOString();
+    // SECURITY: resolve the internal user strictly from the verified Clerk
+    // identity (clerk linkage / token email), never from client data.
+    // Only the display name is enriched from the body; email is never
+    // taken from the client to avoid hijacking rows or colliding users.
+    const userId = await ensureUserForClerk(c, clerkId, authResult.email || '');
 
     await c.env.DB.prepare(
-      `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(userId, name, email, 'clerk-managed', 'USER', now, now).run();
+      `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
+    ).bind(name, userId).run();
 
     return c.json({ success: true, user_id: userId });
   } catch (error) {
@@ -460,28 +448,16 @@ app.post('/api/users/profile', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'All profile fields are required.' }, 400);
     }
 
-    const email = (body?.email || tokenEmail || '').trim().toLowerCase();
-    if (!email) {
-      return c.json({ success: false, error: 'A valid email is required.' }, 400);
-    }
-    const name = (body?.name || '').trim() || email.split('@')[0] || 'User';
+    const name = (body?.name || '').trim() || 'User';
 
-    // Ensure the users row exists
-    let user = await c.env.DB.prepare(`SELECT id, name FROM users WHERE email = ?`)
-      .bind(email).first() as any;
-    if (!user) {
-      const userId = crypto.randomUUID();
-      const now = new Date().toISOString();
-      await c.env.DB.prepare(
-        `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
-      ).bind(userId, name, email, 'clerk-managed', 'USER', now, now).run();
-      user = { id: userId };
-    } else {
-      await c.env.DB.prepare(
-        `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
-      ).bind(name, user.id).run();
-    }
+    // SECURITY: identity must come from the verified Clerk token / clerk linkage,
+    // never from client-supplied data. This prevents one user overwriting
+    // another user's profile (and records) by passing in a victim email.
+    const user = { id: await ensureUserForClerk(c, clerkUserId, tokenEmail), name };
+
+    await c.env.DB.prepare(
+      `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
+    ).bind(name, user.id).run();
 
     // Upsert the profile row (link via clerk_id, fallback to user_id for legacy rows)
     let profile = await c.env.DB.prepare(`SELECT id FROM user_profiles WHERE clerk_id = ?`)

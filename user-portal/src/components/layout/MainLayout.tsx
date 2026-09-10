@@ -56,7 +56,7 @@ export function MainLayout({ children, view, onNavigate }: MainLayoutProps) {
         </div>
 
         {/* Row 3: Navigation and Profile */}
-        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-y-3">
           <div className="flex items-center gap-2 overflow-x-auto">
             <Show when="signed-in">
               {NAV_ITEMS.map((item) => (
