@@ -463,7 +463,7 @@ function MoreInfoModal({
             title={sub.plagiarism_file || 'Plagiarism report'}
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-brand-text rounded-lg text-sm font-medium border border-brand-text/10 hover:bg-brand-text/5 transition-colors"
           >
-            <Eye className="w-4 h-4" /> Plagiarism Report
+            <Eye className="w-4 h-4" /> View Report
           </button>
           <button
             onClick={onClose}
@@ -800,22 +800,23 @@ export default function App() {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Paper ID</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[24%]">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Track</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Status</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[19%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Paper ID</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[22%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Track</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Status</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">More Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-accent/40">
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                      <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
                   ) : submissions.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-brand-text/60">No submissions found.</td>
+                      <td colSpan={7} className="py-8 text-center text-brand-text/60">No submissions found.</td>
                     </tr>
                   ) : (
                     submissions.map((sub) => (
@@ -842,10 +843,28 @@ export default function App() {
                         <td className="py-4 px-5 align-top">
                           <div className="flex flex-col items-start gap-2">
                             <button
+                              onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                              title={sub.manuscript_file || 'Paper PDF'}
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                            >
+                              <Eye className="w-4 h-4" /> View Paper
+                            </button>
+                            <button
+                              onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                              title={sub.plagiarism_file || 'Plagiarism report'}
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                            >
+                              <Eye className="w-4 h-4" /> View Report
+                            </button>
+                          </div>
+                        </td>
+                        <td className="py-4 px-5 align-top">
+                          <div className="flex flex-col items-start gap-2">
+                            <button
                               onClick={() => setMoreInfoTarget(sub)}
                               className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
                             >
-                              <Eye className="w-4 h-4" /> More Info
+                              <Eye className="w-4 h-4" /> View Info
                             </button>
                             <button
                               onClick={() => setDeleteTarget(sub)}
@@ -900,12 +919,26 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-brand-accent/40 pt-3">
+                    <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t-2 border-brand-accent/40 pt-3">
+                      <button
+                        onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                        title={sub.manuscript_file || 'Paper PDF'}
+                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View Paper
+                      </button>
+                      <button
+                        onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                        title={sub.plagiarism_file || 'Plagiarism report'}
+                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View Report
+                      </button>
                       <button
                         onClick={() => setMoreInfoTarget(sub)}
                         className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                       >
-                        <Eye className="w-3.5 h-3.5" /> More Info
+                        <Eye className="w-3.5 h-3.5" /> View Info
                       </button>
                       <button
                         onClick={() => setDeleteTarget(sub)}
@@ -1091,7 +1124,7 @@ export default function App() {
                           onClick={() => setMoreInfoTarget(sub)}
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 text-brand-text text-sm font-medium border border-brand-text/10 rounded-lg hover:bg-brand-text/5 transition-colors"
                         >
-                          <Eye className="w-4 h-4" /> More Info
+                          <Eye className="w-4 h-4" /> View Info
                         </button>
                       </div>
                     </div>

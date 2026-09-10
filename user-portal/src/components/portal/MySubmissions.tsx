@@ -123,16 +123,16 @@ export function MySubmissions({ getToken, onBack, onStart }: MySubmissionsProps)
           {subs.map((sub) => (
             <div
               key={sub.id}
-              className="bg-brand-card rounded-2xl p-6 shadow-xl border border-brand-text/5"
+              className="bg-white rounded-2xl p-6 shadow-xl border-2 border-yellow-400 text-black"
             >
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div className="flex items-start gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm shrink-0 mt-1">
-                    <FileText className="w-5 h-5 text-brand-accent" />
+                  <div className="w-10 h-10 rounded-full bg-yellow-50 border border-yellow-200 flex items-center justify-center shadow-sm shrink-0 mt-1">
+                    <FileText className="w-5 h-5 text-yellow-600" />
                   </div>
                   <div className="min-w-0">
-                    <h3 className="font-serif text-lg font-bold leading-snug">{sub.title}</h3>
-                    <div className="text-sm text-brand-text/60 mt-1">
+                    <h3 className="font-serif text-lg font-bold leading-snug text-black">{sub.title}</h3>
+                    <div className="text-sm text-black/70 mt-1">
                       {sub.submission_code}
                       {sub.paper_id ? ` · CMT ID: ${sub.paper_id}` : ''}
                       {sub.author_count ? ` · Authors: ${sub.author_count}` : ''}
@@ -140,18 +140,18 @@ export function MySubmissions({ getToken, onBack, onStart }: MySubmissionsProps)
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
-                  <span className="text-xs text-brand-text/50">{formatDate(sub.created_at)}</span>
+                  <span className="text-xs text-black/60">{formatDate(sub.created_at)}</span>
                   {statusBadge(sub.status)}
                 </div>
               </div>
 
               {sub.abstract && (
-                <p className="text-sm text-brand-text/70 mt-4 leading-relaxed line-clamp-3">{sub.abstract}</p>
+                <p className="text-sm text-black/80 mt-4 leading-relaxed line-clamp-3">{sub.abstract}</p>
               )}
 
-              <div className="mt-4 flex items-center justify-between gap-3 border-t border-brand-text/10 pt-4">
-                <span className="text-sm text-brand-text/60 capitalize">{sub.track?.replace(/-/g, ' ')}</span>
-                <span className="text-xs text-brand-text/50">{sub.author_count} {sub.author_count === 1 ? 'author' : 'authors'}</span>
+              <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/10 pt-4">
+                <span className="text-sm text-black/80 capitalize">{sub.track?.replace(/-/g, ' ')}</span>
+                <span className="text-xs text-black/60">{sub.author_count} {sub.author_count === 1 ? 'author' : 'authors'}</span>
               </div>
             </div>
           ))}
