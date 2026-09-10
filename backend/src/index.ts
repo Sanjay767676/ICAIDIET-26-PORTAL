@@ -424,15 +424,15 @@ app.get('/api/users/me', requireClerkAuth, async (c) => {
       hasProfile: isProfileComplete(profile),
       profile: profile
         ? {
-            id: profile.profile_id,
-            user_id: profile.user_id,
-            name: profile.name || '',
-            email: profile.email || clerkEmail,
-            institution: profile.institution || '',
-            department: profile.department || '',
-            country: profile.country || '',
-            phone: profile.phone || '',
-          }
+          id: profile.profile_id,
+          user_id: profile.user_id,
+          name: profile.name || '',
+          email: profile.email || clerkEmail,
+          institution: profile.institution || '',
+          department: profile.department || '',
+          country: profile.country || '',
+          phone: profile.phone || '',
+        }
         : null,
     });
   } catch (error) {
@@ -679,12 +679,12 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
       const authorRows = hasAuthors
         ? authors
         : [{
-            first_name: authorName.split(' ').slice(0, -1).join(' ') || authorName.split(' ')[0] || '',
-            last_name: authorName.split(' ').slice(-1)[0] || '',
-            phone: '',
-            email: authorEmail,
-            college: '',
-          }];
+          first_name: authorName.split(' ').slice(0, -1).join(' ') || authorName.split(' ')[0] || '',
+          last_name: authorName.split(' ').slice(-1)[0] || '',
+          phone: '',
+          email: authorEmail,
+          college: '',
+        }];
 
       authorRows.forEach((a, idx) => {
         batchStatements.push(
@@ -717,7 +717,7 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
     } catch (dbError) {
       // Best-effort cleanup of any uploaded file(s) if the DB write failed.
       for (const k of uploadedKeys) {
-        await c.env.BUCKET.delete(k).catch(() => {});
+        await c.env.BUCKET.delete(k).catch(() => { });
       }
       console.error('Submission DB error:', dbError);
       return c.json({ success: false, error: 'Could not save your submission. Please try again.' }, 500);
@@ -1061,7 +1061,7 @@ async function purgeExpiredDeleted(env: Bindings) {
 
     for (const f of (fileRes.results as any[] || [])) {
       if (f && f.storage_key) {
-        await env.BUCKET.delete(f.storage_key).catch(() => {});
+        await env.BUCKET.delete(f.storage_key).catch(() => { });
       }
     }
   } catch (error) {
