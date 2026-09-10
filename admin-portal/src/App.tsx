@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, RefreshCw, LogOut, Download } from 'lucide-react';
+import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -52,6 +52,59 @@ interface PortalUser {
   submission_count: number;
 }
 
+function statusBadge(status: string) {
+  const cls =
+    status === 'ACCEPTED'
+      ? 'bg-green-100 text-green-800'
+      : status === 'REJECTED'
+        ? 'bg-red-100 text-red-800'
+        : status === 'UNDER_REVIEW'
+          ? 'bg-blue-100 text-blue-800'
+          : status === 'REVISION_REQUIRED'
+            ? 'bg-purple-100 text-purple-800'
+            : 'bg-amber-100 text-amber-800';
+  return (
+    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}>
+      {(status || 'SUBMITTED').replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+function formatDate(iso: string) {
+  if (!iso) return '';
+  const d = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
+  return isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+function primaryAuthorLines(sub: Submission) {
+  const primary = (sub.authors || []).find((a) => a.is_primary === 1);
+  if (primary) {
+    return (
+      <>
+        <div className="font-medium text-brand-text break-words">
+          {primary.first_name || '—'}
+        </div>
+        <div className="flex items-center gap-1.5 text-xs text-brand-text/60 font-normal mt-0.5 break-words">
+          {primary.phone && (
+            <span className="inline-flex items-center gap-1">
+              <Phone className="w-3 h-3 shrink-0" /> {primary.phone}
+            </span>
+          )}
+        </div>
+        <div className="text-xs text-brand-text/60 font-normal break-words">{primary.email || ''}</div>
+      </>
+    );
+  }
+  const fallbackName = (sub.author_name || '').trim();
+  const firstName = fallbackName.split(' ')[0] || 'N/A';
+  return (
+    <>
+      <div className="font-medium text-brand-text break-words">{firstName}</div>
+      <div className="text-xs text-brand-text/60 font-normal break-words">{sub.author_email || ''}</div>
+    </>
+  );
+}
+
 // ------------------------------------------------------------------
 // Login screen (hardcoded admin auth against backend)
 // ------------------------------------------------------------------
@@ -89,16 +142,17 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
   };
 
   return (
-    <div className="flex-1 flex items-center justify-center p-4 py-20">
-      <div className="bg-brand-card w-full max-w-md rounded-2xl p-8 shadow-xl border border-brand-text/5">
+    <div className="flex-1 flex items-center justify-center px-4 py-12 sm:py-20">
+      <div className="bg-brand-card w-full max-w-md rounded-2xl p-6 sm:p-8 shadow-xl border border-brand-text/5">
         <div className="text-center mb-8">
-          <h2 className="font-serif text-3xl font-bold mb-2">Admin portal</h2>
+          <h2 className="font-serif text-2xl sm:text-3xl font-bold mb-2">Admin Portal</h2>
+          <p className="text-brand-text/60 text-sm">Sign in to manage ICAIDIET'26 submissions</p>
         </div>
 
         {error && (
           <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
             <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4" /> {error}
+              <AlertCircle className="w-4 h-4 shrink-0" /> {error}
             </div>
           </div>
         )}
@@ -111,7 +165,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+              className="w-full px-4 py-2 rounded-lg bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
               placeholder="Enter Your username"
             />
           </div>
@@ -122,14 +176,14 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
               autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-4 py-2 rounded-lg bg-white/90 border-transparent focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+              className="w-full px-4 py-2 rounded-lg bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
               placeholder="Enter Your Password"
             />
           </div>
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-brand-accent text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 hover:shadow-lg hover:-translate-y-0.5 transition-all mt-6 disabled:opacity-50 disabled:hover:translate-y-0"
+            className="w-full bg-brand-text text-white py-2.5 rounded-lg font-medium hover:bg-brand-accent hover:-translate-y-0.5 hover:shadow-lg transition-all mt-6 disabled:opacity-50 disabled:hover:translate-y-0"
           >
             {loading ? 'Signing in...' : 'Sign In'}
           </button>
@@ -183,10 +237,10 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-4xl h-[85vh] flex flex-col bg-white rounded-2xl overflow-hidden shadow-2xl border border-stone-200">
-        <div className="flex items-center justify-between px-5 py-3 bg-stone-900 text-white">
+      <div className="relative w-full max-w-4xl h-[90vh] sm:h-[85vh] flex flex-col bg-brand-card rounded-2xl overflow-hidden shadow-2xl border border-brand-text/10">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 bg-brand-text text-white">
           <div className="flex items-center gap-2 min-w-0">
             <Eye className="w-4 h-4 shrink-0" />
             <span className="font-medium truncate">
@@ -216,7 +270,7 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
             </button>
           </div>
         </div>
-        <div className="flex-1 bg-stone-100 relative">
+        <div className="flex-1 bg-white relative">
           {error ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-red-600 bg-red-50 border border-red-200 px-5 py-3 rounded-lg text-sm">
@@ -226,6 +280,64 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
           ) : (
             <iframe ref={frameRef} title="Manuscript" className="w-full h-full" />
           )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// Confirm dialog for destructive actions (e.g. delete a submission)
+// ------------------------------------------------------------------
+function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel = 'Delete',
+  busy = false,
+  error,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  message: string;
+  confirmLabel?: string;
+  busy?: boolean;
+  error?: string | null;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={busy ? undefined : onCancel} />
+      <div className="relative w-full max-w-md rounded-2xl p-6 sm:p-8 bg-brand-card shadow-2xl border border-brand-text/10 text-center">
+        <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+          <Trash2 className="w-7 h-7" />
+        </div>
+        <h2 className="font-serif text-2xl font-bold mb-2">{title}</h2>
+        <p className="text-brand-text/70 text-sm mb-6 whitespace-pre-line">{message}</p>
+        {error && (
+          <div className="flex items-center gap-2 bg-red-50 text-red-600 p-3 rounded-xl mb-4 text-xs text-left border border-red-200">
+            <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+          </div>
+        )}
+        <div className="flex flex-col-reverse sm:flex-row gap-3">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="flex-1 py-3 rounded-xl font-medium text-brand-text hover:bg-brand-text/5 transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex-1 py-3 rounded-xl font-medium bg-red-600 text-white hover:bg-red-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />} {confirmLabel}
+          </button>
         </div>
       </div>
     </div>
@@ -245,6 +357,9 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
+  const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleLogin = (newToken: string, email: string) => {
     setToken(newToken);
@@ -336,56 +451,93 @@ export default function App() {
     setPdfView({ open: false, url: undefined, filename: undefined, kind: undefined, error: undefined });
   };
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${deleteTarget.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to delete submission.');
+      }
+      setSubmissions((prev) => prev.filter((s) => s.id !== deleteTarget.id));
+      setStats((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+      setDeleteTarget(null);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : 'Failed to delete submission.');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const authButtons = (
+    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
+      <span className="text-xs sm:text-sm text-brand-text/60 truncate max-w-[45vw] sm:max-w-none">{adminEmail}</span>
+      <button
+        onClick={handleLogout}
+        className="flex items-center gap-1.5 text-sm font-medium text-brand-text/70 hover:text-brand-text transition-colors whitespace-nowrap"
+      >
+        <LogOut className="w-4 h-4" /> Sign Out
+      </button>
+    </div>
+  );
+
   if (!token) {
     return (
       <div className="min-h-screen flex flex-col font-sans text-brand-text bg-brand-bg">
         <div className="flex-1 flex flex-col">
-          <header className="border-b border-brand-text/10 bg-[#fdf08a]">
-            <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-              <h1 className="font-serif font-bold text-xl tracking-tight">ADMIN of ICAIDIET'26
-              </h1>
+          <header className="border-b border-brand-text/10 bg-brand-bg/80 backdrop-blur-md">
+            <div className="container mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+              <h1 className="font-serif font-bold text-xl tracking-tight">Admin of ICAIDIET'26</h1>
             </div>
           </header>
           <LoginScreen onLogin={handleLogin} />
+          <footer className="bg-brand-footer text-white py-6">
+            <div className="container mx-auto px-4 sm:px-6">
+              <p className="text-white/60 text-xs text-center">
+                &copy; 2026 ICAIDIET. All rights reserved.
+              </p>
+            </div>
+          </footer>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col font-sans text-brand-text bg-stone-100">
-      <header className="bg-white border-b border-stone-200 sticky top-0 z-10">
-        <div className="container mx-auto px-6 h-16 flex items-center justify-between">
-          <h1 className="font-serif font-bold text-2xl tracking-tight">ICAIDIET'26 Admin</h1>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-stone-500">{adminEmail}</span>
-            <button
-              onClick={handleLogout}
-              className="flex items-center gap-1.5 text-sm font-medium text-stone-600 hover:text-stone-900 transition-colors"
-            >
-              <LogOut className="w-4 h-4" /> Sign Out
-            </button>
-          </div>
+    <div className="min-h-screen flex flex-col font-sans text-brand-text bg-brand-bg">
+      <header className="bg-brand-bg/80 backdrop-blur-md border-b border-brand-text/10 sticky top-0 z-10">
+        <div className="container mx-auto px-4 sm:px-6 h-16 flex flex-wrap items-center justify-between gap-2">
+          <h1 className="font-serif font-bold text-lg sm:text-2xl tracking-tight">ICAIDIET'26 Admin</h1>
+          {authButtons}
         </div>
       </header>
 
-      <main className="container mx-auto px-6 py-8">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-          <div>
-            <h2 className="text-3xl font-bold font-serif mb-2">Admin Dashboard</h2>
-            <div className="flex items-center gap-2">
+      <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
+          <div className="min-w-0">
+            <h2 className="text-2xl sm:text-3xl font-bold font-serif mb-3 md:mb-2">Admin Dashboard</h2>
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
               <button
                 onClick={() => setActiveTab('submissions')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeTab === 'submissions' ? 'bg-stone-900 text-white' : 'bg-white text-stone-700 hover:bg-stone-100'
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                  activeTab === 'submissions' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                 }`}
               >
                 Submissions
               </button>
               <button
                 onClick={() => setActiveTab('users')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  activeTab === 'users' ? 'bg-stone-900 text-white' : 'bg-white text-stone-700 hover:bg-stone-100'
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                  activeTab === 'users' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                 }`}
               >
                 Users
@@ -398,7 +550,7 @@ export default function App() {
               fetchUsers();
             }}
             disabled={loading}
-            className="px-4 py-2 bg-stone-900 text-white rounded-lg text-sm font-medium hover:bg-stone-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+            className="w-full sm:w-auto px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
           </button>
@@ -406,197 +558,309 @@ export default function App() {
 
         {activeTab === 'submissions' && (
           <>
-        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-4 mb-6">
-          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
-            <div className="text-3xl font-bold font-serif">{stats.total}</div>
-            <div className="text-sm text-stone-500 mt-1">Total</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
-            <div className="text-3xl font-bold font-serif text-amber-600">{stats.submitted}</div>
-            <div className="text-sm text-stone-500 mt-1">Submitted</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
-            <div className="text-3xl font-bold font-serif text-green-600">{stats.accepted}</div>
-            <div className="text-sm text-stone-500 mt-1">Accepted</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
-            <div className="text-3xl font-bold font-serif text-red-600">{stats.rejected}</div>
-            <div className="text-sm text-stone-500 mt-1">Rejected</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
-            <div className="text-3xl font-bold font-serif text-blue-600">{stats.underReview}</div>
-            <div className="text-sm text-stone-500 mt-1">Under Review</div>
-          </div>
-          <div className="bg-white rounded-xl shadow-sm border border-stone-200 p-4">
-            <div className="text-3xl font-bold font-serif text-purple-600">{stats.revisionRequired}</div>
-            <div className="text-sm text-stone-500 mt-1">Revision Required</div>
-          </div>
-        </div>
-
-        {error && (
-          <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
-            <div className="flex items-center gap-2">
-              <AlertCircle className="w-4 h-4" /> Error loading submissions: {error}
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 mb-6">
+              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
+                <div className="text-2xl sm:text-3xl font-bold font-serif">{stats.total}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Total</div>
+              </div>
+              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
+                <div className="text-2xl sm:text-3xl font-bold font-serif text-amber-700">{stats.submitted}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Submitted</div>
+              </div>
+              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
+                <div className="text-2xl sm:text-3xl font-bold font-serif text-green-700">{stats.accepted}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Accepted</div>
+              </div>
+              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
+                <div className="text-2xl sm:text-3xl font-bold font-serif text-red-700">{stats.rejected}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Rejected</div>
+              </div>
+              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
+                <div className="text-2xl sm:text-3xl font-bold font-serif text-blue-700">{stats.underReview}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Under Review</div>
+              </div>
+              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
+                <div className="text-2xl sm:text-3xl font-bold font-serif text-purple-700">{stats.revisionRequired}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Revision Required</div>
+              </div>
             </div>
-          </div>
-        )}
 
-        <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-stone-50 border-b border-stone-200">
-                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Paper</th>
-                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">CMT Paper ID</th>
-                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Track</th>
-                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Primary Author</th>
-                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Status</th>
-                <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-stone-200">
+            {error && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> Error loading submissions: {error}
+                </div>
+              </div>
+            )}
+
+            {/* Desktop table */}
+            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent overflow-hidden">
+              <table className="w-full text-left border-collapse table-fixed">
+                <thead>
+                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Paper ID</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[24%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Track</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Status</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[19%]">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-accent/40">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                    </tr>
+                  ) : submissions.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-brand-text/60">No submissions found.</td>
+                    </tr>
+                  ) : (
+                    submissions.map((sub) => (
+                      <tr key={sub.id} className="hover:bg-brand-bg/40 transition-colors">
+                        <td className="py-4 px-5 align-top">
+                          <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                          <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
+                        </td>
+                        <td className="py-4 px-5 align-top">
+                          <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                          {sub.abstract && (
+                            <div className="text-xs text-brand-text/50 font-normal mt-1 line-clamp-2 break-words">
+                              {sub.abstract}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
+                        <td className="py-4 px-5 align-top">
+                          {primaryAuthorLines(sub)}
+                        </td>
+                        <td className="py-4 px-5 align-top">
+                          {statusBadge(sub.status)}
+                        </td>
+                        <td className="py-4 px-5 align-top">
+                          <div className="flex flex-col items-start gap-2">
+                            <button
+                              onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                              title={sub.manuscript_file || 'Paper PDF'}
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                            >
+                              <Eye className="w-4 h-4" /> View Paper
+                            </button>
+                            <button
+                              onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                              title={sub.plagiarism_file || 'Plagiarism report'}
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                            >
+                              <Eye className="w-4 h-4" /> Plagiarism Report
+                            </button>
+                            <button
+                              onClick={() => setDeleteTarget(sub)}
+                              className="inline-flex items-center gap-1.5 text-red-600 font-medium text-sm hover:text-red-700 hover:underline"
+                            >
+                              <Trash2 className="w-4 h-4" /> Delete
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="space-y-4 lg:hidden">
               {loading ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-stone-500">Loading submissions...</td>
-                </tr>
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  Loading submissions...
+                </div>
               ) : submissions.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-stone-500">No submissions found.</td>
-                </tr>
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  No submissions found.
+                </div>
               ) : (
                 submissions.map((sub) => (
-                  <tr key={sub.id} className="hover:bg-stone-50 transition-colors">
-                    <td className="py-4 px-6 font-medium text-stone-900">
-                      {sub.title}
-                      <div className="text-xs text-stone-500 font-normal mt-0.5">{sub.submission_code}</div>
-                      {sub.abstract && (
-                        <div className="text-xs text-stone-400 font-normal mt-1 line-clamp-2 max-w-xs">
-                          {sub.abstract}
-                        </div>
-                      )}
-                    </td>
-                    <td className="py-4 px-6 text-sm text-stone-600">{sub.paper_id || '—'}</td>
-                    <td className="py-4 px-6 text-sm text-stone-600">{sub.track || '—'}</td>
-                    <td className="py-4 px-6 text-sm text-stone-600">
-                      {sub.authors && sub.authors.length > 0 ? (
-                        <div className="space-y-2">
-                          {sub.authors.map((a) => (
-                            <div key={a.id}>
-                              <div className="flex items-center gap-1.5 font-medium text-stone-800">
-                                {a.is_primary === 1 && (
-                                  <span className="text-[10px] bg-brand-accent/10 text-brand-accent px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide">
-                                    Primary
-                                  </span>
-                                )}
-                                {a.first_name} {a.last_name}
-                              </div>
-                              <div className="text-xs text-stone-500 font-normal">
-                                {a.email}
-                                {a.phone ? ` · ${a.phone}` : ''}
-                                <br />
-                                {a.college}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <>
-                          {sub.author_name || 'N/A'}
-                          {sub.author_email && (
-                            <div className="text-xs text-stone-400 font-normal">{sub.author_email}</div>
-                          )}
-                        </>
-                      )}
-                    </td>
-                    <td className="py-4 px-6">
-                      <span
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium ${sub.status === 'ACCEPTED'
-                          ? 'bg-green-100 text-green-800'
-                          : sub.status === 'REJECTED'
-                            ? 'bg-red-100 text-red-800'
-                            : sub.status === 'UNDER_REVIEW'
-                              ? 'bg-blue-100 text-blue-800'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                      >
-                        {sub.status || 'SUBMITTED'}
-                      </span>
-                    </td>
-                    <td className="py-4 px-6 text-right">
-                      <div className="flex items-center justify-end gap-3">
-                        <button
-                          onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
-                          title={sub.manuscript_file || 'Paper PDF'}
-                          className="inline-flex items-center gap-1.5 text-stone-900 font-medium text-sm hover:underline"
-                        >
-                          <Eye className="w-4 h-4" /> View Paper
-                        </button>
-                        <button
-                          onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                          title={sub.plagiarism_file || 'Plagiarism report'}
-                          className="inline-flex items-center gap-1.5 text-brand-accent font-medium text-sm hover:underline"
-                        >
-                          <Eye className="w-4 h-4" /> Plagiarism Report
-                        </button>
+                  <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
+                        <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                        <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
                       </div>
-                    </td>
-                  </tr>
+                      {statusBadge(sub.status)}
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
+                      <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
+                        <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
+                        <div className="text-brand-text/90">{primaryAuthorLines(sub)}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2 border-t-2 border-brand-accent/40 pt-3">
+                      <button
+                        onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                        title={sub.manuscript_file || 'Paper PDF'}
+                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View Paper
+                      </button>
+                      <button
+                        onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                        title={sub.plagiarism_file || 'Plagiarism report'}
+                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> Plagiarism Report
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget(sub)}
+                        className="flex items-center gap-1.5 text-red-600 font-medium text-xs hover:text-red-700 hover:underline"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" /> Delete
+                      </button>
+                    </div>
+                  </div>
                 ))
               )}
-            </tbody>
-          </table>
-        </div>
+            </div>
           </>
         )}
 
         {activeTab === 'users' && (
-          <div className="bg-white rounded-xl shadow-sm border border-stone-200 overflow-hidden">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-stone-50 border-b border-stone-200">
-                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">User</th>
-                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Institution</th>
-                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Department</th>
-                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Country</th>
-                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider">Phone</th>
-                  <th className="py-4 px-6 font-medium text-sm text-stone-500 uppercase tracking-wider text-center">Submissions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-stone-200">
-                {users.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="py-8 text-center text-stone-500">
-                      {loading ? 'Loading users...' : 'No registered users yet.'}
-                    </td>
+          <>
+            {/* Desktop table */}
+            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent overflow-hidden">
+              <table className="w-full text-left border-collapse table-fixed">
+                <thead>
+                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[22%]">User</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[20%]">Institution</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Department</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Country</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Phone</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] text-center">Submissions</th>
                   </tr>
-                ) : (
-                  users.map((u) => (
-                    <tr key={u.id} className="hover:bg-stone-50 transition-colors">
-                      <td className="py-4 px-6">
-                        <div className="font-medium text-stone-900">{u.name || '—'}</div>
-                        <div className="text-xs text-stone-500 font-normal mt-0.5">{u.email}</div>
-                        {u.role === 'ADMIN' && (
-                          <span className="inline-block text-[10px] bg-stone-900 text-white px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide mt-1">
-                            Admin
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-4 px-6 text-sm text-stone-600">{u.institution || '—'}</td>
-                      <td className="py-4 px-6 text-sm text-stone-600">{u.department || '—'}</td>
-                      <td className="py-4 px-6 text-sm text-stone-600">{u.country || '—'}</td>
-                      <td className="py-4 px-6 text-sm text-stone-600">{u.phone || '—'}</td>
-                      <td className="py-4 px-6 text-sm text-stone-600 text-center">
-                        {u.submission_count || 0}
+                </thead>
+                <tbody className="divide-y divide-brand-accent/40">
+                  {users.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-brand-text/60">
+                        {loading ? 'Loading users...' : 'No registered users yet.'}
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ) : (
+                    users.map((u) => (
+                      <tr key={u.id} className="hover:bg-brand-bg/40 transition-colors">
+                        <td className="py-4 px-5">
+                          <div className="font-medium text-brand-text break-words">{u.name || '—'}</div>
+                          <div className="text-xs text-brand-text/60 font-normal mt-0.5 break-words">{u.email}</div>
+                          {u.role === 'ADMIN' && (
+                            <span className="inline-block text-[10px] bg-brand-text text-white px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide mt-1">
+                              Admin
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.institution || '—'}</td>
+                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.department || '—'}</td>
+                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.country || '—'}</td>
+                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.phone || '—'}</td>
+                        <td className="py-4 px-5 text-sm text-brand-text/70 text-center">
+                          {u.submission_count || 0}
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="space-y-4 lg:hidden">
+              {users.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  {loading ? 'Loading users...' : 'No registered users yet.'}
+                </div>
+              ) : (
+                users.map((u) => (
+                  <div key={u.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-semibold text-brand-text break-words">{u.name || '—'}</div>
+                        <div className="text-xs text-brand-text/60 mt-0.5 break-words">{u.email}</div>
+                      </div>
+                      {u.role === 'ADMIN' && (
+                        <span className="inline-block text-[10px] bg-brand-text text-white px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide shrink-0">
+                          Admin
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                      <div>
+                        <div className="text-xs text-brand-text/60">Institution</div>
+                        <div className="font-medium break-words">{u.institution || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-brand-text/60">Department</div>
+                        <div className="font-medium break-words">{u.department || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-brand-text/60">Country</div>
+                        <div className="font-medium">{u.country || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-brand-text/60">Phone</div>
+                        <div className="font-medium break-words">{u.phone || '—'}</div>
+                      </div>
+                    </div>
+                    <div className="mt-3 flex items-center justify-between border-t-2 border-brand-accent/40 pt-3">
+                      <span className="text-xs text-brand-text/60">Submissions</span>
+                      <span className="font-bold text-lg">{u.submission_count || 0}</span>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
         )}
       </main>
 
+      <footer className="bg-brand-footer text-white py-6 mt-auto">
+        <div className="container mx-auto px-4 sm:px-6">
+          <p className="text-white/60 text-xs text-center">
+            &copy; 2026 ICAIDIET. All rights reserved.
+          </p>
+        </div>
+      </footer>
+
       {pdfView.open && pdfView.url && <PdfViewer file={pdfView} token={token} onClose={closePdf} />}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        title="Delete Submission?"
+        message={
+          deleteTarget
+            ? `This will permanently delete "${deleteTarget.paper_id || deleteTarget.submission_code}" — ${deleteTarget.title}.\n\nAuthors, file records and uploaded PDFs will be removed. This action cannot be undone.`
+            : ''
+        }
+        busy={deleting}
+        error={deleteError}
+        onConfirm={confirmDelete}
+        onCancel={() => {
+          if (!deleting) {
+            setDeleteTarget(null);
+            setDeleteError(null);
+          }
+        }}
+      />
     </div>
   );
 }

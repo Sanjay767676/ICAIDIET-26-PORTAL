@@ -10,18 +10,18 @@ export function HeroSection({ onStart }: { onStart: () => void }) {
       <div className="w-full bg-[#000000] border-y border-[#000000] py-2.5 overflow-hidden z-40">
         <div className="flex w-max animate-marquee items-center gap-12 px-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="flex items-center gap-12 whitespace-nowrap">
-              <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-[16px] md:text-xs[6px]">Publishing Partner</span>
-              <img src={wileyLogo} alt="Wiley" className="h-10 md:h-12 object-contain" />
+            <div key={i} className="flex items-center gap-6 sm:gap-12 whitespace-nowrap">
+              <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-xs sm:text-sm md:text-xs">Publishing Partner</span>
+              <img src={wileyLogo} alt="Wiley" className="h-8 sm:h-10 md:h-12 object-contain" />
               <span className="text-[#FFFFFF]">|</span>
-              <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-[16px] md:text-xs[6px]">Indexed In</span>
-              <img src={scopusLogo} alt="Scopus" className="h-10 md:h-12 object-contain" />
+              <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-xs sm:text-sm md:text-xs">Indexed In</span>
+              <img src={scopusLogo} alt="Scopus" className="h-8 sm:h-10 md:h-12 object-contain" />
               <span className="text-[#FFFFFF]">|</span>
-              <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-[16px] md:text-xs[6px]">November 20<sup className="lowercase">th</sup> & 21<sup className="lowercase">st</sup> 2026</span>
+              <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-xs sm:text-sm md:text-xs">November 20<sup className="lowercase">th</sup> & 21<sup className="lowercase">st</sup> 2026</span>
               <span className="text-[#FFFFFF]">|</span>
               <div className="flex items-center gap-2">
-                <img src={snsctLogo} alt="SNSCT" className="h-6 md:h-8 object-contain" />
-                <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-[16px] md:text-xs[6px]">SNS College Of Technology</span>
+                <img src={snsctLogo} alt="SNSCT" className="h-5 sm:h-6 md:h-8 object-contain" />
+                <span className="text-[#FFFFFF] font-times font-semi-bold uppercase tracking-widest text-xs sm:text-sm md:text-xs">SNS College Of Technology</span>
               </div>
               <span className="text-[#FFFFFF]">|</span>
             </div>

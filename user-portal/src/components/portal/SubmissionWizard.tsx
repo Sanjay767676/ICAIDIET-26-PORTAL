@@ -334,24 +334,24 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
 
   return (
     <div className="container mx-auto px-4 py-12 max-w-4xl">
-      <div className="mb-12 flex items-start justify-between">
+<div className="mb-12 flex items-start justify-between">
         <div>
-          <h1 className="text-4xl font-serif font-bold mb-4">Submit Your Paper</h1>
-          <p className="text-brand-text/70 text-lg">
+          <h1 className="text-3xl sm:text-4xl font-serif font-bold mb-4">Submit Your Paper</h1>
+          <p className="text-brand-text/70 text-base sm:text-lg">
             Complete the steps below to submit your research to ICAIDIET'26.
           </p>
         </div>
       </div>
 
-      <div className="flex gap-4 mb-8">
+      <div className="flex gap-2 sm:gap-4 mb-8">
         {[1, 2, 3].map((num) => (
-          <div key={num} className="flex-1">
+          <div key={num} className="flex-1 min-w-0">
             <div
               className={`h-2 rounded-full mb-2 transition-colors ${step >= num ? 'bg-brand-text' : 'bg-brand-text/10'
                 }`}
             />
             <span
-              className={`text-sm font-medium ${step >= num ? 'text-brand-text' : 'text-brand-text/40'
+              className={`text-xs sm:text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis ${step >= num ? 'text-brand-text' : 'text-brand-text/40'
                 }`}
             >
               Step {num}: {stepLabel(num)}
@@ -360,8 +360,8 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
         ))}
       </div>
 
-      <div className="bg-brand-card rounded-2xl p-8 shadow-xl border border-brand-text/5">
-        <form onSubmit={handleNext}>
+      <div className="bg-brand-card rounded-2xl p-4 sm:p-8 shadow-xl border border-brand-text/5">
+  <form onSubmit={handleNext}>` will also be modified.
           {step === 1 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h2 className="text-2xl font-serif font-bold mb-6 flex items-center gap-2">
@@ -562,7 +562,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
 
               <div
                 onClick={() => fileInputRef.current?.click()}
-                className={`border-2 border-dashed rounded-2xl p-12 text-center transition-colors cursor-pointer group shadow-sm ${file
+                className={`border-2 border-dashed rounded-2xl p-8 sm:p-12 text-center transition-colors cursor-pointer group shadow-sm ${file
                   ? 'border-green-500 bg-green-50'
                   : 'border-stone-300 bg-white hover:bg-stone-50'
                   }`}
@@ -597,8 +597,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
                   Plagiarism Report
                 </h3>
                 <p className="text-sm text-brand-text/60 mb-3">
-                  Upload the plagiarism/verification report for this paper (e.g. Turnitin/iThenticate). PDF only.
-                </p>
+                  Upload the plagiarism/verification report for your paper PDF only</p>
                 <div
                   onClick={() => plagiarismInputRef.current?.click()}
                   className={`border-2 border-dashed rounded-2xl p-8 text-center transition-colors cursor-pointer group shadow-sm ${plagiarismFile

@@ -51,7 +51,7 @@ function corsOrigins(c: any): string[] {
 
 app.use('*', (c, next) => {
   const origin = corsOrigins(c);
-  return cors({ origin, allowMethods: ['GET', 'POST', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'], maxAge: 86400 })(c, next);
+  return cors({ origin, allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'], maxAge: 86400 })(c, next);
 });
 
 // ------------------------------------------------------------------
@@ -856,6 +856,53 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     return c.json({ success: true, submissions: results as any[] });
   } catch (error) {
     console.error('Fetch my submissions error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Delete a submission (requires admin Bearer token)
+// Removes the submission, its authors and file rows, and the R2 objects.
+// ------------------------------------------------------------------
+app.delete('/api/admin/submissions/:id', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const submissionId = c.req.param('id');
+
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM submissions WHERE id = ?`
+    ).bind(submissionId).first();
+    if (!existing) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    const fileRes = await c.env.DB.prepare(
+      `SELECT storage_key FROM submission_files WHERE submission_id = ?`
+    ).bind(submissionId).all();
+
+    await c.env.DB.batch([
+      c.env.DB.prepare(`DELETE FROM authors WHERE submission_id = ?`).bind(submissionId),
+      c.env.DB.prepare(`DELETE FROM submission_files WHERE submission_id = ?`).bind(submissionId),
+      c.env.DB.prepare(`DELETE FROM submissions WHERE id = ?`).bind(submissionId),
+    ]);
+
+    for (const f of (fileRes.results as any[] || [])) {
+      if (f && f.storage_key) {
+        await c.env.BUCKET.delete(f.storage_key).catch(() => {});
+      }
+    }
+
+    return c.json({ success: true, message: 'Submission deleted successfully.' });
+  } catch (error) {
+    console.error('Delete submission error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
