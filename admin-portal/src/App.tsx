@@ -483,7 +483,7 @@ function MoreInfoModal({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'users' | 'deleted'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'users' | 'deleted' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -497,6 +497,8 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
+  const [savingSettings, setSavingSettings] = useState<boolean>(false);
 
   const handleLogin = (newToken: string, email: string) => {
     setToken(newToken);
@@ -533,6 +535,43 @@ export default function App() {
       setUsers(data.users || []);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load users.');
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/settings`);
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        setMaintenanceMode(data.settings?.maintenance_mode === 'true');
+      }
+    } catch (err) {
+      console.error('Failed to load settings:', err);
+    }
+  };
+
+  const toggleMaintenanceMode = async () => {
+    setSavingSettings(true);
+    const newValue = !maintenanceMode;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ maintenance_mode: newValue })
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        setMaintenanceMode(newValue);
+      } else {
+        throw new Error(data?.error || 'Failed to update settings');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update settings.');
+    } finally {
+      setSavingSettings(false);
     }
   };
 
@@ -621,6 +660,7 @@ export default function App() {
       fetchSubmissions();
       fetchDeletedSubmissions();
       fetchUsers();
+      fetchSettings();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -722,14 +762,7 @@ export default function App() {
               >
                 Submissions
               </button>
-              <button
-                onClick={() => setActiveTab('users')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeTab === 'users' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                }`}
-              >
-                Users
-              </button>
+
               <button
                 onClick={() => setActiveTab('deleted')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
@@ -743,6 +776,14 @@ export default function App() {
                   </span>
                 )}
               </button>
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
+                  activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                }`}
+              >
+                Settings
+              </button>
             </div>
           </div>
           <button
@@ -750,6 +791,7 @@ export default function App() {
               fetchSubmissions();
               fetchDeletedSubmissions();
               fetchUsers();
+              fetchSettings();
             }}
             disabled={loading || deletedLoading}
             className="w-full sm:w-auto px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow"
@@ -820,7 +862,7 @@ export default function App() {
                     </tr>
                   ) : (
                     submissions.map((sub) => (
-                      <tr key={sub.id} className="hover:bg-brand-bg/40 transition-colors">
+                      <tr key={sub.id} className="bg-white">
                         <td className="py-4 px-5 align-top">
                           <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                           <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
@@ -954,102 +996,7 @@ export default function App() {
           </>
         )}
 
-        {activeTab === 'users' && (
-          <>
-            {/* Desktop table */}
-            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent overflow-hidden">
-              <table className="w-full text-left border-collapse table-fixed">
-                <thead>
-                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[22%]">User</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[20%]">Institution</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Department</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Country</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Phone</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] text-center">Submissions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-brand-accent/40">
-                  {users.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="py-8 text-center text-brand-text/60">
-                        {loading ? 'Loading users...' : 'No registered users yet.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    users.map((u) => (
-                      <tr key={u.id} className="hover:bg-brand-bg/40 transition-colors">
-                        <td className="py-4 px-5">
-                          <div className="font-medium text-brand-text break-words">{u.name || '—'}</div>
-                          <div className="text-xs text-brand-text/60 font-normal mt-0.5 break-words">{u.email}</div>
-                          {u.role === 'ADMIN' && (
-                            <span className="inline-block text-[10px] bg-brand-text text-white px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide mt-1">
-                              Admin
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.institution || '—'}</td>
-                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.department || '—'}</td>
-                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.country || '—'}</td>
-                        <td className="py-4 px-5 text-sm text-brand-text/70 break-words">{u.phone || '—'}</td>
-                        <td className="py-4 px-5 text-sm text-brand-text/70 text-center">
-                          {u.submission_count || 0}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
 
-            {/* Mobile cards */}
-            <div className="space-y-4 lg:hidden">
-              {users.length === 0 ? (
-                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  {loading ? 'Loading users...' : 'No registered users yet.'}
-                </div>
-              ) : (
-                users.map((u) => (
-                  <div key={u.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="font-semibold text-brand-text break-words">{u.name || '—'}</div>
-                        <div className="text-xs text-brand-text/60 mt-0.5 break-words">{u.email}</div>
-                      </div>
-                      {u.role === 'ADMIN' && (
-                        <span className="inline-block text-[10px] bg-brand-text text-white px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wide shrink-0">
-                          Admin
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
-                      <div>
-                        <div className="text-xs text-brand-text/60">Institution</div>
-                        <div className="font-medium break-words">{u.institution || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-brand-text/60">Department</div>
-                        <div className="font-medium break-words">{u.department || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-brand-text/60">Country</div>
-                        <div className="font-medium">{u.country || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-brand-text/60">Phone</div>
-                        <div className="font-medium break-words">{u.phone || '—'}</div>
-                      </div>
-                    </div>
-                    <div className="mt-3 flex items-center justify-between border-t-2 border-brand-accent/40 pt-3">
-                      <span className="text-xs text-brand-text/60">Submissions</span>
-                      <span className="font-bold text-lg">{u.submission_count || 0}</span>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        )}
 
         {activeTab === 'deleted' && (
           <>
@@ -1133,6 +1080,33 @@ export default function App() {
               )}
             </div>
           </>
+        )}
+        {activeTab === 'settings' && (
+          <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-6 sm:p-8 max-w-2xl mt-6">
+            <h3 className="font-serif text-xl font-bold mb-6">Portal Settings</h3>
+            
+            <div className="flex items-center justify-between py-4 border-b border-brand-text/10">
+              <div>
+                <h4 className="font-semibold text-brand-text">Maintenance Mode</h4>
+                <p className="text-sm text-brand-text/60 mt-1">
+                  When active, the user portal will display a maintenance message and disable new submissions.
+                </p>
+              </div>
+              <button
+                onClick={toggleMaintenanceMode}
+                disabled={savingSettings}
+                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${maintenanceMode ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                role="switch"
+                aria-checked={maintenanceMode}
+              >
+                <span className="sr-only">Use setting</span>
+                <span
+                  aria-hidden="true"
+                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${maintenanceMode ? 'translate-x-5' : 'translate-x-0'}`}
+                />
+              </button>
+            </div>
+          </div>
         )}
       </main>
 

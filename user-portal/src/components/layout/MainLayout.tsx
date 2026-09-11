@@ -10,6 +10,7 @@ interface MainLayoutProps {
   children: ReactNode;
   view?: NavView;
   onNavigate?: (view: NavView) => void;
+  maintenanceMode?: boolean;
 }
 
 const NAV_ITEMS: { view: NavView; label: string }[] = [
@@ -18,9 +19,14 @@ const NAV_ITEMS: { view: NavView; label: string }[] = [
   { view: 'submissions', label: 'My Submissions' },
 ];
 
-export function MainLayout({ children, view, onNavigate }: MainLayoutProps) {
+export function MainLayout({ children, view, onNavigate, maintenanceMode }: MainLayoutProps) {
   return (
     <div className="min-h-screen flex flex-col font-sans text-brand-text bg-brand-bg">
+      {maintenanceMode && (
+        <div className="bg-red-600 text-white text-center py-3 px-4 shadow-md font-semibold text-sm sm:text-base z-[60] relative">
+          The portal is under maintenance. We will be live on September 11, 2026, at 6:00 PM.
+        </div>
+      )}
       <header className="sticky top-0 z-50 w-full backdrop-blur-md bg-brand-bg/80 border-b border-brand-text/10 flex flex-col">
         {/* Row 1: Logo */}
         <div className="container mx-auto px-4 h-16 flex-shrink-0 flex items-center">

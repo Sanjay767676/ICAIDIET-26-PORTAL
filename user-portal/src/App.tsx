@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Show, SignInButton, useAuth, useUser } from '@clerk/react';
 import { MainLayout } from './components/layout/MainLayout';
 import { HeroSection } from './components/portal/HeroSection';
@@ -25,14 +25,31 @@ function SignInRequired({ title, message }: { title: string; message: string }) 
 
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewState>('home');
+  const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
   const { getToken } = useAuth();
   const { user: clerkUser } = useUser();
 
   const navigate = (view: ViewState) => setCurrentView(view);
 
+  useEffect(() => {
+    const fetchSettings = async () => {
+      try {
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+        const res = await fetch(`${apiUrl}/api/settings`);
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) {
+          setMaintenanceMode(data.settings?.maintenance_mode === 'true');
+        }
+      } catch (err) {
+        console.error('Failed to load settings:', err);
+      }
+    };
+    fetchSettings();
+  }, []);
+
   return (
-    <MainLayout view={currentView} onNavigate={navigate}>
-      {currentView === 'home' && <HeroSection onStart={() => navigate('wizard')} />}
+    <MainLayout view={currentView} onNavigate={navigate} maintenanceMode={maintenanceMode}>
+      {currentView === 'home' && <HeroSection onStart={() => navigate('wizard')} maintenanceMode={maintenanceMode} />}
 
       {currentView === 'wizard' && (
         <Show

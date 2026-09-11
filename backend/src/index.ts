@@ -1003,6 +1003,44 @@ app.get('/api/admin/users', async (c) => {
 });
 
 // ------------------------------------------------------------------
+// Settings (Maintenance Mode, etc.)
+// ------------------------------------------------------------------
+app.get('/api/settings', async (c) => {
+  const env = c.env as Bindings;
+  try {
+    const res = await env.DB.prepare('SELECT key, value FROM settings').all();
+    const settings: Record<string, string> = {};
+    for (const row of res.results as any[]) {
+      settings[row.key] = row.value;
+    }
+    return c.json({ success: true, settings });
+  } catch (error) {
+    console.error('Fetch settings error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+app.post('/api/admin/settings', async (c) => {
+  const env = c.env as Bindings;
+  const payload = c.get('jwtPayload' as any) as any;
+  if (payload.role !== 'admin') {
+    return c.json({ success: false, error: 'Forbidden' }, 403);
+  }
+  try {
+    const body = await c.req.json();
+    if (typeof body.maintenance_mode === 'boolean') {
+      await env.DB.prepare('UPDATE settings SET value = ? WHERE key = ?')
+        .bind(body.maintenance_mode.toString(), 'maintenance_mode')
+        .run();
+    }
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Update settings error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
 // Cron: Permanently purge soft-deleted submissions older than 30 days.
 // Removes the DB rows (authors, files, submission) and the R2 objects.
 // ------------------------------------------------------------------
