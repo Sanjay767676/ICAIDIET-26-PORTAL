@@ -1022,9 +1022,14 @@ app.get('/api/settings', async (c) => {
 
 app.post('/api/admin/settings', async (c) => {
   const env = c.env as Bindings;
-  const payload = c.get('jwtPayload' as any) as any;
-  if (payload.role !== 'admin') {
-    return c.json({ success: false, error: 'Forbidden' }, 403);
+  
+  const token = getBearer(c);
+  if (!token) {
+    return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+  }
+  const verified = await verifyToken(c, token);
+  if (!verified.ok) {
+    return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
   }
   try {
     const body = await c.req.json();
