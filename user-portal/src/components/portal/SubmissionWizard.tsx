@@ -361,7 +361,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
       </div>
 
       <div className="bg-brand-card rounded-2xl p-4 sm:p-8 shadow-xl border border-brand-text/5">
-  <form onSubmit={handleNext}>` will also be modified.
+  <form onSubmit={handleNext}>
           {step === 1 && (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
               <h2 className="text-2xl font-serif font-bold mb-6 flex items-center gap-2">
