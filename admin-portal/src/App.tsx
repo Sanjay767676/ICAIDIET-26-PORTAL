@@ -199,13 +199,20 @@ function formatDate(iso: string) {
   return isNaN(d.getTime()) ? iso : d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+function formatDateTime(iso: string) {
+  if (!iso) return '';
+  const d = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+}
+
 function primaryAuthorLines(sub: Submission) {
   const primary = (sub.authors || []).find((a) => a.is_primary === 1);
   if (primary) {
     return (
       <>
         <div className="font-medium text-brand-text break-words">
-          {primary.first_name || '—'}
+          {[primary.first_name, primary.last_name].filter(Boolean).join(' ') || '—'}
         </div>
         <div className="flex items-center gap-1.5 text-xs text-brand-text/60 font-normal mt-0.5 break-words">
           {primary.phone && (
@@ -219,10 +226,9 @@ function primaryAuthorLines(sub: Submission) {
     );
   }
   const fallbackName = (sub.author_name || '').trim();
-  const firstName = fallbackName.split(' ')[0] || 'N/A';
   return (
     <>
-      <div className="font-medium text-brand-text break-words">{firstName}</div>
+      <div className="font-medium text-brand-text break-words">{fallbackName || 'N/A'}</div>
       <div className="text-xs text-brand-text/60 font-normal break-words">{sub.author_email || ''}</div>
     </>
   );
@@ -518,7 +524,7 @@ function MoreInfoModal({
             </div>
             <div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submitted</div>
-              <div className="font-semibold mt-0.5">{formatDate(sub.created_at) || '—'}</div>
+              <div className="font-semibold mt-0.5">{formatDateTime(sub.created_at) || '—'}</div>
             </div>
           </div>
 
@@ -940,11 +946,12 @@ export default function App() {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%] rounded-tl-xl">Paper ID</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[20%]">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Track</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Status</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Track</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Status</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Actions</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%] rounded-tr-xl">More Actions</th>
                   </tr>
@@ -952,11 +959,11 @@ export default function App() {
                 <tbody className="divide-y divide-brand-accent/40">
                   {loading ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                      <td colSpan={8} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
                   ) : submissions.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-brand-text/60">No submissions found.</td>
+                      <td colSpan={8} className="py-8 text-center text-brand-text/60">No submissions found.</td>
                     </tr>
                   ) : (
                     submissions.map((sub, idx) => (
@@ -976,6 +983,9 @@ export default function App() {
                         <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
                         <td className="py-4 px-5 align-top">
                           {primaryAuthorLines(sub)}
+                        </td>
+                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
+                          {formatDateTime(sub.created_at) || '—'}
                         </td>
                         <td className="py-4 px-5 align-top">
                           <StatusSelect
@@ -1070,6 +1080,10 @@ export default function App() {
                       <div>
                         <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
                         <div className="text-brand-text/90">{primaryAuthorLines(sub)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
+                        <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
                       </div>
                     </div>
 

@@ -69,11 +69,10 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode }: Main
                 <button
                   key={item.view}
                   onClick={() => onNavigate?.(item.view)}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
-                    view === item.view
+                  className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${view === item.view
                       ? 'bg-brand-text text-white'
                       : 'hover:bg-brand-text/10'
-                  }`}
+                    }`}
                 >
                   {item.label}
                 </button>
@@ -103,14 +102,21 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode }: Main
       <footer className="bg-brand-footer text-white py-6">
         <div className="container mx-auto px-4">
           <div className="flex flex-col md:flex-row items-center justify-between gap-4">
-            <div>
+            <div className="text-center md:text-left">
               <h3 className="font-serif text-xl font-bold mb-1">ICAIDIET&apos;26</h3>
               <p className="text-white/70 text-xs">
                 International Conference on AI-Driven Innovation in Engineering and Technology
               </p>
             </div>
-            <div className="text-xs text-white/50">
-              &copy; 2026 ICAIDIET. All rights reserved.
+            <div className="flex flex-col items-center md:items-end gap-3 text-xs text-white/50">
+              <div className="text-center md:text-right text-white/70">
+                <p className="font-semibold text-white/90 mb-1">For Queries/Assistance</p>
+                <p>+91 7358981203</p>
+                <p>icaidiet26@gmail.com</p>
+              </div>
+              <div>
+                &copy; 2026 ICAIDIET. All rights reserved.
+              </div>
             </div>
           </div>
         </div>
