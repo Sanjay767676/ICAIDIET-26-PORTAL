@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import {
-  CheckCircle,
   ChevronRight,
   ChevronLeft,
   UserPlus,
@@ -596,8 +595,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
                   <ShieldCheck className="w-5 h-5 text-brand-accent" />
                   Plagiarism Report
                 </h3>
-                <p className="text-sm text-brand-text/60 mb-3">
-                  Upload the plagiarism/verification report for your paper PDF only</p>
+
                 <div
                   onClick={() => plagiarismInputRef.current?.click()}
                   className={`border-2 border-dashed rounded-2xl p-8 text-center transition-colors cursor-pointer group shadow-sm ${plagiarismFile

@@ -35,6 +35,14 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:8787',
 ];
 
+// Statuses an admin may set from the dashboard. Values are stored in DB.
+const ALLOWED_SUBMISSION_STATUSES = new Set([
+  'SUBMITTED',
+  'UNDER_REVIEW',
+  'READY_FOR_REGISTRATION',
+  'READY_FOR_CAMERA_READY',
+]);
+
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
 function getEnvOrigin(c: any): string {
@@ -108,7 +116,9 @@ async function verifyToken(c: any, token: string): Promise<{ ok: boolean; subjec
   try {
     const parts = token.split('.');
     if (parts.length !== 2) return { ok: false };
-    const [payload, sig] = parts;
+    const payload = parts[0];
+    const sig = parts[1];
+    if (!payload || !sig) return { ok: false };
     const key = await crypto.subtle.importKey(
       'raw',
       new TextEncoder().encode(await getAuthSecret(c)),
@@ -116,7 +126,12 @@ async function verifyToken(c: any, token: string): Promise<{ ok: boolean; subjec
       false,
       ['verify']
     );
-    const valid = await crypto.subtle.verify('HMAC', key, base64UrlDecode(sig), new TextEncoder().encode(payload));
+    const valid = await crypto.subtle.verify(
+      'HMAC',
+      key,
+      base64UrlDecode(sig),
+      new TextEncoder().encode(payload)
+    );
     if (!valid) return { ok: false };
     const decoded = JSON.parse(new TextDecoder().decode(base64UrlDecode(payload)));
     if (!decoded.exp || decoded.exp < Math.floor(Date.now() / 1000)) return { ok: false };
@@ -879,7 +894,11 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at, s.updated_at,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
               (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count
        FROM submissions s
        WHERE s.user_id = ? AND s.deleted_at IS NULL
@@ -890,6 +909,134 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
   } catch (error) {
     console.error('Fetch my submissions error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// User: Replace the files of the user's own submission.
+// Details (title, abstract, track, authors, paper ID) can never be
+// changed; only the uploaded manuscript / plagiarism report files may
+// be replaced. The old R2 object is deleted and the submission_files
+// row is updated so only the edited file remains visible.
+// ------------------------------------------------------------------
+app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
+  try {
+    if (!rateLimit(c, 'edit-files', 10, 60000)) {
+      return c.json({ success: false, error: 'Too many edit attempts. Please try again later.' }, 429);
+    }
+
+    const clerkUserId = c.get('clerkUserId') as string;
+    const clerkEmail = (c.get('clerkEmail') || '').trim();
+    const submissionId = c.req.param('id');
+
+    const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+
+    const submission = await c.env.DB.prepare(
+      `SELECT id, user_id, created_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
+    ).bind(submissionId).first() as any;
+    if (!submission) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+    if (submission.user_id !== userId) {
+      return c.json({ success: false, error: 'You can only edit files of your own submission.' }, 403);
+    }
+
+    const formData = await c.req.parseBody();
+    const newPaper = formData['file'] as File;
+    const newPlag = formData['plagiarismFile'] as File;
+
+    const updates: { type: 'MANUSCRIPT' | 'PLAGIARISM'; file: File }[] = [];
+    if (newPaper) updates.push({ type: 'MANUSCRIPT', file: newPaper });
+    if (newPlag) updates.push({ type: 'PLAGIARISM', file: newPlag });
+
+    if (updates.length === 0) {
+      return c.json({ success: false, error: 'Please choose at least one file to update.' }, 400);
+    }
+
+    for (const u of updates) {
+      const check = validateFile(u.file);
+      if (!check.ok) {
+        return c.json({
+          success: false,
+          error: u.type === 'MANUSCRIPT' ? check.reason : `Plagiarism report: ${check.reason}`,
+        }, 400);
+      }
+    }
+
+    const now = new Date().toISOString();
+    const uploadedKeys: string[] = [];
+    const updatedFiles: { type: string; filename: string }[] = [];
+
+    try {
+      for (const u of updates) {
+        const prefix = u.type === 'MANUSCRIPT' ? 'PAPER' : 'PLAGIARISM';
+        const newKey = `submissions/${submissionId}-${prefix}-${sanitizeFilename(u.file.name)}-${Date.now().toString(36)}`;
+
+        await c.env.BUCKET.put(newKey, u.file.stream(), {
+          httpMetadata: { contentType: u.file.type || 'application/octet-stream' },
+        });
+        uploadedKeys.push(newKey);
+
+        const existing = await c.env.DB.prepare(
+          `SELECT id, storage_key FROM submission_files
+           WHERE submission_id = ? AND file_type = ? LIMIT 1`
+        ).bind(submissionId, u.type).first() as any;
+
+        if (existing?.id) {
+          await c.env.DB.prepare(
+            `UPDATE submission_files
+             SET original_filename = ?, storage_key = ?, mime_type = ?, file_size = ?, uploaded_at = ?
+             WHERE id = ?`
+          ).bind(
+            u.file.name,
+            newKey,
+            u.file.type || 'application/octet-stream',
+            u.file.size,
+            now,
+            existing.id
+          ).run();
+          if (existing.storage_key && existing.storage_key !== newKey) {
+            await c.env.BUCKET.delete(existing.storage_key).catch(() => { });
+          }
+        } else {
+          await c.env.DB.prepare(
+            `INSERT INTO submission_files
+              (id, submission_id, file_type, original_filename, storage_key, mime_type, file_size, uploaded_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(
+            crypto.randomUUID(),
+            submissionId,
+            u.type,
+            u.file.name,
+            newKey,
+            u.file.type || 'application/octet-stream',
+            u.file.size,
+            now
+          ).run();
+        }
+
+        updatedFiles.push({ type: u.type, filename: u.file.name });
+      }
+
+      await c.env.DB.prepare(`UPDATE submissions SET updated_at = ? WHERE id = ?`)
+        .bind(now, submissionId).run();
+
+      return c.json({
+        success: true,
+        message: 'Your files have been updated successfully.',
+        files: updatedFiles,
+      });
+    } catch (dbError) {
+      // Best-effort cleanup of any newly uploaded file(s) if a partial failure occurs.
+      for (const k of uploadedKeys) {
+        await c.env.BUCKET.delete(k).catch(() => { });
+      }
+      console.error('Edit files DB error:', dbError);
+      return c.json({ success: false, error: 'Could not save your updated files. Please try again.' }, 500);
+    }
+  } catch (error) {
+    console.error('Edit submission files error:', error);
+    return c.json({ success: false, error: 'Internal Server Error. Please try again.' }, 500);
   }
 });
 
@@ -968,6 +1115,54 @@ app.post('/api/admin/submissions/:id/recover', async (c) => {
     });
   } catch (error) {
     console.error('Recover submission error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Update the status of a submission (requires admin Bearer token)
+// Allowed statuses: SUBMITTED, UNDER_REVIEW, READY_FOR_REGISTRATION,
+// READY_FOR_CAMERA_READY. The user portal reflects the new status the
+// next time the author loads their submissions.
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/:id/status', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const submissionId = c.req.param('id');
+    const body = await c.req.json().catch(() => null);
+    const status = (body?.status || '').toString().trim().toUpperCase();
+
+    if (!ALLOWED_SUBMISSION_STATUSES.has(status)) {
+      return c.json({ success: false, error: 'Invalid status value.' }, 400);
+    }
+
+    const existing = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
+      .bind(submissionId).first();
+    if (!existing) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    const now = new Date().toISOString();
+    const result = await c.env.DB.prepare(
+      `UPDATE submissions SET status = ?, updated_at = ? WHERE id = ?`
+    ).bind(status, now, submissionId).run();
+
+    const updated = result.meta.changes > 0;
+    return c.json({
+      success: updated,
+      message: updated ? 'Submission status updated.' : 'Submission status could not be updated.',
+      status,
+    });
+  } catch (error) {
+    console.error('Update submission status error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });

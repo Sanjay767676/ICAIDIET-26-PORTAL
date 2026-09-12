@@ -53,21 +53,143 @@ interface PortalUser {
   submission_count: number;
 }
 
-function statusBadge(status: string) {
-  const cls =
-    status === 'ACCEPTED'
-      ? 'bg-green-100 text-green-800'
-      : status === 'REJECTED'
-        ? 'bg-red-100 text-red-800'
-        : status === 'UNDER_REVIEW'
-          ? 'bg-blue-100 text-blue-800'
-          : status === 'REVISION_REQUIRED'
-            ? 'bg-purple-100 text-purple-800'
-            : 'bg-amber-100 text-amber-800';
+const STATUS_META: Record<string, { label: string; cls: string }> = {
+  SUBMITTED: { label: 'Submitted', cls: 'bg-amber-100 text-amber-800' },
+  UNDER_REVIEW: { label: 'Under Review', cls: 'bg-blue-100 text-blue-800' },
+  READY_FOR_REGISTRATION: { label: 'Ready for Registration', cls: 'bg-green-100 text-green-800' },
+  READY_FOR_CAMERA_READY: { label: 'Moved to Camera Ready\nSubmission', cls: 'bg-purple-100 text-purple-800' },
+  ACCEPTED: { label: 'Accepted', cls: 'bg-green-100 text-green-800' },
+  REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800' },
+  REVISION_REQUIRED: { label: 'Revision Required', cls: 'bg-purple-100 text-purple-800' },
+};
+
+const STATUS_OPTIONS = ['SUBMITTED', 'UNDER_REVIEW', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
+
+function statusMeta(status: string) {
   return (
-    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}>
-      {(status || 'SUBMITTED').replace(/_/g, ' ')}
+    STATUS_META[status] || {
+      label: (status || 'SUBMITTED').replace(/_/g, ' '),
+      cls: 'bg-amber-100 text-amber-800',
+    }
+  );
+}
+
+function statusBadge(status: string) {
+  const meta = statusMeta(status);
+  return (
+    <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${meta.cls}`}>
+      {meta.label}
     </span>
+  );
+}
+
+// ------------------------------------------------------------------
+// Inline status editor in the Submissions list
+// ------------------------------------------------------------------
+function StatusSelect({
+  sub,
+  token,
+  onChanged,
+  onUnauthorized,
+  onError,
+}: {
+  sub: Submission;
+  token: string;
+  onChanged: () => void;
+  onUnauthorized: () => void;
+  onError: (msg: string) => void;
+}) {
+  const [current, setCurrent] = useState(sub.status || 'SUBMITTED');
+  const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setCurrent(sub.status || 'SUBMITTED');
+  }, [sub.status]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const applyStatus = async (next: string) => {
+    setOpen(false);
+    if (next === current) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: next }),
+      });
+      const data = await res.json().catch(() => null);
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to update status.');
+      }
+      setCurrent(next);
+      onChanged();
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Failed to update status.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const meta = statusMeta(current);
+  return (
+    <div ref={containerRef} className="relative inline-flex items-center gap-1.5">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={saving}
+        className={`inline-flex items-center gap-1 pl-2.5 pr-2 py-1 max-w-full rounded-2xl text-xs font-medium border-2 transition-colors disabled:opacity-60 ${meta.cls}`}
+        aria-label={`Change status for ${sub.title}, currently ${meta.label}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        <span className="max-w-[8.5rem] whitespace-pre-line text-left leading-tight py-0.5">{meta.label}</span>
+        <svg
+          className={`w-3 h-3 shrink-0 ${saving ? 'opacity-30' : ''}`}
+          viewBox="0 0 20 20"
+          fill="currentColor"
+          aria-hidden="true"
+        >
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
+      </button>
+      {open && (
+        <div
+          className="absolute left-0 top-full mt-1.5 z-30 w-max min-w-[10rem] max-h-56 overflow-y-auto bg-white border border-brand-text/10 rounded-lg shadow-xl py-1"
+          role="listbox"
+        >
+          {STATUS_OPTIONS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              role="option"
+              aria-selected={s === current}
+              onClick={() => applyStatus(s)}
+              className={`block w-full text-left px-3 py-1.5 text-xs font-medium whitespace-pre-line leading-tight transition-colors ${s === current ? STATUS_META[s].cls : 'text-brand-text hover:bg-brand-text/5'
+                }`}
+            >
+              {STATUS_META[s].label}
+            </button>
+          ))}
+        </div>
+      )}
+      {saving && <Loader2 className="w-3.5 h-3.5 animate-spin text-brand-text/60 shrink-0" />}
+    </div>
   );
 }
 
@@ -346,15 +468,13 @@ function ConfirmDialog({
 }
 
 // ------------------------------------------------------------------
-// More info modal: full record details + PDF actions
+// More info modal: full record details (no file actions)
 // ------------------------------------------------------------------
 function MoreInfoModal({
   sub,
-  onView,
   onClose,
 }: {
   sub: Submission | null;
-  onView: (id: string, kind: 'paper' | 'plagiarism', filename: string) => void;
   onClose: () => void;
 }) {
   if (!sub) return null;
@@ -452,20 +572,6 @@ function MoreInfoModal({
 
         <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">
           <button
-            onClick={() => onView(sub.id, 'paper', sub.manuscript_file || sub.title)}
-            title={sub.manuscript_file || 'Paper PDF'}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all"
-          >
-            <Eye className="w-4 h-4" /> View Paper
-          </button>
-          <button
-            onClick={() => onView(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-            title={sub.plagiarism_file || 'Plagiarism report'}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-brand-text rounded-lg text-sm font-medium border border-brand-text/10 hover:bg-brand-text/5 transition-colors"
-          >
-            <Eye className="w-4 h-4" /> View Report
-          </button>
-          <button
             onClick={onClose}
             className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-brand-text/70 hover:bg-brand-text/5 transition-colors ml-auto"
           >
@@ -487,7 +593,7 @@ export default function App() {
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
-  const [stats, setStats] = useState({ total: 0, accepted: 0, rejected: 0, submitted: 0, underReview: 0, revisionRequired: 0 });
+  const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
   const [loading, setLoading] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
   const [recovering, setRecovering] = useState(false);
@@ -594,11 +700,10 @@ export default function App() {
       setSubmissions(list);
       setStats({
         total: list.length,
-        accepted: list.filter((s) => s.status === 'ACCEPTED').length,
-        rejected: list.filter((s) => s.status === 'REJECTED').length,
         submitted: list.filter((s) => s.status === 'SUBMITTED').length,
         underReview: list.filter((s) => s.status === 'UNDER_REVIEW').length,
-        revisionRequired: list.filter((s) => s.status === 'REVISION_REQUIRED').length,
+        readyForRegistration: list.filter((s) => s.status === 'READY_FOR_REGISTRATION').length,
+        readyForCameraReady: list.filter((s) => s.status === 'READY_FOR_CAMERA_READY').length,
       });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load submissions.');
@@ -756,18 +861,16 @@ export default function App() {
             <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
               <button
                 onClick={() => setActiveTab('submissions')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeTab === 'submissions' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                }`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'submissions' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                  }`}
               >
                 Submissions
               </button>
 
               <button
                 onClick={() => setActiveTab('deleted')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                }`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                  }`}
               >
                 Deleted Files
                 {deletedSubmissions.length > 0 && (
@@ -778,9 +881,8 @@ export default function App() {
               </button>
               <button
                 onClick={() => setActiveTab('settings')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${
-                  activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                }`}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                  }`}
               >
                 Settings
               </button>
@@ -802,7 +904,7 @@ export default function App() {
 
         {activeTab === 'submissions' && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4 mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4 mb-6">
               <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
                 <div className="text-2xl sm:text-3xl font-bold font-serif">{stats.total}</div>
                 <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Total</div>
@@ -812,20 +914,16 @@ export default function App() {
                 <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Submitted</div>
               </div>
               <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
-                <div className="text-2xl sm:text-3xl font-bold font-serif text-green-700">{stats.accepted}</div>
-                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Accepted</div>
-              </div>
-              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
-                <div className="text-2xl sm:text-3xl font-bold font-serif text-red-700">{stats.rejected}</div>
-                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Rejected</div>
-              </div>
-              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
                 <div className="text-2xl sm:text-3xl font-bold font-serif text-blue-700">{stats.underReview}</div>
                 <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Under Review</div>
               </div>
               <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
-                <div className="text-2xl sm:text-3xl font-bold font-serif text-purple-700">{stats.revisionRequired}</div>
-                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Revision Required</div>
+                <div className="text-2xl sm:text-3xl font-bold font-serif text-green-700">{stats.readyForRegistration}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Ready for Registration</div>
+              </div>
+              <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
+                <div className="text-2xl sm:text-3xl font-bold font-serif text-purple-700">{stats.readyForCameraReady}</div>
+                <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Proceeded for Camera Ready</div>
               </div>
             </div>
 
@@ -838,17 +936,17 @@ export default function App() {
             )}
 
             {/* Desktop table */}
-            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent overflow-hidden">
+            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Paper ID</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[22%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%] rounded-tl-xl">Paper ID</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[20%]">Paper Title</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Track</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Status</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Status</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">More Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%] rounded-tr-xl">More Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-accent/40">
@@ -861,9 +959,9 @@ export default function App() {
                       <td colSpan={7} className="py-8 text-center text-brand-text/60">No submissions found.</td>
                     </tr>
                   ) : (
-                    submissions.map((sub) => (
+                    submissions.map((sub, idx) => (
                       <tr key={sub.id} className="bg-white">
-                        <td className="py-4 px-5 align-top">
+                        <td className={`py-4 px-5 align-top ${idx === submissions.length - 1 ? 'rounded-bl-xl' : ''}`}>
                           <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                           <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
                         </td>
@@ -880,7 +978,13 @@ export default function App() {
                           {primaryAuthorLines(sub)}
                         </td>
                         <td className="py-4 px-5 align-top">
-                          {statusBadge(sub.status)}
+                          <StatusSelect
+                            sub={sub}
+                            token={token}
+                            onChanged={fetchSubmissions}
+                            onUnauthorized={handleLogout}
+                            onError={setError}
+                          />
                         </td>
                         <td className="py-4 px-5 align-top">
                           <div className="flex flex-col items-start gap-2">
@@ -900,7 +1004,7 @@ export default function App() {
                             </button>
                           </div>
                         </td>
-                        <td className="py-4 px-5 align-top">
+                        <td className={`py-4 px-5 align-top ${idx === submissions.length - 1 ? 'rounded-br-xl' : ''}`}>
                           <div className="flex flex-col items-start gap-2">
                             <button
                               onClick={() => setMoreInfoTarget(sub)}
@@ -942,7 +1046,15 @@ export default function App() {
                         <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                         <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
                       </div>
-                      {statusBadge(sub.status)}
+                      <div className="shrink-0">
+                        <StatusSelect
+                          sub={sub}
+                          token={token}
+                          onChanged={fetchSubmissions}
+                          onUnauthorized={handleLogout}
+                          onError={setError}
+                        />
+                      </div>
                     </div>
 
                     <div className="mt-3">
@@ -1048,9 +1160,8 @@ export default function App() {
                         </div>
                         <div className="shrink-0 flex flex-col items-start lg:items-end gap-2">
                           <span
-                            className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                              expired ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
-                            }`}
+                            className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${expired ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700'
+                              }`}
                           >
                             {expired ? 'Expired' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
                           </span>
@@ -1084,7 +1195,7 @@ export default function App() {
         {activeTab === 'settings' && (
           <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-6 sm:p-8 max-w-2xl mt-6">
             <h3 className="font-serif text-xl font-bold mb-6">Portal Settings</h3>
-            
+
             <div className="flex items-center justify-between py-4 border-b border-brand-text/10">
               <div>
                 <h4 className="font-semibold text-brand-text">Maintenance Mode</h4>
@@ -1142,10 +1253,6 @@ export default function App() {
 
       <MoreInfoModal
         sub={moreInfoTarget}
-        onView={(id, kind, filename) => {
-          setMoreInfoTarget(null);
-          openPdf(id, kind, filename);
-        }}
         onClose={() => setMoreInfoTarget(null)}
       />
     </div>
