@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Show, SignInButton, useAuth, useUser } from '@clerk/react';
+import { Analytics } from '@vercel/analytics/react';
 import { MainLayout } from './components/layout/MainLayout';
 import { HeroSection } from './components/portal/HeroSection';
 import { SubmissionWizard } from './components/portal/SubmissionWizard';
@@ -48,45 +49,48 @@ export default function App() {
   }, []);
 
   return (
-    <MainLayout view={currentView} onNavigate={navigate} maintenanceMode={maintenanceMode}>
-      {currentView === 'home' && <HeroSection onStart={() => navigate('wizard')} maintenanceMode={maintenanceMode} />}
+    <>
+      <MainLayout view={currentView} onNavigate={navigate} maintenanceMode={maintenanceMode}>
+        {currentView === 'home' && <HeroSection onStart={() => navigate('wizard')} maintenanceMode={maintenanceMode} />}
 
-      {currentView === 'wizard' && (
-        <Show
-          when="signed-in"
-          fallback={
-            <SignInRequired
-              title="Sign In Required"
-              message="Please sign in or create an account to submit your paper."
+        {currentView === 'wizard' && (
+          <Show
+            when="signed-in"
+            fallback={
+              <SignInRequired
+                title="Sign In Required"
+                message="Please sign in or create an account to submit your paper."
+              />
+            }
+          >
+            <SubmissionWizard
+              onComplete={() => navigate('home')}
+              onBack={() => navigate('home')}
+              getToken={getToken}
+              clerkUser={clerkUser}
             />
-          }
-        >
-          <SubmissionWizard
-            onComplete={() => navigate('home')}
-            onBack={() => navigate('home')}
-            getToken={getToken}
-            clerkUser={clerkUser}
-          />
-        </Show>
-      )}
+          </Show>
+        )}
 
-      {currentView === 'submissions' && (
-        <Show
-          when="signed-in"
-          fallback={
-            <SignInRequired
-              title="Sign In Required"
-              message="Please sign in to view your submissions."
+        {currentView === 'submissions' && (
+          <Show
+            when="signed-in"
+            fallback={
+              <SignInRequired
+                title="Sign In Required"
+                message="Please sign in to view your submissions."
+              />
+            }
+          >
+            <MySubmissions
+              getToken={getToken}
+              onBack={() => navigate('home')}
+              onStart={() => navigate('wizard')}
             />
-          }
-        >
-          <MySubmissions
-            getToken={getToken}
-            onBack={() => navigate('home')}
-            onStart={() => navigate('wizard')}
-          />
-        </Show>
-      )}
-    </MainLayout>
+          </Show>
+        )}
+      </MainLayout>
+      <Analytics />
+    </>
   );
 }
