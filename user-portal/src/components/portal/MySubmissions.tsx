@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, CheckCircle2, FileText, Inbox, Loader2, Upload, ShieldCheck, X, Pencil } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Inbox, Loader2, Upload, ShieldCheck, ScanSearch, X, Pencil } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -18,6 +18,7 @@ interface MySubmission {
   author_count: number;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
+  ai_plagiarism_file?: string | null;
   review_decision?: string | null;
   review_feedback?: string | null;
   review_updated_at?: string | null;
@@ -114,10 +115,12 @@ function EditFilesModal({
 }) {
   const [manuscriptFile, setManuscriptFile] = useState<File | null>(null);
   const [plagiarismFile, setPlagiarismFile] = useState<File | null>(null);
+  const [aiPlagiarismFile, setAiPlagiarismFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const manuscriptRef = useRef<HTMLInputElement>(null);
   const plagiarismRef = useRef<HTMLInputElement>(null);
+  const aiPlagiarismRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = (
     setter: (f: File | null) => void
@@ -139,7 +142,7 @@ function EditFilesModal({
   };
 
   const handleSave = async () => {
-    if (!manuscriptFile && !plagiarismFile) {
+    if (!manuscriptFile && !plagiarismFile && !aiPlagiarismFile) {
       setError('Please choose at least one file to update, or cancel.');
       return;
     }
@@ -155,6 +158,7 @@ function EditFilesModal({
       const formData = new FormData();
       if (manuscriptFile) formData.append('file', manuscriptFile);
       if (plagiarismFile) formData.append('plagiarismFile', plagiarismFile);
+      if (aiPlagiarismFile) formData.append('aiPlagiarismFile', aiPlagiarismFile);
 
       const res = await fetch(`${API_URL}/api/submissions/${sub.id}/files`, {
         method: 'POST',
@@ -260,6 +264,22 @@ function EditFilesModal({
               className="hidden"
               ref={plagiarismRef}
               onChange={handleFileSelect(setPlagiarismFile)}
+            />
+
+            {dropZone(
+              sub.ai_plagiarism_file,
+              !!aiPlagiarismFile,
+              aiPlagiarismFile?.name || null,
+              () => aiPlagiarismRef.current?.click(),
+              aiPlagiarismFile ? <ScanSearch className="w-6 h-6 text-green-500" /> : <ScanSearch className="w-6 h-6 text-brand-accent" />,
+              'Click to replace AI plagiarism report'
+            )}
+            <input
+              type="file"
+              accept=".pdf"
+              className="hidden"
+              ref={aiPlagiarismRef}
+              onChange={handleFileSelect(setAiPlagiarismFile)}
             />
           </div>
 

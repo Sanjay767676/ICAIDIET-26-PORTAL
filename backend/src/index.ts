@@ -26,8 +26,6 @@ const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 const ALLOWED_TYPES: Record<string, string[]> = {
   '.pdf': ['application/pdf'],
-  '.doc': ['application/msword'],
-  '.docx': ['application/vnd.openxmlformats-officedocument.wordprocessingml.document'],
 };
 
 const DEFAULT_ALLOWED_ORIGINS = [
@@ -296,7 +294,7 @@ function validateFile(file: File): { ok: boolean; reason?: string } {
   const lower = file.name.toLowerCase();
   const extEntry = Object.entries(ALLOWED_TYPES).find(([ext]) => lower.endsWith(ext));
   if (!extEntry) {
-    return { ok: false, reason: 'Invalid file type. Only PDF (.pdf), DOC (.doc), or DOCX (.docx) manuscripts are accepted.' };
+    return { ok: false, reason: 'Invalid file type. Only PDF (.pdf) files are accepted.' };
   }
 
   const allowedMimes = extEntry[1];
@@ -465,7 +463,9 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
-               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file
        FROM submissions s
        WHERE s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
@@ -523,7 +523,7 @@ app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => 
   try {
     const submissionId = c.req.param('id');
     let docType = (c.req.query('type') || '').toUpperCase();
-    if (docType !== 'PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
+    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
 
     const file = await c.env.DB.prepare(
       `SELECT storage_key, original_filename, mime_type FROM submission_files
@@ -536,6 +536,8 @@ app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => 
         error:
           docType === 'PLAGIARISM'
             ? 'No plagiarism report found for this submission.'
+            : docType === 'AI_PLAGIARISM'
+            ? 'No AI plagiarism report found for this submission.'
             : 'No manuscript file found for this submission.',
       }, 404);
     }
@@ -851,6 +853,7 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
     const keywords = (formData['keywords'] as string || '').trim();
     const file = formData['file'] as File;
     const plagiarismFile = formData['plagiarismFile'] as File;
+    const aiPlagiarismFile = formData['aiPlagiarismFile'] as File;
 
     let authors: { first_name: string; last_name: string; phone: string; email: string; college: string }[] = [];
     try {
@@ -912,11 +915,20 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: `Plagiarism report: ${plagCheck.reason}` }, 400);
     }
 
+    if (!aiPlagiarismFile) {
+      return c.json({ success: false, error: 'An AI plagiarism report file is required.' }, 400);
+    }
+    const aiPlagCheck = validateFile(aiPlagiarismFile);
+    if (!aiPlagCheck.ok) {
+      return c.json({ success: false, error: `AI plagiarism report: ${aiPlagCheck.reason}` }, 400);
+    }
+
     const submissionId = crypto.randomUUID();
     const submissionCode = `SUB-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
     const now = new Date().toISOString();
     const paperKey = `submissions/${submissionId}-PAPER-${sanitizeFilename(file.name)}`;
     const plagKey = `submissions/${submissionId}-PLAGIARISM-${sanitizeFilename(plagiarismFile.name)}`;
+    const aiPlagKey = `submissions/${submissionId}-AI_PLAGIARISM-${sanitizeFilename(aiPlagiarismFile.name)}`;
 
     const uploadedKeys: string[] = [];
     try {
@@ -929,6 +941,11 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
         httpMetadata: { contentType: plagiarismFile.type || 'application/octet-stream' },
       });
       uploadedKeys.push(plagKey);
+
+      await c.env.BUCKET.put(aiPlagKey, aiPlagiarismFile.stream(), {
+        httpMetadata: { contentType: aiPlagiarismFile.type || 'application/octet-stream' },
+      });
+      uploadedKeys.push(aiPlagKey);
 
       const batchStatements: D1PreparedStatement[] = [
         c.env.DB.prepare(
@@ -976,6 +993,20 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
           plagKey,
           plagiarismFile.type || 'application/octet-stream',
           plagiarismFile.size,
+          now
+        ),
+        c.env.DB.prepare(
+          `INSERT INTO submission_files
+            (id, submission_id, file_type, original_filename, storage_key, mime_type, file_size, uploaded_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          submissionId,
+          'AI_PLAGIARISM',
+          aiPlagiarismFile.name,
+          aiPlagKey,
+          aiPlagiarismFile.type || 'application/octet-stream',
+          aiPlagiarismFile.size,
           now
         ),
       ];
@@ -1053,6 +1084,8 @@ app.get('/api/admin/submissions', async (c) => {
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
@@ -1110,6 +1143,8 @@ app.get('/api/admin/submissions/deleted', async (c) => {
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
               (CASE WHEN s.deleted_at < ? THEN 1 ELSE 0 END) AS expired,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
@@ -1163,7 +1198,7 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
 
     const submissionId = c.req.param('id');
     let docType = (c.req.query('type') || '').toUpperCase();
-    if (docType !== 'PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
+    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
 
     const file = await c.env.DB.prepare(
       `SELECT storage_key, original_filename, mime_type FROM submission_files
@@ -1176,6 +1211,8 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
         error:
           docType === 'PLAGIARISM'
             ? 'No plagiarism report found for this submission.'
+            : docType === 'AI_PLAGIARISM'
+            ? 'No AI plagiarism report found for this submission.'
             : 'No manuscript file found for this submission.',
       }, 404);
     }
@@ -1218,6 +1255,8 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
               (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
@@ -1278,10 +1317,12 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
     const formData = await c.req.parseBody();
     const newPaper = formData['file'] as File;
     const newPlag = formData['plagiarismFile'] as File;
+    const newAiPlag = formData['aiPlagiarismFile'] as File;
 
-    const updates: { type: 'MANUSCRIPT' | 'PLAGIARISM'; file: File }[] = [];
+    const updates: { type: 'MANUSCRIPT' | 'PLAGIARISM' | 'AI_PLAGIARISM'; file: File }[] = [];
     if (newPaper) updates.push({ type: 'MANUSCRIPT', file: newPaper });
     if (newPlag) updates.push({ type: 'PLAGIARISM', file: newPlag });
+    if (newAiPlag) updates.push({ type: 'AI_PLAGIARISM', file: newAiPlag });
 
     if (updates.length === 0) {
       return c.json({ success: false, error: 'Please choose at least one file to update.' }, 400);
@@ -1292,7 +1333,11 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
       if (!check.ok) {
         return c.json({
           success: false,
-          error: u.type === 'MANUSCRIPT' ? check.reason : `Plagiarism report: ${check.reason}`,
+          error: u.type === 'MANUSCRIPT'
+            ? check.reason
+            : u.type === 'PLAGIARISM'
+            ? `Plagiarism report: ${check.reason}`
+            : `AI plagiarism report: ${check.reason}`,
         }, 400);
       }
     }
@@ -1303,7 +1348,7 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
 
     try {
       for (const u of updates) {
-        const prefix = u.type === 'MANUSCRIPT' ? 'PAPER' : 'PLAGIARISM';
+        const prefix = u.type === 'MANUSCRIPT' ? 'PAPER' : u.type === 'PLAGIARISM' ? 'PLAGIARISM' : 'AI_PLAGIARISM';
         const newKey = `submissions/${submissionId}-${prefix}-${sanitizeFilename(u.file.name)}-${Date.now().toString(36)}`;
 
         await c.env.BUCKET.put(newKey, u.file.stream(), {

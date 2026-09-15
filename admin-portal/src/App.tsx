@@ -29,6 +29,7 @@ interface Submission {
   deleted_at?: string | null;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
+  ai_plagiarism_file?: string | null;
   review_decision?: string | null;
   review_feedback?: string | null;
   review_updated_at?: string | null;
@@ -39,7 +40,7 @@ interface FileView {
   open: boolean;
   url?: string;
   filename?: string;
-  kind?: 'paper' | 'plagiarism';
+  kind?: 'paper' | 'plagiarism' | 'ai_plagiarism';
   error?: string;
 }
 
@@ -361,7 +362,13 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = file.filename || (file.kind === 'plagiarism' ? 'plagiarism-report.pdf' : 'manuscript.pdf');
+    a.download =
+      file.filename ||
+      (file.kind === 'plagiarism'
+        ? 'plagiarism-report.pdf'
+        : file.kind === 'ai_plagiarism'
+          ? 'ai-plagiarism-report.pdf'
+          : 'manuscript.pdf');
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -376,7 +383,12 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
           <div className="flex items-center gap-2 min-w-0">
             <Eye className="w-4 h-4 shrink-0" />
             <span className="font-medium truncate">
-              {file.filename || (file.kind === 'plagiarism' ? 'Plagiarism Report' : 'Manuscript')}
+              {file.filename ||
+                (file.kind === 'plagiarism'
+                  ? 'Plagiarism Report'
+                  : file.kind === 'ai_plagiarism'
+                    ? 'AI Plagiarism Report'
+                    : 'Manuscript')}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -819,10 +831,12 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
-  const openPdf = (id: string, kind: 'paper' | 'plagiarism', filename: string) => {
+  const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => {
+    const type =
+      kind === 'plagiarism' ? 'PLAGIARISM' : kind === 'ai_plagiarism' ? 'AI_PLAGIARISM' : 'MANUSCRIPT';
     setPdfView({
       open: true,
-      url: `${API_URL}/api/admin/submissions/${id}/file?type=${kind === 'plagiarism' ? 'PLAGIARISM' : 'MANUSCRIPT'}`,
+      url: `${API_URL}/api/admin/submissions/${id}/file?type=${type}`,
       filename,
       kind,
     });
@@ -1053,7 +1067,14 @@ export default function App() {
                               title={sub.plagiarism_file || 'Plagiarism report'}
                               className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
                             >
-                              <Eye className="w-4 h-4" /> View Report
+                              <Eye className="w-4 h-4" /> View Plaq Report
+                            </button>
+                            <button
+                              onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                              title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                            >
+                              <Eye className="w-4 h-4" /> View AI Plaq
                             </button>
                           </div>
                         </td>
@@ -1143,7 +1164,14 @@ export default function App() {
                         title={sub.plagiarism_file || 'Plagiarism report'}
                         className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                       >
-                        <Eye className="w-3.5 h-3.5" /> View Report
+                        <Eye className="w-3.5 h-3.5" /> View Plaq Report
+                      </button>
+                      <button
+                        onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                        title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View AI Plaq
                       </button>
                       <button
                         onClick={() => setMoreInfoTarget(sub)}

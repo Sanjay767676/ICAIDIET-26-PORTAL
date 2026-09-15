@@ -8,6 +8,7 @@ import {
   Loader2,
   FileText,
   ShieldCheck,
+  ScanSearch,
 } from 'lucide-react';
 import paperIcon from '../../assets/images/paper.png';
 import infoIcon from '../../assets/images/info.png';
@@ -58,9 +59,11 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
   // Step 3: Upload
   const [file, setFile] = useState<File | null>(null);
   const [plagiarismFile, setPlagiarismFile] = useState<File | null>(null);
+  const [aiPlagiarismFile, setAiPlagiarismFile] = useState<File | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const plagiarismInputRef = useRef<HTMLInputElement>(null);
+  const aiPlagiarismInputRef = useRef<HTMLInputElement>(null);
 
   // Sync the Clerk user profile to the backend on mount
   useEffect(() => {
@@ -133,6 +136,14 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
         });
         return;
       }
+      if (!aiPlagiarismFile) {
+        setPopup({
+          type: 'error',
+          title: 'AI Plagiarism Report Required',
+          message: 'Please upload the AI plagiarism report PDF before submitting. Maximum file size is 10MB.',
+        });
+        return;
+      }
     }
 
     if (step < 3) {
@@ -167,6 +178,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
       formData.append('authorEmail', authors[0].email.trim());
       formData.append('file', file);
       formData.append('plagiarismFile', plagiarismFile);
+      formData.append('aiPlagiarismFile', aiPlagiarismFile);
 
       const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
       const token = await getToken();
@@ -279,6 +291,33 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
         return;
       }
       setPlagiarismFile(selectedFile);
+    }
+  };
+
+  const handleAiPlagiarismChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const selectedFile = e.target.files[0];
+      if (selectedFile.size > MAX_FILE_SIZE) {
+        setPopup({
+          type: 'error',
+          title: 'File Too Large',
+          message: 'The AI plagiarism report is larger than 10MB. Please choose a smaller PDF.',
+        });
+        setAiPlagiarismFile(null);
+        e.target.value = '';
+        return;
+      }
+      if (!/\.pdf$/i.test(selectedFile.name)) {
+        setPopup({
+          type: 'error',
+          title: 'Invalid File Type',
+          message: 'Please upload the AI plagiarism report as a PDF.',
+        });
+        setAiPlagiarismFile(null);
+        e.target.value = '';
+        return;
+      }
+      setAiPlagiarismFile(selectedFile);
     }
   };
 
@@ -627,6 +666,48 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
                     className="hidden"
                     ref={plagiarismInputRef}
                     onChange={handlePlagiarismChange}
+                  />
+                </div>
+              </div>
+
+
+              <div>
+                <h3 className="text-xl font-serif font-bold mb-2 flex items-center gap-2">
+                  <ScanSearch className="w-5 h-5 text-brand-accent" />
+                  AI Plagiarism Report
+                </h3>
+
+                <div
+                  onClick={() => aiPlagiarismInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-2xl p-8 text-center transition-colors cursor-pointer group shadow-sm ${aiPlagiarismFile
+                    ? 'border-green-500 bg-green-50'
+                    : 'border-stone-300 bg-white hover:bg-stone-50'
+                    }`}
+                >
+                  <div className="bg-white w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm group-hover:scale-110 transition-transform">
+                    {aiPlagiarismFile ? (
+                      <FileText className="w-7 h-7 text-green-500" />
+                    ) : (
+                      <ScanSearch className="w-7 h-7 text-brand-accent" />
+                    )}
+                  </div>
+                  <h4 className="text-lg font-bold mb-1">
+                    {aiPlagiarismFile ? 'Report Selected' : 'Click to upload the AI plagiarism report'}
+                  </h4>
+                  <p className="text-sm text-brand-text/60">
+                    {aiPlagiarismFile ? aiPlagiarismFile.name : 'PDF format only. Maximum file size 10MB.'}
+                  </p>
+                  {aiPlagiarismFile && (
+                    <p className="text-xs text-brand-text/50 mt-1">
+                      {(aiPlagiarismFile.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                  )}
+                  <input
+                    type="file"
+                    accept=".pdf"
+                    className="hidden"
+                    ref={aiPlagiarismInputRef}
+                    onChange={handleAiPlagiarismChange}
                   />
                 </div>
               </div>
