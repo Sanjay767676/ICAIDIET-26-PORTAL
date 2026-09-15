@@ -4,6 +4,7 @@
   "workspaces": [
     "backend",
     "user-portal",
-    "admin-portal"
+    "admin-portal",
+    "reviewer-portal"
   ]
 }

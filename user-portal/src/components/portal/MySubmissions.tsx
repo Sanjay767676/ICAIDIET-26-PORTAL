@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, FileText, Inbox, Loader2, Upload, ShieldCheck, X, Pencil } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Inbox, Loader2, Upload, ShieldCheck, X, Pencil } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -18,6 +18,9 @@ interface MySubmission {
   author_count: number;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
+  review_decision?: string | null;
+  review_feedback?: string | null;
+  review_updated_at?: string | null;
 }
 
 interface MySubmissionsProps {
@@ -57,6 +60,42 @@ function formatDate(iso: string) {
 
 function isEdited(sub: MySubmission) {
   return sub.updated_at && sub.created_at && sub.updated_at !== sub.created_at;
+}
+
+function reviewBanner(sub: MySubmission) {
+  const hasReview = sub.review_decision || sub.review_feedback;
+  if (!hasReview) return null;
+  const accepted = sub.review_decision === 'ACCEPTED';
+  return (
+    <div
+      className={`mt-4 rounded-xl border p-4 ${
+        accepted ? 'bg-green-50 border-green-300' : 'bg-amber-50 border-amber-300'
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        {accepted ? (
+          <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+        ) : (
+          <FileText className="w-4 h-4 text-amber-600 shrink-0" />
+        )}
+        <span className="text-sm font-bold text-black">
+          {accepted ? 'Accepted — Ready for Registration' : 'Revise & Resubmit'}
+        </span>
+      </div>
+      {!accepted && (
+        <p className="text-sm text-black/80 mt-2 leading-relaxed whitespace-pre-wrap">{sub.review_feedback}</p>
+      )}
+      {!accepted && (
+        <p className="text-xs text-black/60 mt-2">
+          Please correct the paper based on the reviewer feedback, then use "Edit Files" to upload the revised
+          files. Your paper will be sent back to the reviewer for a new review.
+        </p>
+      )}
+      {sub.review_updated_at && (
+        <p className="text-[11px] text-black/50 mt-2">Reviewer feedback · {formatDate(sub.review_updated_at)}</p>
+      )}
+    </div>
+  );
 }
 
 // ------------------------------------------------------------------
@@ -308,8 +347,12 @@ export function MySubmissions({ getToken, onBack, onStart }: MySubmissionsProps)
     setPopup({
       type: 'success',
       title: 'Files Updated',
-      message: 'Your uploaded files have been replaced with the edited versions.',
+      message:
+        editing?.review_decision === 'NOT_ACCEPTED'
+          ? 'Your revised files have been uploaded. Your paper has been sent back to the reviewer for a new review.'
+          : 'Your uploaded files have been replaced with the edited versions.',
     });
+    setEditing(null);
     loadSubmissions();
   };
 
@@ -385,6 +428,8 @@ export function MySubmissions({ getToken, onBack, onStart }: MySubmissionsProps)
               {sub.abstract && (
                 <p className="text-sm text-black/80 mt-4 leading-relaxed line-clamp-3">{sub.abstract}</p>
               )}
+
+              {reviewBanner(sub)}
 
               <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/10 pt-4">
                 <div className="flex items-center gap-3 flex-wrap min-w-0">

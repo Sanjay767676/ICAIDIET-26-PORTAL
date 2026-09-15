@@ -29,6 +29,9 @@ interface Submission {
   deleted_at?: string | null;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
+  review_decision?: string | null;
+  review_feedback?: string | null;
+  review_updated_at?: string | null;
   authors?: Author[];
 }
 
@@ -574,6 +577,35 @@ function MoreInfoModal({
               </div>
             )}
           </div>
+
+          {(sub.review_decision || sub.review_feedback) && (
+            <div>
+              <div className="flex items-center gap-1.5 text-xs text-brand-text/50 uppercase tracking-wide font-medium mb-2">
+                <FileText className="w-3.5 h-3.5" /> Review Feedback
+              </div>
+              <div
+                className={`rounded-xl border p-3 ${
+                  sub.review_decision === 'ACCEPTED'
+                    ? 'bg-green-50 border-green-300'
+                    : 'bg-amber-50 border-amber-300'
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2 font-semibold text-brand-text">
+                  <span>{sub.review_decision || 'No decision recorded'}</span>
+                  {sub.review_updated_at && (
+                    <span className="text-[11px] text-brand-text/50 font-medium ml-auto">
+                      {formatDateTime(sub.review_updated_at)}
+                    </span>
+                  )}
+                </div>
+                {sub.review_feedback && (
+                  <p className="text-sm text-brand-text/80 leading-relaxed whitespace-pre-wrap mt-1.5">
+                    {sub.review_feedback}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">

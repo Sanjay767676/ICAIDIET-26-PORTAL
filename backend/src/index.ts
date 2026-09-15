@@ -12,6 +12,7 @@ type Bindings = {
 type Variables = {
   clerkUserId: string;
   clerkEmail: string;
+  reviewerId: string;
 };
 
 type AppEnv = { Bindings: Bindings; Variables: Variables };
@@ -32,6 +33,7 @@ const ALLOWED_TYPES: Record<string, string[]> = {
 const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:5174',
+  'http://localhost:5175',
   'http://localhost:8787',
 ];
 
@@ -367,6 +369,293 @@ app.post('/api/admin/login', async (c) => {
     });
   } catch (error) {
     console.error('Login error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Reviewer Login (username: icaidiet, password: review123)
+// Verifies against the `reviewers` table and returns a 12h HMAC token.
+// Reviewer tokens are signed with subject `reviewer:<id>`.
+// ------------------------------------------------------------------
+app.post('/api/reviewer/login', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => null);
+    const username = (body?.username || '').trim().toLowerCase();
+    const password = body?.password || '';
+
+    if (!username || !password) {
+      return c.json({ success: false, error: 'Username and password are required.' }, 400);
+    }
+
+    const stored = await c.env.DB.prepare(
+      `SELECT id, username, name, email, password_hash FROM reviewers WHERE username = ?`
+    ).bind(username).first() as any;
+
+    if (!stored) {
+      return c.json({ success: false, error: 'Invalid username or password.' }, 401);
+    }
+
+    const hash = await sha256Hex(password);
+    if (hash !== stored.password_hash) {
+      return c.json({ success: false, error: 'Invalid username or password.' }, 401);
+    }
+
+    const token = await signToken(c, `reviewer:${stored.id}`, 60 * 60 * 12); // 12 hours
+
+    return c.json({
+      success: true,
+      message: 'Login successful.',
+      token,
+      user: { id: stored.id, username: stored.username, name: stored.name, email: stored.email },
+    });
+  } catch (error) {
+    console.error('Reviewer login error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// Middleware: require a valid reviewer (non-admin) token.
+async function requireReviewerAuth(c: Context<AppEnv>, next: () => Promise<void>) {
+  const token = getBearer(c);
+  if (!token) {
+    return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+  }
+  const verified = await verifyToken(c, token);
+  if (!verified.ok) {
+    return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+  }
+  const subject = verified.subject || '';
+  if (!subject.startsWith('reviewer:')) {
+    return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+  }
+  const reviewerId = subject.slice('reviewer:'.length);
+  const reviewer = await c.env.DB.prepare(
+    `SELECT id, username, name, email FROM reviewers WHERE id = ?`
+  ).bind(reviewerId).first() as any;
+  if (!reviewer) {
+    return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+  }
+  c.set('reviewerId', reviewer.id);
+  return next();
+}
+
+// ------------------------------------------------------------------
+// Reviewer: Get all live submissions with authors + any saved review.
+// Requires reviewer Bearer token.
+// ------------------------------------------------------------------
+app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
+  try {
+    const reviewerId = c.get('reviewerId') as string;
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file
+       FROM submissions s
+       WHERE s.deleted_at IS NULL
+       ORDER BY s.created_at DESC`
+    ).all();
+
+    const submissions = results as any[];
+    let authorsBySubmission: Record<string, any[]> = {};
+    let reviewsBySubmission: Record<string, any> = {};
+
+    if (submissions.length > 0) {
+      const ids = submissions.map((s: any) => s.id as string);
+      const placeholders = ids.map(() => '?').join(',');
+
+      const authorRes = await c.env.DB.prepare(
+        `SELECT id, submission_id, is_primary, first_name, last_name
+         FROM authors
+         WHERE submission_id IN (${placeholders})
+         ORDER BY is_primary DESC, created_at ASC`
+      ).bind(...ids).all();
+      authorsBySubmission = (authorRes.results as any[] || []).reduce((acc: any, a: any) => {
+        const sid = a.submission_id;
+        (acc[sid] = acc[sid] || []).push(a);
+        return acc;
+      }, {});
+
+      const reviewRes = await c.env.DB.prepare(
+        `SELECT id, submission_id, reviewer_id, decision, feedback, resubmitted, created_at, updated_at
+         FROM reviews
+         WHERE submission_id IN (${placeholders}) AND reviewer_id = ?`
+      ).bind(...ids, reviewerId).all();
+      reviewsBySubmission = (reviewRes.results as any[] || []).reduce((acc: any, r: any) => {
+        acc[r.submission_id] = r;
+        return acc;
+      }, {});
+    }
+
+    const enriched = submissions.map((s: any) => ({
+      ...s,
+      authors: authorsBySubmission[s.id] || [],
+      review: reviewsBySubmission[s.id] || null,
+    }));
+
+    return c.json({ success: true, submissions: enriched });
+  } catch (error) {
+    console.error('Reviewer fetch submissions error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Reviewer: Stream a submission file (paper or plagiarism report).
+// Requires reviewer Bearer token.
+// ------------------------------------------------------------------
+app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => {
+  try {
+    const submissionId = c.req.param('id');
+    let docType = (c.req.query('type') || '').toUpperCase();
+    if (docType !== 'PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
+
+    const file = await c.env.DB.prepare(
+      `SELECT storage_key, original_filename, mime_type FROM submission_files
+       WHERE submission_id = ? AND file_type = ? LIMIT 1`
+    ).bind(submissionId, docType).first() as any;
+
+    if (!file) {
+      return c.json({
+        success: false,
+        error:
+          docType === 'PLAGIARISM'
+            ? 'No plagiarism report found for this submission.'
+            : 'No manuscript file found for this submission.',
+      }, 404);
+    }
+
+    const object = await c.env.BUCKET.get(file.storage_key);
+    if (!object) {
+      return c.json({ success: false, error: 'The file could not be found in storage.' }, 404);
+    }
+
+    const mime = file.mime_type || 'application/octet-stream';
+    const safeName = encodeURIComponent(file.original_filename || 'manuscript');
+
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': mime,
+        'Content-Disposition': `inline; filename*=UTF-8''${safeName}`,
+        'Content-Length': String(object.size),
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  } catch (error) {
+    console.error('Reviewer file stream error:', error);
+    return c.json({ success: false, error: 'Could not load the file.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Reviewer: Get the saved review for a submission (if any).
+// Requires reviewer Bearer token.
+// ------------------------------------------------------------------
+app.get('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) => {
+  try {
+    const reviewerId = c.get('reviewerId') as string;
+    const submissionId = c.req.param('id');
+
+    const review = await c.env.DB.prepare(
+      `SELECT id, submission_id, reviewer_id, decision, feedback, created_at, updated_at
+       FROM reviews
+       WHERE submission_id = ? AND reviewer_id = ? LIMIT 1`
+    ).bind(submissionId, reviewerId).first() as any;
+
+    if (!review) {
+      return c.json({ success: true, review: null });
+    }
+    return c.json({ success: true, review });
+  } catch (error) {
+    console.error('Reviewer fetch review error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Reviewer: Save (upsert) the review decision + feedback for a paper.
+// Requires reviewer Bearer token.
+// Decision must be ACCEPTED or NOT_ACCEPTED; when NOT_ACCEPTED the
+// reviewer must provide feedback.
+// ------------------------------------------------------------------
+app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) => {
+  try {
+    const reviewerId = c.get('reviewerId') as string;
+    const submissionId = c.req.param('id');
+    const body = await c.req.json().catch(() => null);
+    const decision = ((body?.decision || '').toString()).trim().toUpperCase();
+    const feedback = ((body?.feedback || '') as string).trim();
+
+    if (decision !== 'ACCEPTED' && decision !== 'NOT_ACCEPTED') {
+      return c.json({ success: false, error: 'Please choose whether the paper is Accepted or Not Accepted.' }, 400);
+    }
+    if (decision === 'NOT_ACCEPTED' && !feedback) {
+      return c.json({ success: false, error: 'Feedback is required when a paper is marked as Not Accepted.' }, 400);
+    }
+
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM submissions WHERE id = ? AND deleted_at IS NULL`
+    ).bind(submissionId).first() as any;
+    if (!existing) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    // Reviewing a paper updates its workflow status:
+    //   ACCEPTED     -> READY_FOR_REGISTRATION (shown to user + admin)
+    //   NOT_ACCEPTED -> UNDER_REVIEW (author must revise; shown to user + admin)
+    const nextStatus = decision === 'ACCEPTED' ? 'READY_FOR_REGISTRATION' : 'UNDER_REVIEW';
+
+    const now = new Date().toISOString();
+    const current = await c.env.DB.prepare(
+      `SELECT id FROM reviews WHERE submission_id = ? AND reviewer_id = ? LIMIT 1`
+    ).bind(submissionId, reviewerId).first() as any;
+
+    let reviewId: string;
+    const statements: D1PreparedStatement[] = [];
+    if (current?.id) {
+      statements.push(
+        c.env.DB.prepare(
+          `UPDATE reviews SET decision = ?, feedback = ?, resubmitted = 0, updated_at = ? WHERE id = ?`
+        ).bind(decision, feedback, now, current.id)
+      );
+      reviewId = current.id;
+    } else {
+      reviewId = crypto.randomUUID();
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO reviews (id, submission_id, reviewer_id, decision, feedback, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`
+        ).bind(reviewId, submissionId, reviewerId, decision, feedback, now, now)
+      );
+    }
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE submissions SET status = ?, updated_at = ? WHERE id = ?`
+      ).bind(nextStatus, now, submissionId)
+    );
+    await c.env.DB.batch(statements);
+
+    return c.json({
+      success: true,
+      message:
+        decision === 'ACCEPTED'
+          ? 'Paper marked as Accepted and moved to Ready for Registration.'
+          : 'Paper marked as Not Accepted and feedback saved.',
+      review: {
+        id: reviewId,
+        submission_id: submissionId,
+        reviewer_id: reviewerId,
+        decision,
+        feedback,
+        resubmitted: 0,
+        updated_at: now,
+      },
+    });
+  } catch (error) {
+    console.error('Reviewer save review error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -739,7 +1028,10 @@ app.get('/api/admin/submissions', async (c) => {
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
-               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
+              (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
+              (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
        FROM submissions s
        WHERE s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
@@ -794,7 +1086,10 @@ app.get('/api/admin/submissions/deleted', async (c) => {
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
-              (CASE WHEN s.deleted_at < ? THEN 1 ELSE 0 END) AS expired
+              (CASE WHEN s.deleted_at < ? THEN 1 ELSE 0 END) AS expired,
+              (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
+              (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
+              (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
        FROM submissions s
        WHERE s.deleted_at IS NOT NULL
        ORDER BY s.deleted_at DESC`
@@ -899,7 +1194,10 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
-              (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count
+              (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count,
+              (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
+              (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
+              (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
        FROM submissions s
        WHERE s.user_id = ? AND s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
@@ -1018,8 +1316,27 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
         updatedFiles.push({ type: u.type, filename: u.file.name });
       }
 
-      await c.env.DB.prepare(`UPDATE submissions SET updated_at = ? WHERE id = ?`)
-        .bind(now, submissionId).run();
+      const editStatements: D1PreparedStatement[] = [
+        c.env.DB.prepare(`UPDATE submissions SET updated_at = ? WHERE id = ?`)
+          .bind(now, submissionId),
+      ];
+
+      // Re-uploading corrected files after a NOT_ACCEPTED review moves the
+      // paper back to the reviewer's "To Review" queue (resubmitted = 1)
+      // while keeping the previous feedback available to the author.
+      const flagged = await c.env.DB.prepare(
+        `SELECT id FROM reviews
+         WHERE submission_id = ? AND decision = 'NOT_ACCEPTED' AND resubmitted = 0
+         LIMIT 1`
+      ).bind(submissionId).first() as any;
+      if (flagged?.id) {
+        editStatements.push(
+          c.env.DB.prepare(
+            `UPDATE reviews SET resubmitted = 1, updated_at = ? WHERE id = ?`
+          ).bind(now, flagged.id)
+        );
+      }
+      await c.env.DB.batch(editStatements);
 
       return c.json({
         success: true,
