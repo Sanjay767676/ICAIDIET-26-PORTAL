@@ -33,6 +33,17 @@ export function HeroSection({ onStart, maintenanceMode, maintenanceUntil }: { on
             Author Guidelines
           </a>
         </div>
+
+        <div className="mt-4 flex justify-center w-full max-w-2xl">
+          <a
+            href="https://www.novelcheckr.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="w-full sm:w-auto px-8 py-4 bg-red-600 text-white rounded-xl font-semibold text-lg hover:bg-red-700 transition-all text-center shadow-xl"
+          >
+            Plagiarism Checker at ₹99
+          </a>
+        </div>
       </div>
     </div>
   );
