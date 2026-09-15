@@ -596,11 +596,10 @@ function MoreInfoModal({
                 <FileText className="w-3.5 h-3.5" /> Review Feedback
               </div>
               <div
-                className={`rounded-xl border p-3 ${
-                  sub.review_decision === 'ACCEPTED'
-                    ? 'bg-green-50 border-green-300'
-                    : 'bg-amber-50 border-amber-300'
-                }`}
+                className={`rounded-xl border p-3 ${sub.review_decision === 'ACCEPTED'
+                  ? 'bg-green-50 border-green-300'
+                  : 'bg-amber-50 border-amber-300'
+                  }`}
               >
                 <div className="flex flex-wrap items-center gap-2 font-semibold text-brand-text">
                   <span>{sub.review_decision || 'No decision recorded'}</span>
@@ -1063,22 +1062,22 @@ export default function App() {
                               <Eye className="w-4 h-4" /> View Paper
                             </button>
                             {sub.plagiarism_file && (
-                            <button
-                              onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                              title={sub.plagiarism_file || 'Plagiarism report'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                            >
-                              <Eye className="w-4 h-4" /> View Plaq Report
-                            </button>
+                              <button
+                                onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                                title={sub.plagiarism_file || 'Plagiarism report'}
+                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                              >
+                                <Eye className="w-4 h-4" /> View Plag.
+                              </button>
                             )}
                             {sub.ai_plagiarism_file && (
-                            <button
-                              onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                              title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                            >
-                              <Eye className="w-4 h-4" /> View AI Plaq
-                            </button>
+                              <button
+                                onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                                title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                              >
+                                <Eye className="w-4 h-4" /> View AI Plag.
+                              </button>
                             )}
                           </div>
                         </td>
@@ -1164,22 +1163,22 @@ export default function App() {
                         <Eye className="w-3.5 h-3.5" /> View Paper
                       </button>
                       {sub.plagiarism_file && (
-                      <button
-                        onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                        title={sub.plagiarism_file || 'Plagiarism report'}
-                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View Plaq Report
-                      </button>
+                        <button
+                          onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                          title={sub.plagiarism_file || 'Plagiarism report'}
+                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View Plag.
+                        </button>
                       )}
                       {sub.ai_plagiarism_file && (
-                      <button
-                        onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                        title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View AI Plaq
-                      </button>
+                        <button
+                          onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                          title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View AI Plag.
+                        </button>
                       )}
                       <button
                         onClick={() => setMoreInfoTarget(sub)}

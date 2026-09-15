@@ -466,11 +466,10 @@ function ReviewEditor({
         <button
           type="button"
           onClick={() => setDecision('ACCEPTED')}
-          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${
-            decision === 'ACCEPTED'
-              ? 'bg-green-100 text-green-800 border-green-400'
-              : 'border-brand-text/15 text-brand-text/70 hover:border-green-400 hover:bg-green-50'
-          }`}
+          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${decision === 'ACCEPTED'
+            ? 'bg-green-100 text-green-800 border-green-400'
+            : 'border-brand-text/15 text-brand-text/70 hover:border-green-400 hover:bg-green-50'
+            }`}
           aria-pressed={decision === 'ACCEPTED'}
         >
           <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Accepted
@@ -478,11 +477,10 @@ function ReviewEditor({
         <button
           type="button"
           onClick={chooseNotAccepted}
-          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${
-            decision === 'NOT_ACCEPTED'
-              ? 'bg-red-100 text-red-800 border-red-400'
-              : 'border-brand-text/15 text-brand-text/70 hover:border-red-400 hover:bg-red-50'
-          }`}
+          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${decision === 'NOT_ACCEPTED'
+            ? 'bg-red-100 text-red-800 border-red-400'
+            : 'border-brand-text/15 text-brand-text/70 hover:border-red-400 hover:bg-red-50'
+            }`}
           aria-pressed={decision === 'NOT_ACCEPTED'}
         >
           <XCircle className="w-3.5 h-3.5 shrink-0" /> Not Accepted
@@ -872,22 +870,22 @@ export default function App() {
                           <Eye className="w-4 h-4" /> View Paper
                         </button>
                         {sub.plagiarism_file && (
-                        <button
-                          onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                          title={sub.plagiarism_file || 'Plagiarism report'}
-                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                        >
-                          <Eye className="w-4 h-4" /> View Plaq Report
-                        </button>
+                          <button
+                            onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                            title={sub.plagiarism_file || 'Plagiarism report'}
+                            className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                          >
+                            <Eye className="w-4 h-4" /> View Plag.
+                          </button>
                         )}
                         {sub.ai_plagiarism_file && (
-                        <button
-                          onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                          title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                        >
-                          <Eye className="w-4 h-4" /> View AI Plaq
-                        </button>
+                          <button
+                            onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                            title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                            className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                          >
+                            <Eye className="w-4 h-4" /> View AI Plag.
+                          </button>
                         )}
                       </div>
                     </td>
@@ -958,22 +956,22 @@ export default function App() {
                     <Eye className="w-3.5 h-3.5" /> View Paper
                   </button>
                   {sub.plagiarism_file && (
-                  <button
-                    onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                    title={sub.plagiarism_file || 'Plagiarism report'}
-                    className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> View Plaq Report
-                  </button>
+                    <button
+                      onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                      title={sub.plagiarism_file || 'Plagiarism report'}
+                      className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> View Plag.
+                    </button>
                   )}
                   {sub.ai_plagiarism_file && (
-                  <button
-                    onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                    title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                    className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                  >
-                    <Eye className="w-3.5 h-3.5" /> View AI Plaq
-                  </button>
+                    <button
+                      onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                      title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                      className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                    >
+                      <Eye className="w-3.5 h-3.5" /> View AI Plag.
+                    </button>
                   )}
                 </div>
 
