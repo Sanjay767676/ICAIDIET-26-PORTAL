@@ -1009,8 +1009,8 @@ export default function App() {
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Status</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%] rounded-tr-xl">More Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[17%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%] rounded-tr-xl">More Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-accent/40">
@@ -1058,7 +1058,7 @@ export default function App() {
                             <button
                               onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
                               title={sub.manuscript_file || 'Paper PDF'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                             >
                               <Eye className="w-4 h-4" /> View Paper
                             </button>
@@ -1066,7 +1066,7 @@ export default function App() {
                             <button
                               onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
                               title={sub.plagiarism_file || 'Plagiarism report'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                             >
                               <Eye className="w-4 h-4" /> View Plaq Report
                             </button>
@@ -1075,7 +1075,7 @@ export default function App() {
                             <button
                               onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
                               title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                             >
                               <Eye className="w-4 h-4" /> View AI Plaq
                             </button>
@@ -1086,13 +1086,13 @@ export default function App() {
                           <div className="flex flex-col items-start gap-2">
                             <button
                               onClick={() => setMoreInfoTarget(sub)}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-sm hover:underline"
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                             >
                               <Eye className="w-4 h-4" /> View Info
                             </button>
                             <button
                               onClick={() => setDeleteTarget(sub)}
-                              className="inline-flex items-center gap-1.5 text-red-600 font-medium text-sm hover:text-red-700 hover:underline"
+                              className="inline-flex items-center gap-1.5 text-red-600 font-medium text-xs whitespace-nowrap hover:text-red-700 hover:underline"
                             >
                               <Trash2 className="w-4 h-4" /> Delete
                             </button>
