@@ -380,6 +380,18 @@ app.post('/api/admin/login', async (c) => {
 // ------------------------------------------------------------------
 app.post('/api/reviewer/login', async (c) => {
   try {
+    const maintenance = portalMaintenanceActive(await loadSettingsRecord(c.env as Bindings), 'review');
+    if (maintenance.active) {
+      return c.json(
+        {
+          success: false,
+          error: 'The reviewer portal is under maintenance. Please try again later.',
+          maintenance_until: maintenance.until,
+        },
+        503
+      );
+    }
+
     const body = await c.req.json().catch(() => null);
     const username = (body?.username || '').trim().toLowerCase();
     const password = body?.password || '';
@@ -810,6 +822,18 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'Too many submission attempts. Please try again later.' }, 429);
     }
 
+    const maintenance = portalMaintenanceActive(await loadSettingsRecord(c.env as Bindings), 'user');
+    if (maintenance.active) {
+      return c.json(
+        {
+          success: false,
+          error: 'The submission portal is under maintenance and new submissions are disabled. Please try again later.',
+          maintenance_until: maintenance.until,
+        },
+        503
+      );
+    }
+
     const clerkUserId = c.get('clerkUserId') as string;
     const clerkEmail = (c.get('clerkEmail') || '').trim();
 
@@ -1223,6 +1247,18 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'Too many edit attempts. Please try again later.' }, 429);
     }
 
+    const maintenance = portalMaintenanceActive(await loadSettingsRecord(c.env as Bindings), 'user');
+    if (maintenance.active) {
+      return c.json(
+        {
+          success: false,
+          error: 'The submission portal is under maintenance and file updates are disabled. Please try again later.',
+          maintenance_until: maintenance.until,
+        },
+        503
+      );
+    }
+
     const clerkUserId = c.get('clerkUserId') as string;
     const clerkEmail = (c.get('clerkEmail') || '').trim();
     const submissionId = c.req.param('id');
@@ -1517,14 +1553,38 @@ app.get('/api/admin/users', async (c) => {
 // ------------------------------------------------------------------
 // Settings (Maintenance Mode, etc.)
 // ------------------------------------------------------------------
+async function loadSettingsRecord(env: Bindings): Promise<Record<string, string>> {
+  const res = await env.DB.prepare('SELECT key, value FROM settings').all();
+  const settings: Record<string, string> = {};
+  for (const row of res.results as any[]) {
+    settings[row.key] = row.value;
+  }
+  return settings;
+}
+
+// Returns whether a portal is currently in maintenance and, when set, the
+// end date/time the admin configured ("" otherwise). If the admin set an
+// "until" time and it has already passed, maintenance is treated as off.
+function portalMaintenanceActive(
+  settings: Record<string, string>,
+  portal: 'user' | 'review'
+): { active: boolean; until: string | null } {
+  const enabled = settings[`maintenance_${portal}_enabled`] === 'true';
+  const until = (settings[`maintenance_${portal}_until`] || '').trim();
+  let active = enabled;
+  if (active && until) {
+    const untilMs = new Date(until).getTime();
+    if (!isNaN(untilMs)) {
+      active = untilMs > Date.now();
+    }
+  }
+  return { active, until: until || null };
+}
+
 app.get('/api/settings', async (c) => {
   const env = c.env as Bindings;
   try {
-    const res = await env.DB.prepare('SELECT key, value FROM settings').all();
-    const settings: Record<string, string> = {};
-    for (const row of res.results as any[]) {
-      settings[row.key] = row.value;
-    }
+    const settings = await loadSettingsRecord(env);
     return c.json({ success: true, settings });
   } catch (error) {
     console.error('Fetch settings error:', error);
@@ -1534,7 +1594,7 @@ app.get('/api/settings', async (c) => {
 
 app.post('/api/admin/settings', async (c) => {
   const env = c.env as Bindings;
-  
+
   const token = getBearer(c);
   if (!token) {
     return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
@@ -1545,10 +1605,60 @@ app.post('/api/admin/settings', async (c) => {
   }
   try {
     const body = await c.req.json();
+    const statements: D1PreparedStatement[] = [];
+
+    // Legacy single-mode toggle (still honoured): maps onto the user portal.
     if (typeof body.maintenance_mode === 'boolean') {
-      await env.DB.prepare('UPDATE settings SET value = ? WHERE key = ?')
-        .bind(body.maintenance_mode.toString(), 'maintenance_mode')
-        .run();
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('maintenance_user_enabled', body.maintenance_mode.toString())
+      );
+    }
+
+    const str = (v: unknown): string | undefined =>
+      typeof v === 'string' ? (v as string).trim() : typeof v === 'boolean' ? v.toString() : undefined;
+
+    const userEnabled = str(body.maintenance_user_enabled);
+    if (userEnabled !== undefined) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('maintenance_user_enabled', userEnabled)
+      );
+    }
+    const userUntil = str(body.maintenance_user_until);
+    if (userUntil !== undefined) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('maintenance_user_until', userUntil)
+      );
+    }
+    const reviewEnabled = str(body.maintenance_review_enabled);
+    if (reviewEnabled !== undefined) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('maintenance_review_enabled', reviewEnabled)
+      );
+    }
+    const reviewUntil = str(body.maintenance_review_until);
+    if (reviewUntil !== undefined) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('maintenance_review_until', reviewUntil)
+      );
+    }
+
+    if (statements.length > 0) {
+      await env.DB.batch(statements);
     }
     return c.json({ success: true });
   } catch (error) {

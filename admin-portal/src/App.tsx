@@ -641,7 +641,10 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
+  const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
+  const [mtUserUntil, setMtUserUntil] = useState<string>('');
+  const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
+  const [mtReviewUntil, setMtReviewUntil] = useState<string>('');
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
 
   const handleLogin = (newToken: string, email: string) => {
@@ -687,16 +690,19 @@ export default function App() {
       const res = await fetch(`${API_URL}/api/settings`);
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) {
-        setMaintenanceMode(data.settings?.maintenance_mode === 'true');
+        const s = data.settings || {};
+        setMtUserEnabled(s.maintenance_user_enabled === 'true' || s.maintenance_mode === 'true');
+        setMtUserUntil(s.maintenance_user_until || '');
+        setMtReviewEnabled(s.maintenance_review_enabled === 'true');
+        setMtReviewUntil(s.maintenance_review_until || '');
       }
     } catch (err) {
       console.error('Failed to load settings:', err);
     }
   };
 
-  const toggleMaintenanceMode = async () => {
+  const savePortalSettings = async () => {
     setSavingSettings(true);
-    const newValue = !maintenanceMode;
     try {
       const res = await fetch(`${API_URL}/api/admin/settings`, {
         method: 'POST',
@@ -704,11 +710,16 @@ export default function App() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ maintenance_mode: newValue })
+        body: JSON.stringify({
+          maintenance_user_enabled: mtUserEnabled,
+          maintenance_user_until: mtUserUntil,
+          maintenance_review_enabled: mtReviewEnabled,
+          maintenance_review_until: mtReviewUntil,
+        })
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) {
-        setMaintenanceMode(newValue);
+        setError(null);
       } else {
         throw new Error(data?.error || 'Failed to update settings');
       }
@@ -1239,28 +1250,100 @@ export default function App() {
           </>
         )}
         {activeTab === 'settings' && (
-          <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-6 sm:p-8 max-w-2xl mt-6">
-            <h3 className="font-serif text-xl font-bold mb-6">Portal Settings</h3>
+          <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-6 sm:p-8 max-w-3xl mt-6">
+            <h3 className="font-serif text-xl font-bold mb-1">Portal Settings</h3>
+            <p className="text-sm text-brand-text/60 mb-6">
+              Turn maintenance on per portal. While a portal is under maintenance, the end date/time you set is
+              shown to visitors; the user portal blocks new submissions and the reviewer portal blocks sign-in.
+              Leave the date/time blank for maintenance with no scheduled end.
+            </p>
 
-            <div className="flex items-center justify-between py-4 border-b border-brand-text/10">
-              <div>
-                <h4 className="font-semibold text-brand-text">Maintenance Mode</h4>
-                <p className="text-sm text-brand-text/60 mt-1">
-                  When active, the user portal will display a maintenance message and disable new submissions.
-                </p>
+            <div className="border border-brand-text/10 rounded-xl">
+              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                <div>
+                  <h4 className="font-semibold text-brand-text">User Portal Maintenance</h4>
+                  <p className="text-sm text-brand-text/60 mt-1">
+                    When on, users cannot create or update submissions and see a maintenance message.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setMtUserEnabled(!mtUserEnabled)}
+                  disabled={savingSettings}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  role="switch"
+                  aria-checked={mtUserEnabled}
+                >
+                  <span className="sr-only">Toggle user portal maintenance</span>
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
               </div>
-              <button
-                onClick={toggleMaintenanceMode}
-                disabled={savingSettings}
-                className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${maintenanceMode ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                role="switch"
-                aria-checked={maintenanceMode}
-              >
-                <span className="sr-only">Use setting</span>
-                <span
-                  aria-hidden="true"
-                  className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${maintenanceMode ? 'translate-x-5' : 'translate-x-0'}`}
+              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+                <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
+                <input
+                  type="datetime-local"
+                  value={mtUserUntil}
+                  disabled={savingSettings}
+                  onChange={(e) => setMtUserUntil(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
                 />
+                {mtUserUntil && (
+                  <span className="text-xs text-brand-text/50">
+                    Shown as "back online {new Date(mtUserUntil).toLocaleString()}"
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="border border-brand-text/10 rounded-xl mt-4">
+              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                <div>
+                  <h4 className="font-semibold text-brand-text">Reviewer Portal Maintenance</h4>
+                  <p className="text-sm text-brand-text/60 mt-1">
+                    When on, reviewers cannot sign in and see a maintenance message.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setMtReviewEnabled(!mtReviewEnabled)}
+                  disabled={savingSettings}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtReviewEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  role="switch"
+                  aria-checked={mtReviewEnabled}
+                >
+                  <span className="sr-only">Toggle reviewer portal maintenance</span>
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtReviewEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                  />
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+                <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
+                <input
+                  type="datetime-local"
+                  value={mtReviewUntil}
+                  disabled={savingSettings}
+                  onChange={(e) => setMtReviewUntil(e.target.value)}
+                  className="px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                />
+                {mtReviewUntil && (
+                  <span className="text-xs text-brand-text/50">
+                    Shown as "back online {new Date(mtReviewUntil).toLocaleString()}"
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <button
+                onClick={savePortalSettings}
+                disabled={savingSettings}
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50 shadow"
+              >
+                {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {savingSettings ? 'Saving...' : 'Save Portal Settings'}
               </button>
             </div>
           </div>

@@ -531,6 +531,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
+  const [reviewMaintenance, setReviewMaintenance] = useState<{ active: boolean; until: string | null }>({ active: false, until: null });
+  const [settingsChecked, setSettingsChecked] = useState<boolean>(false);
 
   const handleLogin = (newToken: string, name: string) => {
     setToken(newToken);
@@ -586,6 +588,34 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/settings`);
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.success) {
+          const s = data.settings || {};
+          const enabled = s.maintenance_review_enabled === 'true';
+          const until = s.maintenance_review_until || null;
+          let active = enabled;
+          if (active && until) {
+            const untilMs = new Date(until).getTime();
+            if (!isNaN(untilMs)) active = untilMs > Date.now();
+          }
+          setReviewMaintenance({ active, until });
+          if (active) {
+            handleLogout();
+          }
+        }
+      } catch {
+        // ignore; the portal stays usable if settings cannot be fetched
+      } finally {
+        setSettingsChecked(true);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const openPdf = (id: string, kind: 'paper' | 'plagiarism', filename: string) => {
     setPdfView({
       open: true,
@@ -616,6 +646,63 @@ export default function App() {
       </button>
     </div>
   );
+
+  if (!settingsChecked) {
+    return (
+      <div className="min-h-screen flex flex-col font-sans text-brand-text bg-brand-bg">
+        <div className="flex-1 flex flex-col">
+          <header className="border-b border-brand-text/10 bg-brand-bg/80 backdrop-blur-md">
+            <div className="container mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+              <h1 className="font-serif font-bold text-xl tracking-tight">Reviewer of ICAIDIET'26</h1>
+            </div>
+          </header>
+          <main className="flex-1 flex items-center justify-center py-12">
+            <div className="flex items-center gap-3 text-brand-text/70">
+              <Loader2 className="w-5 h-5 animate-spin" /> Loading portal...
+            </div>
+          </main>
+          <footer className="bg-brand-footer text-white py-6">
+            <div className="container mx-auto px-4 sm:px-6">
+              <p className="text-white/60 text-xs text-center">&copy; 2026 ICAIDIET. All rights reserved.</p>
+            </div>
+          </footer>
+        </div>
+      </div>
+    );
+  }
+
+  if (reviewMaintenance.active) {
+    return (
+      <div className="min-h-screen flex flex-col font-sans text-brand-text bg-brand-bg">
+        <div className="flex-1 flex flex-col">
+          <header className="border-b border-brand-text/10 bg-brand-bg/80 backdrop-blur-md">
+            <div className="container mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+              <h1 className="font-serif font-bold text-xl tracking-tight">Reviewer of ICAIDIET'26</h1>
+            </div>
+          </header>
+          <main className="flex-1 flex items-center justify-center px-4 py-12 sm:py-20">
+            <div className="bg-brand-card w-full max-w-lg rounded-2xl p-6 sm:p-8 shadow-xl border border-brand-text/5 text-center">
+              <AlertCircle className="w-10 h-10 text-red-600 mx-auto mb-4" />
+              <h2 className="font-serif text-2xl sm:text-3xl font-bold mb-3">Under Maintenance</h2>
+              <p className="text-brand-text/70 leading-relaxed">
+                The reviewer portal is currently under maintenance and sign-in is temporarily disabled.
+                {reviewMaintenance.until ? (
+                  <> We expect to be back online{' '}<span className="font-semibold">{new Date(reviewMaintenance.until).toLocaleString()}</span>.</>
+                ) : (
+                  ' Please check back again later.'
+                )}
+              </p>
+            </div>
+          </main>
+          <footer className="bg-brand-footer text-white py-6">
+            <div className="container mx-auto px-4 sm:px-6">
+              <p className="text-white/60 text-xs text-center">&copy; 2026 ICAIDIET. All rights reserved.</p>
+            </div>
+          </footer>
+        </div>
+      </div>
+    );
+  }
 
   if (!token) {
     return (

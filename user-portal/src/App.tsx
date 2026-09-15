@@ -24,9 +24,37 @@ function SignInRequired({ title, message }: { title: string; message: string }) 
   );
 }
 
+function MaintenanceNotice({ until }: { until: string | null }) {
+  return (
+    <div className="container mx-auto px-4 py-16 max-w-3xl text-center">
+      <div className="bg-brand-card rounded-2xl p-10 shadow-xl border border-brand-text/5">
+        <h2 className="text-2xl sm:text-3xl font-serif font-bold mb-3">Under Maintenance</h2>
+        <p className="text-brand-text/70 text-base sm:text-lg leading-relaxed">
+          The submission portal is currently under maintenance and new submissions are temporarily disabled.
+          {until ? (
+            <>
+              {' '}We expect the portal to be back online{' '}
+              <span className="font-semibold">{new Date(until).toLocaleString()}</span>.
+            </>
+          ) : (
+            ' Please check back again later.'
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function maintenanceMessage(until: string | null) {
+  return until
+    ? `The portal is under maintenance. We will be back online ${new Date(until).toLocaleString()}.`
+    : 'The portal is currently under maintenance. Please check back again later.';
+}
+
 export default function App() {
   const [currentView, setCurrentView] = useState<ViewState>('home');
   const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
+  const [maintenanceUntil, setMaintenanceUntil] = useState<string | null>(null);
   const { getToken } = useAuth();
   const { user: clerkUser } = useUser();
 
@@ -39,7 +67,12 @@ export default function App() {
         const res = await fetch(`${apiUrl}/api/settings`);
         const data = await res.json().catch(() => null);
         if (res.ok && data?.success) {
-          setMaintenanceMode(data.settings?.maintenance_mode === 'true');
+          const s = data.settings || {};
+          setMaintenanceMode(
+            s.maintenance_user_enabled === 'true' ||
+            (s.maintenance_user_enabled === undefined && s.maintenance_mode === 'true')
+          );
+          setMaintenanceUntil(s.maintenance_user_until || null);
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -50,27 +83,32 @@ export default function App() {
 
   return (
     <>
-      <MainLayout view={currentView} onNavigate={navigate} maintenanceMode={maintenanceMode}>
-        {currentView === 'home' && <HeroSection onStart={() => navigate('wizard')} maintenanceMode={maintenanceMode} />}
-
-        {currentView === 'wizard' && (
-          <Show
-            when="signed-in"
-            fallback={
-              <SignInRequired
-                title="Sign In Required"
-                message="Please sign in or create an account to submit your paper."
-              />
-            }
-          >
-            <SubmissionWizard
-              onComplete={() => navigate('home')}
-              onBack={() => navigate('home')}
-              getToken={getToken}
-              clerkUser={clerkUser}
-            />
-          </Show>
+      <MainLayout view={currentView} onNavigate={navigate} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil}>
+        {currentView === 'home' && (
+          <HeroSection onStart={() => navigate('wizard')} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil} />
         )}
+
+        {currentView === 'wizard' &&
+          (maintenanceMode ? (
+            <MaintenanceNotice until={maintenanceUntil} />
+          ) : (
+            <Show
+              when="signed-in"
+              fallback={
+                <SignInRequired
+                  title="Sign In Required"
+                  message="Please sign in or create an account to submit your paper."
+                />
+              }
+            >
+              <SubmissionWizard
+                onComplete={() => navigate('home')}
+                onBack={() => navigate('home')}
+                getToken={getToken}
+                clerkUser={clerkUser}
+              />
+            </Show>
+          ))}
 
         {currentView === 'submissions' && (
           <Show

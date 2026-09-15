@@ -16,3 +16,4 @@ backend/wrangler.toml.example
 
 # Redundant top-level assets copy (source of truth is user-portal/src/assets/)
 user-portal/assets/
+*.err
