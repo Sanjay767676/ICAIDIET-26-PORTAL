@@ -871,6 +871,7 @@ export default function App() {
                         >
                           <Eye className="w-4 h-4" /> View Paper
                         </button>
+                        {sub.plagiarism_file && (
                         <button
                           onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
                           title={sub.plagiarism_file || 'Plagiarism report'}
@@ -878,6 +879,8 @@ export default function App() {
                         >
                           <Eye className="w-4 h-4" /> View Plaq Report
                         </button>
+                        )}
+                        {sub.ai_plagiarism_file && (
                         <button
                           onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
                           title={sub.ai_plagiarism_file || 'AI plagiarism report'}
@@ -885,6 +888,7 @@ export default function App() {
                         >
                           <Eye className="w-4 h-4" /> View AI Plaq
                         </button>
+                        )}
                       </div>
                     </td>
                     <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-br-xl' : ''}`}>
@@ -945,7 +949,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2 border-t-2 border-brand-accent/40 pt-3">
+                <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
                   <button
                     onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
                     title={sub.manuscript_file || 'Paper PDF'}
@@ -953,6 +957,7 @@ export default function App() {
                   >
                     <Eye className="w-3.5 h-3.5" /> View Paper
                   </button>
+                  {sub.plagiarism_file && (
                   <button
                     onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
                     title={sub.plagiarism_file || 'Plagiarism report'}
@@ -960,6 +965,8 @@ export default function App() {
                   >
                     <Eye className="w-3.5 h-3.5" /> View Plaq Report
                   </button>
+                  )}
+                  {sub.ai_plagiarism_file && (
                   <button
                     onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
                     title={sub.ai_plagiarism_file || 'AI plagiarism report'}
@@ -967,6 +974,7 @@ export default function App() {
                   >
                     <Eye className="w-3.5 h-3.5" /> View AI Plaq
                   </button>
+                  )}
                 </div>
 
                 <div className="mt-4 border-t-2 border-brand-accent/40 pt-3">
