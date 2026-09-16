@@ -35,6 +35,7 @@ interface Submission {
   review_decision?: string | null;
   review_feedback?: string | null;
   review_updated_at?: string | null;
+  review_resubmitted?: number;
   authors?: Author[];
 }
 
@@ -86,6 +87,18 @@ function statusBadge(status: string) {
     <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap ${meta.cls}`}>
       {meta.label}
     </span>
+  );
+}
+
+function reviewBadge(decision?: string | null, updatedAt?: string | null) {
+  const ok = decision === 'ACCEPTED';
+  return (
+    <div className={`rounded-lg border px-2.5 py-1.5 ${ok ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
+      <div className={`text-xs font-semibold ${ok ? 'text-green-800' : 'text-red-800'}`}>
+        {decision === 'ACCEPTED' ? 'Accepted' : decision === 'NOT_ACCEPTED' ? 'Not Accepted' : '—'}
+      </div>
+      {updatedAt && <div className="text-[11px] text-brand-text/50 mt-0.5">{formatDateTime(updatedAt)}</div>}
+    </div>
   );
 }
 
@@ -640,7 +653,7 @@ function MoreInfoModal({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'users' | 'deleted' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'users' | 'deleted' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -854,7 +867,7 @@ export default function App() {
   React.useEffect(() => {
     if (!token) return;
     const id = setInterval(() => {
-      if (activeTab === 'submissions') fetchSubmissions({ silent: true });
+      if (activeTab === 'submissions' || activeTab === 'reviewed') fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
       else if (activeTab === 'users') fetchUsers({ silent: true });
     }, 180000);
@@ -983,16 +996,28 @@ export default function App() {
   );
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(q || trackFilter || paperIdFilter);
-  const filteredSubmissions = submissions.filter((s) => {
-    const matchSearch =
-      !q ||
-      [s.title, s.paper_id, s.submission_code, s.author_name, s.author_email].some((v) =>
-        (v || '').toLowerCase().includes(q)
-      );
-    const matchTrack = !trackFilter || s.track === trackFilter;
-    const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
-    return matchSearch && matchTrack && matchPaper;
-  });
+  const isReviewed = (s: Submission) => !!s.review_decision && s.review_resubmitted !== 1;
+  const reviewedSubmissions = submissions.filter(isReviewed);
+  const pendingSubmissions = submissions.filter((s) => !isReviewed(s));
+  const filteredSubmissions = pendingSubmissions
+    .filter((s) => {
+      const matchSearch =
+        !q ||
+        [s.title, s.paper_id, s.submission_code, s.author_name, s.author_email].some((v) =>
+          (v || '').toLowerCase().includes(q)
+        );
+      const matchTrack = !trackFilter || s.track === trackFilter;
+      const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
+      return matchSearch && matchTrack && matchPaper;
+    })
+    .sort((a, b) => {
+      const aNC = a.no_corrections ? 1 : 0;
+      const bNC = b.no_corrections ? 1 : 0;
+      if (aNC !== bNC) return bNC - aNC;
+      const aE = a.enquired ? 1 : 0;
+      const bE = b.enquired ? 1 : 0;
+      return bE - aE;
+    });
 
   if (!token) {
     return (
@@ -1036,6 +1061,24 @@ export default function App() {
                   }`}
               >
                 Submissions
+                {pendingSubmissions.length > 0 && (
+                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'submissions' ? 'bg-amber-500 text-white' : 'bg-brand-text text-white'}`}>
+                    {pendingSubmissions.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('reviewed')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'reviewed' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                  }`}
+              >
+                Reviewed
+                {reviewedSubmissions.length > 0 && (
+                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'reviewed' ? 'bg-green-500 text-white' : 'bg-green-500 text-white'}`}>
+                    {reviewedSubmissions.length}
+                  </span>
+                )}
               </button>
 
               <button
@@ -1158,7 +1201,7 @@ export default function App() {
               </div>
               {filtersActive && (
                 <div className="mt-2 text-xs text-brand-text/60">
-                  Showing {filteredSubmissions.length} of {submissions.length} submission{submissions.length === 1 ? '' : 's'}
+                  Showing {filteredSubmissions.length} of {pendingSubmissions.length} submission{pendingSubmissions.length === 1 ? '' : 's'}
                 </div>
               )}
             </div>
@@ -1416,6 +1459,204 @@ export default function App() {
                         />
                         No Corrections
                       </label>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </>
+        )}
+
+        {activeTab === 'reviewed' && (
+          <>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+              <h3 className="font-serif text-xl font-bold">Reviewed Files</h3>
+              <p className="text-xs text-brand-text/60">
+                Papers that reviewers have decided on. This section is view-only.
+              </p>
+            </div>
+
+            {error && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> Error loading submissions: {error}
+                </div>
+              </div>
+            )}
+
+            {/* Desktop table */}
+            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
+              <table className="w-full text-left border-collapse table-fixed">
+                <thead>
+                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Track</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Review Decision</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[19%] rounded-tr-xl">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-accent/40">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                    </tr>
+                  ) : reviewedSubmissions.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-brand-text/60">No reviewed papers yet.</td>
+                    </tr>
+                  ) : (
+                    reviewedSubmissions.map((sub, idx) => (
+                      <tr key={sub.id} className="bg-white">
+                        <td className={`py-4 px-5 align-top ${idx === reviewedSubmissions.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                          <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                          <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
+                        </td>
+                        <td className="py-4 px-5 align-top">
+                          <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                          <div className="mt-1">{statusBadge(sub.status)}</div>
+                        </td>
+                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
+                        <td className="py-4 px-5 align-top">{primaryAuthorLines(sub)}</td>
+                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
+                          {formatDateTime(sub.created_at) || '—'}
+                        </td>
+                        <td className="py-4 px-5 align-top">
+                          {reviewBadge(sub.review_decision, sub.review_updated_at)}
+                          {sub.review_feedback && (
+                            <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5 max-h-24 overflow-y-auto">
+                              {sub.review_feedback}
+                            </p>
+                          )}
+                        </td>
+                        <td className={`py-4 px-5 align-top ${idx === reviewedSubmissions.length - 1 ? 'rounded-br-xl' : ''}`}>
+                          <div className="flex flex-col items-start gap-2">
+                            <button
+                              onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                              title={sub.manuscript_file || 'Paper PDF'}
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                            >
+                              <Eye className="w-4 h-4" /> View Paper
+                            </button>
+                            {sub.plagiarism_file && (
+                              <button
+                                onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                                title={sub.plagiarism_file || 'Plagiarism report'}
+                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                              >
+                                <Eye className="w-4 h-4" /> View Plag.
+                              </button>
+                            )}
+                            {sub.ai_plagiarism_file && (
+                              <button
+                                onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                                title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                              >
+                                <Eye className="w-4 h-4" /> View AI Plag.
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setMoreInfoTarget(sub)}
+                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                            >
+                              <Eye className="w-4 h-4" /> View Info
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="space-y-4 lg:hidden">
+              {loading ? (
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  Loading submissions...
+                </div>
+              ) : reviewedSubmissions.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  No reviewed papers yet.
+                </div>
+              ) : (
+                reviewedSubmissions.map((sub) => (
+                  <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
+                        <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                        <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
+                      </div>
+                      <div className="shrink-0">{statusBadge(sub.status)}</div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
+                      <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                    </div>
+
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
+                        <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
+                        <div className="text-brand-text/90">{primaryAuthorLines(sub)}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
+                        <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">Review Decision</div>
+                      {reviewBadge(sub.review_decision, sub.review_updated_at)}
+                      {sub.review_feedback && (
+                        <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5">
+                          {sub.review_feedback}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
+                      <button
+                        onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                        title={sub.manuscript_file || 'Paper PDF'}
+                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View Paper
+                      </button>
+                      {sub.plagiarism_file && (
+                        <button
+                          onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                          title={sub.plagiarism_file || 'Plagiarism report'}
+                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View Plag.
+                        </button>
+                      )}
+                      {sub.ai_plagiarism_file && (
+                        <button
+                          onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                          title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View AI Plag.
+                        </button>
+                      )}
+                      <button
+                        onClick={() => setMoreInfoTarget(sub)}
+                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                      >
+                        <Eye className="w-3.5 h-3.5" /> View Info
+                      </button>
                     </div>
                   </div>
                 ))

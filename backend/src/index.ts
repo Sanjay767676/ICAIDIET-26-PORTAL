@@ -1088,7 +1088,8 @@ app.get('/api/admin/submissions', async (c) => {
                WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
-              (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
+              (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
+              (SELECT resubmitted FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_resubmitted
        FROM submissions s
        WHERE s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
