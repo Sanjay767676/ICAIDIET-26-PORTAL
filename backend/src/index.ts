@@ -1079,7 +1079,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1138,7 +1138,7 @@ app.get('/api/admin/submissions/deleted', async (c) => {
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.enquired,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.enquired, s.no_corrections,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1608,6 +1608,50 @@ app.post('/api/admin/submissions/:id/enquired', async (c) => {
     });
   } catch (error) {
     console.error('Update submission enquiry error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Toggle the "No Corrections" flag of a submission
+// (requires admin Bearer token)
+// Lets the admin track whether a paper requires no further
+// corrections. Mirrors the "Enquired" tracking flag.
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/:id/no-corrections', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const submissionId = c.req.param('id');
+    const body = await c.req.json().catch(() => null);
+    const noCorrections = body?.noCorrections === true || body?.noCorrections === 1 || body?.noCorrections === '1';
+
+    const existing = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
+      .bind(submissionId).first();
+    if (!existing) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    const now = new Date().toISOString();
+    const result = await c.env.DB.prepare(
+      `UPDATE submissions SET no_corrections = ?, updated_at = ? WHERE id = ?`
+    ).bind(noCorrections ? 1 : 0, now, submissionId).run();
+
+    const updated = result.meta.changes > 0;
+    return c.json({
+      success: updated,
+      message: updated ? 'No Corrections status updated.' : 'No Corrections status could not be updated.',
+      noCorrections: updated ? (noCorrections ? 1 : 0) : undefined,
+    });
+  } catch (error) {
+    console.error('Update submission no-corrections error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });

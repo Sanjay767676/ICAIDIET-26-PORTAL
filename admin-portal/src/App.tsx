@@ -28,6 +28,7 @@ interface Submission {
   created_at: string;
   deleted_at?: string | null;
   enquired?: number;
+  no_corrections?: number;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
   ai_plagiarism_file?: string | null;
@@ -654,6 +655,7 @@ export default function App() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [enquiredSaving, setEnquiredSaving] = useState<string | null>(null);
+  const [noCorrectionsSaving, setNoCorrectionsSaving] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
@@ -929,6 +931,35 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'Failed to update enquiry status.');
     } finally {
       setEnquiredSaving(null);
+    }
+  };
+
+  const handleNoCorrectionsToggle = async (sub: Submission) => {
+    const next = sub.no_corrections ? 0 : 1;
+    setNoCorrectionsSaving(sub.id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/no-corrections`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ noCorrections: next === 1 }),
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to update No Corrections status.');
+      }
+      setSubmissions((prev) => prev.map((s) => (s.id === sub.id ? { ...s, no_corrections: next } : s)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update No Corrections status.');
+    } finally {
+      setNoCorrectionsSaving(null);
     }
   };
 
@@ -1247,6 +1278,21 @@ export default function App() {
                                 Enquired
                               </label>
                             </div>
+                            <div className="w-full">
+                              <label
+                                className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                                title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={!!sub.no_corrections}
+                                  disabled={noCorrectionsSaving === sub.id}
+                                  onChange={() => handleNoCorrectionsToggle(sub)}
+                                  className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                                />
+                                No Corrections
+                              </label>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -1356,6 +1402,19 @@ export default function App() {
                           className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
                         />
                         Enquired
+                      </label>
+                      <label
+                        className="w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                        title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!sub.no_corrections}
+                          disabled={noCorrectionsSaving === sub.id}
+                          onChange={() => handleNoCorrectionsToggle(sub)}
+                          className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                        />
+                        No Corrections
                       </label>
                     </div>
                   </div>
