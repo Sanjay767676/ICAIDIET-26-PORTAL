@@ -34,7 +34,7 @@ export function HeroSection({ onStart, maintenanceMode, maintenanceUntil }: { on
           </a>
         </div>
 
-        <div className="mt-4 flex justify-center w-full max-w-2xl">
+        <div className="mt-4 flex flex-col sm:flex-row items-center justify-center gap-4 w-full max-w-2xl">
           <a
             href="https://www.novelcheckr.com/"
             target="_blank"
@@ -42,6 +42,13 @@ export function HeroSection({ onStart, maintenanceMode, maintenanceUntil }: { on
             className="w-full sm:w-auto px-8 py-4 bg-red-600 text-white rounded-xl font-semibold text-lg hover:bg-red-700 transition-all text-center shadow-xl"
           >
             Plagiarism Checker at ₹99
+          </a>
+          <a
+            href="/Conference_paper_Template.docx"
+            download
+            className="w-full sm:w-auto px-8 py-4 bg-black text-white rounded-xl font-semibold text-lg hover:bg-gray-800 transition-all text-center shadow-xl"
+          >
+            Download Template
           </a>
         </div>
       </div>
