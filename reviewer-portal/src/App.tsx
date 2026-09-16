@@ -607,7 +607,7 @@ export default function App() {
     if (!token) return;
     const id = setInterval(() => {
       fetchSubmissions({ silent: true });
-    }, 5000);
+    }, 180000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);

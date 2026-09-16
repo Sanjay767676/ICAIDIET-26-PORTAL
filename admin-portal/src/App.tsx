@@ -855,7 +855,7 @@ export default function App() {
       if (activeTab === 'submissions') fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
       else if (activeTab === 'users') fetchUsers({ silent: true });
-    }, 5000);
+    }, 180000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeTab]);
