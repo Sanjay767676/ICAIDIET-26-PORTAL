@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users } from 'lucide-react';
+import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -27,6 +27,7 @@ interface Submission {
   status: string;
   created_at: string;
   deleted_at?: string | null;
+  enquired?: number;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
   ai_plagiarism_file?: string | null;
@@ -652,6 +653,10 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [enquiredSaving, setEnquiredSaving] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [trackFilter, setTrackFilter] = useState('');
+  const [paperIdFilter, setPaperIdFilter] = useState('');
   const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
   const [mtUserUntil, setMtUserUntil] = useState<string>('');
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
@@ -677,7 +682,7 @@ export default function App() {
     sessionStorage.removeItem('icaidiet_admin_user');
   };
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (opts?: { silent?: boolean }) => {
     try {
       const res = await fetch(`${API_URL}/api/admin/users`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -692,7 +697,11 @@ export default function App() {
       }
       setUsers(data.users || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load users.');
+      if (opts?.silent) {
+        console.error(err);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load users.');
+      }
     }
   };
 
@@ -741,9 +750,10 @@ export default function App() {
     }
   };
 
-  const fetchSubmissions = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchSubmissions = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    if (!silent) setLoading(true);
+    if (!silent) setError(null);
     try {
       const res = await fetch(`${API_URL}/api/admin/submissions`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -766,15 +776,20 @@ export default function App() {
         readyForCameraReady: list.filter((s) => s.status === 'READY_FOR_CAMERA_READY').length,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load submissions.');
+      if (silent) {
+        console.error(err);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load submissions.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
-  const fetchDeletedSubmissions = async () => {
-    setDeletedLoading(true);
-    setError(null);
+  const fetchDeletedSubmissions = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    if (!silent) setDeletedLoading(true);
+    if (!silent) setError(null);
     try {
       const res = await fetch(`${API_URL}/api/admin/submissions/deleted`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -789,9 +804,13 @@ export default function App() {
       }
       setDeletedSubmissions(data.submissions || []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load deleted submissions.');
+      if (silent) {
+        console.error(err);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load deleted submissions.');
+      }
     } finally {
-      setDeletedLoading(false);
+      if (!silent) setDeletedLoading(false);
     }
   };
 
@@ -829,6 +848,17 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  React.useEffect(() => {
+    if (!token) return;
+    const id = setInterval(() => {
+      if (activeTab === 'submissions') fetchSubmissions({ silent: true });
+      else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
+      else if (activeTab === 'users') fetchUsers({ silent: true });
+    }, 5000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeTab]);
 
   const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => {
     const type =
@@ -873,6 +903,35 @@ export default function App() {
     }
   };
 
+  const handleEnquiredToggle = async (sub: Submission) => {
+    const next = sub.enquired ? 0 : 1;
+    setEnquiredSaving(sub.id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/enquired`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ enquired: next === 1 }),
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to update enquiry status.');
+      }
+      setSubmissions((prev) => prev.map((s) => (s.id === sub.id ? { ...s, enquired: next } : s)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update enquiry status.');
+    } finally {
+      setEnquiredSaving(null);
+    }
+  };
+
   const authButtons = (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
       <span className="text-xs sm:text-sm text-brand-text/60 truncate max-w-[45vw] sm:max-w-none">{adminEmail}</span>
@@ -884,6 +943,25 @@ export default function App() {
       </button>
     </div>
   );
+
+  const tracks = Array.from(new Set(submissions.map((s) => s.track).filter(Boolean) as string[])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const paperIds = Array.from(new Set(submissions.map((s) => s.paper_id).filter(Boolean) as string[])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const q = searchTerm.trim().toLowerCase();
+  const filtersActive = !!(q || trackFilter || paperIdFilter);
+  const filteredSubmissions = submissions.filter((s) => {
+    const matchSearch =
+      !q ||
+      [s.title, s.paper_id, s.submission_code, s.author_name, s.author_email].some((v) =>
+        (v || '').toLowerCase().includes(q)
+      );
+    const matchTrack = !trackFilter || s.track === trackFilter;
+    const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
+    return matchSearch && matchTrack && matchPaper;
+  });
 
   if (!token) {
     return (
@@ -997,6 +1075,63 @@ export default function App() {
               </div>
             )}
 
+            {/* Search & Filters */}
+            <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 mb-4">
+              <div className="flex flex-col lg:flex-row gap-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text/40 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    placeholder="Search by title, paper ID, code, author..."
+                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                  />
+                </div>
+                <select
+                  value={trackFilter}
+                  onChange={(e) => setTrackFilter(e.target.value)}
+                  className="w-full lg:w-52 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                >
+                  <option value="">All Tracks</option>
+                  {tracks.map((t) => (
+                    <option key={t} value={t}>
+                      {t.replace(/-/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+                <select
+                  value={paperIdFilter}
+                  onChange={(e) => setPaperIdFilter(e.target.value)}
+                  className="w-full lg:w-48 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                >
+                  <option value="">All Paper IDs</option>
+                  {paperIds.map((p) => (
+                    <option key={p} value={p}>
+                      {p}
+                    </option>
+                  ))}
+                </select>
+                {filtersActive && (
+                  <button
+                    onClick={() => {
+                      setSearchTerm('');
+                      setTrackFilter('');
+                      setPaperIdFilter('');
+                    }}
+                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border border-brand-text/20 text-sm font-medium text-brand-text hover:bg-brand-text/5 transition-colors whitespace-nowrap"
+                  >
+                    <X className="w-4 h-4" /> Clear
+                  </button>
+                )}
+              </div>
+              {filtersActive && (
+                <div className="mt-2 text-xs text-brand-text/60">
+                  Showing {filteredSubmissions.length} of {submissions.length} submission{submissions.length === 1 ? '' : 's'}
+                </div>
+              )}
+            </div>
+
             {/* Desktop table */}
             <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
               <table className="w-full text-left border-collapse table-fixed">
@@ -1017,14 +1152,16 @@ export default function App() {
                     <tr>
                       <td colSpan={8} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
-                  ) : submissions.length === 0 ? (
+                  ) : filteredSubmissions.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="py-8 text-center text-brand-text/60">No submissions found.</td>
+                      <td colSpan={8} className="py-8 text-center text-brand-text/60">
+                        {filtersActive ? 'No submissions match your search or filters.' : 'No submissions found.'}
+                      </td>
                     </tr>
                   ) : (
-                    submissions.map((sub, idx) => (
+                    filteredSubmissions.map((sub, idx) => (
                       <tr key={sub.id} className="bg-white">
-                        <td className={`py-4 px-5 align-top ${idx === submissions.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                        <td className={`py-4 px-5 align-top ${idx === filteredSubmissions.length - 1 ? 'rounded-bl-xl' : ''}`}>
                           <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                           <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
                         </td>
@@ -1081,7 +1218,7 @@ export default function App() {
                             )}
                           </div>
                         </td>
-                        <td className={`py-4 px-5 align-top ${idx === submissions.length - 1 ? 'rounded-br-xl' : ''}`}>
+                        <td className={`py-4 px-5 align-top ${idx === filteredSubmissions.length - 1 ? 'rounded-br-xl' : ''}`}>
                           <div className="flex flex-col items-start gap-2">
                             <button
                               onClick={() => setMoreInfoTarget(sub)}
@@ -1095,6 +1232,21 @@ export default function App() {
                             >
                               <Trash2 className="w-4 h-4" /> Delete
                             </button>
+                            <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
+                              <label
+                                className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                                title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={!!sub.enquired}
+                                  disabled={enquiredSaving === sub.id}
+                                  onChange={() => handleEnquiredToggle(sub)}
+                                  className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                                />
+                                Enquired
+                              </label>
+                            </div>
                           </div>
                         </td>
                       </tr>
@@ -1110,12 +1262,12 @@ export default function App() {
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
                   Loading submissions...
                 </div>
-              ) : submissions.length === 0 ? (
+              ) : filteredSubmissions.length === 0 ? (
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  No submissions found.
+                  {filtersActive ? 'No submissions match your search or filters.' : 'No submissions found.'}
                 </div>
               ) : (
-                submissions.map((sub) => (
+                filteredSubmissions.map((sub) => (
                   <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -1192,6 +1344,19 @@ export default function App() {
                       >
                         <Trash2 className="w-3.5 h-3.5" /> Delete
                       </button>
+                      <label
+                        className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                        title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!sub.enquired}
+                          disabled={enquiredSaving === sub.id}
+                          onChange={() => handleEnquiredToggle(sub)}
+                          className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                        />
+                        Enquired
+                      </label>
                     </div>
                   </div>
                 ))

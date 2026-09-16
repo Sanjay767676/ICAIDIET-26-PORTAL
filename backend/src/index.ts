@@ -1079,7 +1079,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1138,7 +1138,7 @@ app.get('/api/admin/submissions/deleted', async (c) => {
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.enquired,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1398,7 +1398,9 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
       }
 
       const editStatements: D1PreparedStatement[] = [
-        c.env.DB.prepare(`UPDATE submissions SET updated_at = ? WHERE id = ?`)
+        // Author re-uploaded files => the submission changed, so the
+        // admin's "Enquired" tracking flag is reset to 0 (unticked).
+        c.env.DB.prepare(`UPDATE submissions SET updated_at = ?, enquired = 0 WHERE id = ?`)
           .bind(now, submissionId),
       ];
 
@@ -1561,6 +1563,51 @@ app.post('/api/admin/submissions/:id/status', async (c) => {
     });
   } catch (error) {
     console.error('Update submission status error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Toggle the "Enquired" (contacted) flag of a submission
+// (requires admin Bearer token)
+// Lets the admin track which authors have already been called for
+// updates. When an author re-uploads files, this flag resets to 0 so
+// the checkbox becomes unticked and the admin knows to call again.
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/:id/enquired', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const submissionId = c.req.param('id');
+    const body = await c.req.json().catch(() => null);
+    const enquired = body?.enquired === true || body?.enquired === 1 || body?.enquired === '1';
+
+    const existing = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
+      .bind(submissionId).first();
+    if (!existing) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    const now = new Date().toISOString();
+    const result = await c.env.DB.prepare(
+      `UPDATE submissions SET enquired = ?, updated_at = ? WHERE id = ?`
+    ).bind(enquired ? 1 : 0, now, submissionId).run();
+
+    const updated = result.meta.changes > 0;
+    return c.json({
+      success: updated,
+      message: updated ? 'Enquiry status updated.' : 'Enquiry status could not be updated.',
+      enquired: updated ? (enquired ? 1 : 0) : undefined,
+    });
+  } catch (error) {
+    console.error('Update submission enquiry error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });

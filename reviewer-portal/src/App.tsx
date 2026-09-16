@@ -561,9 +561,10 @@ export default function App() {
     sessionStorage.removeItem('icaidiet_reviewer_user');
   };
 
-  const fetchSubmissions = async () => {
-    setLoading(true);
-    setError(null);
+  const fetchSubmissions = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    if (!silent) setLoading(true);
+    if (!silent) setError(null);
     try {
       const res = await fetch(`${API_URL}/api/reviewer/submissions`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -585,9 +586,13 @@ export default function App() {
         notAccepted: list.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'NOT_ACCEPTED').length,
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load submissions.');
+      if (silent) {
+        console.error(err);
+      } else {
+        setError(err instanceof Error ? err.message : 'Failed to load submissions.');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -595,6 +600,15 @@ export default function App() {
     if (token) {
       fetchSubmissions();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    const id = setInterval(() => {
+      fetchSubmissions({ silent: true });
+    }, 5000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
