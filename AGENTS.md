@@ -8,7 +8,7 @@ Contains `backend` (Cloudflare Worker: Hono + D1 + R2), `user-portal`, `admin-po
 Whenever the user says to deploy to Cloudflare, run BOTH steps from the `backend/` directory:
 
 1. Apply any pending D1 migrations to the remote (production) database:
-   `npx wrangler d1 migrations apply icai.diet_text_records --remote`
+   `npx wrangler d1 migrations apply icaidiet_text_records --remote`
    (DB name per `backend/wrangler.toml` — `database_name = "icaidiet_text_records"`.)
 2. Deploy the Worker code:
    `npm run deploy`
