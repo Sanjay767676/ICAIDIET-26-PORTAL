@@ -254,6 +254,35 @@ function primaryAuthorLines(sub: Submission) {
 }
 
 // ------------------------------------------------------------------
+// Keyword search: checks every available text field of a submission.
+// ------------------------------------------------------------------
+function matchesSearch(sub: Submission, q: string) {
+  if (!q) return true;
+  const haystack = [
+    sub.title,
+    sub.paper_id,
+    sub.submission_code,
+    sub.abstract,
+    sub.track,
+    sub.author_name,
+    sub.author_email,
+    sub.review_decision,
+    sub.review_feedback,
+    ...(sub.authors || []).flatMap((a) => [
+      a.first_name,
+      a.last_name,
+      a.email,
+      a.phone,
+      a.college,
+    ]),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(q);
+}
+
+// ------------------------------------------------------------------
 // Login screen (hardcoded admin auth against backend)
 // ------------------------------------------------------------------
 function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => void }) {
@@ -648,6 +677,94 @@ function MoreInfoModal({
 }
 
 // ------------------------------------------------------------------
+// Reusable search + track + paper ID filter panel (used in every tab)
+// ------------------------------------------------------------------
+function FilterPanel({
+  searchTerm,
+  onSearchChange,
+  trackFilter,
+  onTrackFilterChange,
+  paperIdFilter,
+  onPaperIdFilterChange,
+  tracks,
+  paperIds,
+  resultCount,
+  totalCount,
+  onClear,
+}: {
+  searchTerm: string;
+  onSearchChange: (v: string) => void;
+  trackFilter: string;
+  onTrackFilterChange: (v: string) => void;
+  paperIdFilter: string;
+  onPaperIdFilterChange: (v: string) => void;
+  tracks: string[];
+  paperIds: string[];
+  resultCount: number;
+  totalCount: number;
+  onClear: () => void;
+}) {
+  const filtersActive = !!(searchTerm.trim() || trackFilter || paperIdFilter);
+  return (
+    <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 mb-4">
+      <div className="flex flex-col lg:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text/40 pointer-events-none" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search by title, abstract, track, author, co-author, review feedback..."
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          />
+        </div>
+        {tracks.length > 0 && (
+          <select
+            value={trackFilter}
+            onChange={(e) => onTrackFilterChange(e.target.value)}
+            className="w-full lg:w-52 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          >
+            <option value="">All Tracks</option>
+            {tracks.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/-/g, ' ')}
+              </option>
+            ))}
+          </select>
+        )}
+        {paperIds.length > 0 && (
+          <select
+            value={paperIdFilter}
+            onChange={(e) => onPaperIdFilterChange(e.target.value)}
+            className="w-full lg:w-48 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          >
+            <option value="">All Paper IDs</option>
+            {paperIds.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        )}
+        {filtersActive && (
+          <button
+            onClick={onClear}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border border-brand-text/20 text-sm font-medium text-brand-text hover:bg-brand-text/5 transition-colors whitespace-nowrap"
+          >
+            <X className="w-4 h-4" /> Clear
+          </button>
+        )}
+      </div>
+      {filtersActive && (
+        <div className="mt-2 text-xs text-brand-text/60">
+          Showing {resultCount} of {totalCount}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
 // Main app
 // ------------------------------------------------------------------
 export default function App() {
@@ -994,30 +1111,34 @@ export default function App() {
   const paperIds = Array.from(new Set(submissions.map((s) => s.paper_id).filter(Boolean) as string[])).sort((a, b) =>
     a.localeCompare(b)
   );
+  const deletedTracks = Array.from(new Set(deletedSubmissions.map((s) => s.track).filter(Boolean) as string[])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const deletedPaperIds = Array.from(new Set(deletedSubmissions.map((s) => s.paper_id).filter(Boolean) as string[])).sort((a, b) =>
+    a.localeCompare(b)
+  );
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(q || trackFilter || paperIdFilter);
   const isReviewed = (s: Submission) => !!s.review_decision && s.review_resubmitted !== 1;
   const reviewedSubmissions = submissions.filter(isReviewed);
   const pendingSubmissions = submissions.filter((s) => !isReviewed(s));
-  const filteredSubmissions = pendingSubmissions
-    .filter((s) => {
-      const matchSearch =
-        !q ||
-        [s.title, s.paper_id, s.submission_code, s.author_name, s.author_email].some((v) =>
-          (v || '').toLowerCase().includes(q)
-        );
+  const applyFilters = (list: Submission[]) =>
+    list.filter((s) => {
+      const matchSearch = matchesSearch(s, q);
       const matchTrack = !trackFilter || s.track === trackFilter;
       const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
       return matchSearch && matchTrack && matchPaper;
-    })
-    .sort((a, b) => {
-      const aNC = a.no_corrections ? 1 : 0;
-      const bNC = b.no_corrections ? 1 : 0;
-      if (aNC !== bNC) return bNC - aNC;
-      const aE = a.enquired ? 1 : 0;
-      const bE = b.enquired ? 1 : 0;
-      return bE - aE;
     });
+  const filteredSubmissions = applyFilters(pendingSubmissions).sort((a, b) => {
+    const aNC = a.no_corrections ? 1 : 0;
+    const bNC = b.no_corrections ? 1 : 0;
+    if (aNC !== bNC) return bNC - aNC;
+    const aE = a.enquired ? 1 : 0;
+    const bE = b.enquired ? 1 : 0;
+    return bE - aE;
+  });
+  const filteredReviewed = applyFilters(reviewedSubmissions);
+  const filteredDeleted = applyFilters(deletedSubmissions);
 
   if (!token) {
     return (
@@ -1150,61 +1271,23 @@ export default function App() {
             )}
 
             {/* Search & Filters */}
-            <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 mb-4">
-              <div className="flex flex-col lg:flex-row gap-3">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text/40 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search by title, paper ID, code, author..."
-                    className="w-full pl-9 pr-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                  />
-                </div>
-                <select
-                  value={trackFilter}
-                  onChange={(e) => setTrackFilter(e.target.value)}
-                  className="w-full lg:w-52 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                >
-                  <option value="">All Tracks</option>
-                  {tracks.map((t) => (
-                    <option key={t} value={t}>
-                      {t.replace(/-/g, ' ')}
-                    </option>
-                  ))}
-                </select>
-                <select
-                  value={paperIdFilter}
-                  onChange={(e) => setPaperIdFilter(e.target.value)}
-                  className="w-full lg:w-48 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                >
-                  <option value="">All Paper IDs</option>
-                  {paperIds.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-                {filtersActive && (
-                  <button
-                    onClick={() => {
-                      setSearchTerm('');
-                      setTrackFilter('');
-                      setPaperIdFilter('');
-                    }}
-                    className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border border-brand-text/20 text-sm font-medium text-brand-text hover:bg-brand-text/5 transition-colors whitespace-nowrap"
-                  >
-                    <X className="w-4 h-4" /> Clear
-                  </button>
-                )}
-              </div>
-              {filtersActive && (
-                <div className="mt-2 text-xs text-brand-text/60">
-                  Showing {filteredSubmissions.length} of {pendingSubmissions.length} submission{pendingSubmissions.length === 1 ? '' : 's'}
-                </div>
-              )}
-            </div>
+            <FilterPanel
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              trackFilter={trackFilter}
+              onTrackFilterChange={setTrackFilter}
+              paperIdFilter={paperIdFilter}
+              onPaperIdFilterChange={setPaperIdFilter}
+              tracks={tracks}
+              paperIds={paperIds}
+              resultCount={filteredSubmissions.length}
+              totalCount={pendingSubmissions.length}
+              onClear={() => {
+                setSearchTerm('');
+                setTrackFilter('');
+                setPaperIdFilter('');
+              }}
+            />
 
             {/* Desktop table */}
             <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
@@ -1484,6 +1567,24 @@ export default function App() {
               </div>
             )}
 
+            <FilterPanel
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              trackFilter={trackFilter}
+              onTrackFilterChange={setTrackFilter}
+              paperIdFilter={paperIdFilter}
+              onPaperIdFilterChange={setPaperIdFilter}
+              tracks={tracks}
+              paperIds={paperIds}
+              resultCount={filteredReviewed.length}
+              totalCount={reviewedSubmissions.length}
+              onClear={() => {
+                setSearchTerm('');
+                setTrackFilter('');
+                setPaperIdFilter('');
+              }}
+            />
+
             {/* Desktop table */}
             <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
               <table className="w-full text-left border-collapse table-fixed">
@@ -1503,14 +1604,16 @@ export default function App() {
                     <tr>
                       <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
-                  ) : reviewedSubmissions.length === 0 ? (
+                  ) : filteredReviewed.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-brand-text/60">No reviewed papers yet.</td>
+                      <td colSpan={7} className="py-8 text-center text-brand-text/60">
+                        {filtersActive ? 'No reviewed papers match your search or filters.' : 'No reviewed papers yet.'}
+                      </td>
                     </tr>
                   ) : (
-                    reviewedSubmissions.map((sub, idx) => (
+                    filteredReviewed.map((sub, idx) => (
                       <tr key={sub.id} className="bg-white">
-                        <td className={`py-4 px-5 align-top ${idx === reviewedSubmissions.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                        <td className={`py-4 px-5 align-top ${idx === filteredReviewed.length - 1 ? 'rounded-bl-xl' : ''}`}>
                           <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                           <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
                         </td>
@@ -1531,7 +1634,7 @@ export default function App() {
                             </p>
                           )}
                         </td>
-                        <td className={`py-4 px-5 align-top ${idx === reviewedSubmissions.length - 1 ? 'rounded-br-xl' : ''}`}>
+                        <td className={`py-4 px-5 align-top ${idx === filteredReviewed.length - 1 ? 'rounded-br-xl' : ''}`}>
                           <div className="flex flex-col items-start gap-2">
                             <button
                               onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
@@ -1579,12 +1682,12 @@ export default function App() {
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
                   Loading submissions...
                 </div>
-              ) : reviewedSubmissions.length === 0 ? (
+              ) : filteredReviewed.length === 0 ? (
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  No reviewed papers yet.
+                  {filtersActive ? 'No reviewed papers match your search or filters.' : 'No reviewed papers yet.'}
                 </div>
               ) : (
-                reviewedSubmissions.map((sub) => (
+                filteredReviewed.map((sub) => (
                   <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
@@ -1684,17 +1787,37 @@ export default function App() {
               </div>
             )}
 
+            <FilterPanel
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              trackFilter={trackFilter}
+              onTrackFilterChange={setTrackFilter}
+              paperIdFilter={paperIdFilter}
+              onPaperIdFilterChange={setPaperIdFilter}
+              tracks={deletedTracks}
+              paperIds={deletedPaperIds}
+              resultCount={filteredDeleted.length}
+              totalCount={deletedSubmissions.length}
+              onClear={() => {
+                setSearchTerm('');
+                setTrackFilter('');
+                setPaperIdFilter('');
+              }}
+            />
+
             <div className="space-y-4">
               {deletedLoading ? (
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
                   Loading deleted files...
                 </div>
-              ) : deletedSubmissions.length === 0 ? (
+              ) : filteredDeleted.length === 0 ? (
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  No deleted files. Deleted submissions will appear here.
+                  {filtersActive
+                    ? 'No deleted files match your search or filters.'
+                    : 'No deleted files. Deleted submissions will appear here.'}
                 </div>
               ) : (
-                deletedSubmissions.map((sub) => {
+                filteredDeleted.map((sub) => {
                   const deletedAt = sub.deleted_at ? new Date(sub.deleted_at) : null;
                   const daysLeft = deletedAt
                     ? Math.max(0, 30 - Math.floor((Date.now() - deletedAt.getTime()) / (24 * 60 * 60 * 1000)))
