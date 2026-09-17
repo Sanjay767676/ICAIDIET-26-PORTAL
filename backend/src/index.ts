@@ -1400,17 +1400,20 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
 
       const editStatements: D1PreparedStatement[] = [
         // Author re-uploaded files => the submission changed, so the
-        // admin's "Enquired" tracking flag is reset to 0 (unticked).
-        c.env.DB.prepare(`UPDATE submissions SET updated_at = ?, enquired = 0 WHERE id = ?`)
+        // admin's "Enquired" and "No Corrections" tracking flags are
+        // reset to 0 (unticked) and the paper leaves those sections.
+        c.env.DB.prepare(`UPDATE submissions SET updated_at = ?, enquired = 0, no_corrections = 0 WHERE id = ?`)
           .bind(now, submissionId),
       ];
 
-      // Re-uploading corrected files after a NOT_ACCEPTED review moves the
-      // paper back to the reviewer's "To Review" queue (resubmitted = 1)
-      // while keeping the previous feedback available to the author.
+      // Re-uploading files after a review (Accepted or Not Accepted)
+      // moves the paper back to the reviewer's "To Review" queue and
+      // out of the admin's Reviewed / Not Accepted sections
+      // (resubmitted = 1) while keeping the previous feedback
+      // available to the author.
       const flagged = await c.env.DB.prepare(
         `SELECT id FROM reviews
-         WHERE submission_id = ? AND decision = 'NOT_ACCEPTED' AND resubmitted = 0
+         WHERE submission_id = ? AND resubmitted = 0
          LIMIT 1`
       ).bind(submissionId).first() as any;
       if (flagged?.id) {
