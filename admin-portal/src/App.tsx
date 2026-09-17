@@ -765,12 +765,622 @@ function FilterPanel({
 }
 
 // ------------------------------------------------------------------
+// Reusable full submissions listing: search/filters + desktop table +
+// mobile cards with the complete action set (status editing, file
+// views, Enquired / No Corrections toggles, delete). Used by the
+// Submissions (main) tab and the No Corrections tab.
+// ------------------------------------------------------------------
+function SubmissionListing({
+  rows,
+  total,
+  loading,
+  error,
+  filtersActive,
+  emptyMsg,
+  emptyFilteredMsg,
+  searchTerm,
+  onSearchChange,
+  trackFilter,
+  onTrackFilterChange,
+  paperIdFilter,
+  onPaperIdFilterChange,
+  tracks,
+  paperIds,
+  onClear,
+  token,
+  refresh,
+  onUnauthorized,
+  onStatusError,
+  onOpenPdf,
+  onViewInfo,
+  onDelete,
+  enquiredSaving,
+  noCorrectionsSaving,
+  onToggleEnquired,
+  onToggleNoCorrections,
+}: {
+  rows: Submission[];
+  total: number;
+  loading: boolean;
+  error: string | null;
+  filtersActive: boolean;
+  emptyMsg: string;
+  emptyFilteredMsg: string;
+  searchTerm: string;
+  onSearchChange: (v: string) => void;
+  trackFilter: string;
+  onTrackFilterChange: (v: string) => void;
+  paperIdFilter: string;
+  onPaperIdFilterChange: (v: string) => void;
+  tracks: string[];
+  paperIds: string[];
+  onClear: () => void;
+  token: string;
+  refresh: () => void;
+  onUnauthorized: () => void;
+  onStatusError: (msg: string) => void;
+  onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
+  onViewInfo: (sub: Submission) => void;
+  onDelete: (sub: Submission) => void;
+  enquiredSaving: string | null;
+  noCorrectionsSaving: string | null;
+  onToggleEnquired: (sub: Submission) => void;
+  onToggleNoCorrections: (sub: Submission) => void;
+}) {
+  return (
+    <>
+      {error && (
+        <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+          </div>
+        </div>
+      )}
+
+      <FilterPanel
+        searchTerm={searchTerm}
+        onSearchChange={onSearchChange}
+        trackFilter={trackFilter}
+        onTrackFilterChange={onTrackFilterChange}
+        paperIdFilter={paperIdFilter}
+        onPaperIdFilterChange={onPaperIdFilterChange}
+        tracks={tracks}
+        paperIds={paperIds}
+        resultCount={rows.length}
+        totalCount={total}
+        onClear={onClear}
+      />
+
+      {/* Desktop table */}
+      <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
+        <table className="w-full text-left border-collapse table-fixed">
+          <thead>
+            <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Paper Title</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Track</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Status</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[17%]">Actions</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%] rounded-tr-xl">More Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-brand-accent/40">
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="py-8 text-center text-brand-text/60">
+                  {filtersActive ? emptyFilteredMsg : emptyMsg}
+                </td>
+              </tr>
+            ) : (
+              rows.map((sub, idx) => (
+                <tr key={sub.id} className="bg-white">
+                  <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                    <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                    <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
+                  </td>
+                  <td className="py-4 px-5 align-top">
+                    <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                    {sub.abstract && (
+                      <div className="text-xs text-brand-text/50 font-normal mt-1 line-clamp-2 break-words">
+                        {sub.abstract}
+                      </div>
+                    )}
+                  </td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
+                  <td className="py-4 px-5 align-top">
+                    {primaryAuthorLines(sub)}
+                  </td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
+                    {formatDateTime(sub.created_at) || '—'}
+                  </td>
+                  <td className="py-4 px-5 align-top">
+                    <StatusSelect
+                      sub={sub}
+                      token={token}
+                      onChanged={refresh}
+                      onUnauthorized={onUnauthorized}
+                      onError={onStatusError}
+                    />
+                  </td>
+                  <td className="py-4 px-5 align-top">
+                    <div className="flex flex-col items-start gap-2">
+                      <button
+                        onClick={() => onOpenPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                        title={sub.manuscript_file || 'Paper PDF'}
+                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                      >
+                        <Eye className="w-4 h-4" /> View Paper
+                      </button>
+                      {sub.plagiarism_file && (
+                        <button
+                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                          title={sub.plagiarism_file || 'Plagiarism report'}
+                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                        >
+                          <Eye className="w-4 h-4" /> View Plag.
+                        </button>
+                      )}
+                      {sub.ai_plagiarism_file && (
+                        <button
+                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                          title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                        >
+                          <Eye className="w-4 h-4" /> View AI Plag.
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                  <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-br-xl' : ''}`}>
+                    <div className="flex flex-col items-start gap-2">
+                      <button
+                        onClick={() => onViewInfo(sub)}
+                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                      >
+                        <Eye className="w-4 h-4" /> View Info
+                      </button>
+                      <button
+                        onClick={() => onDelete(sub)}
+                        className="inline-flex items-center gap-1.5 text-red-600 font-medium text-xs whitespace-nowrap hover:text-red-700 hover:underline"
+                      >
+                        <Trash2 className="w-4 h-4" /> Delete
+                      </button>
+                      <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
+                        <label
+                          className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                          title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!sub.enquired}
+                            disabled={enquiredSaving === sub.id}
+                            onChange={() => onToggleEnquired(sub)}
+                            className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                          />
+                          Enquired
+                        </label>
+                      </div>
+                      <div className="w-full">
+                        <label
+                          className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                          title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!sub.no_corrections}
+                            disabled={noCorrectionsSaving === sub.id}
+                            onChange={() => onToggleNoCorrections(sub)}
+                            className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                          />
+                          No Corrections
+                        </label>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="space-y-4 lg:hidden">
+        {loading ? (
+          <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+            Loading submissions...
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+            {filtersActive ? emptyFilteredMsg : emptyMsg}
+          </div>
+        ) : (
+          rows.map((sub) => (
+            <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
+                  <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                  <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
+                </div>
+                <div className="shrink-0">
+                  <StatusSelect
+                    sub={sub}
+                    token={token}
+                    onChanged={refresh}
+                    onUnauthorized={onUnauthorized}
+                    onError={onStatusError}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
+                <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
+                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
+                  <div className="text-brand-text/90">{primaryAuthorLines(sub)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
+                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
+                <button
+                  onClick={() => onOpenPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                  title={sub.manuscript_file || 'Paper PDF'}
+                  className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                >
+                  <Eye className="w-3.5 h-3.5" /> View Paper
+                </button>
+                {sub.plagiarism_file && (
+                  <button
+                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                    title={sub.plagiarism_file || 'Plagiarism report'}
+                    className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> View Plag.
+                  </button>
+                )}
+                {sub.ai_plagiarism_file && (
+                  <button
+                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                    title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                    className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> View AI Plag.
+                  </button>
+                )}
+                <button
+                  onClick={() => onViewInfo(sub)}
+                  className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                >
+                  <Eye className="w-3.5 h-3.5" /> View Info
+                </button>
+                <button
+                  onClick={() => onDelete(sub)}
+                  className="flex items-center gap-1.5 text-red-600 font-medium text-xs hover:text-red-700 hover:underline"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
+                </button>
+                <label
+                  className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                  title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!sub.enquired}
+                    disabled={enquiredSaving === sub.id}
+                    onChange={() => onToggleEnquired(sub)}
+                    className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                  />
+                  Enquired
+                </label>
+                <label
+                  className="w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                  title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!sub.no_corrections}
+                    disabled={noCorrectionsSaving === sub.id}
+                    onChange={() => onToggleNoCorrections(sub)}
+                    className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                  />
+                  No Corrections
+                </label>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------
+// Reusable listing for reviewed papers (Accepted and Not Accepted
+// tabs): header, search/filters, desktop table and mobile cards.
+// This section is view-only for the admin.
+// ------------------------------------------------------------------
+function ReviewSection({
+  title,
+  subtitle,
+  rows,
+  total,
+  loading,
+  error,
+  filtersActive,
+  emptyMsg,
+  emptyFilteredMsg,
+  searchTerm,
+  onSearchChange,
+  trackFilter,
+  onTrackFilterChange,
+  paperIdFilter,
+  onPaperIdFilterChange,
+  tracks,
+  paperIds,
+  onClear,
+  onOpenPdf,
+  onViewInfo,
+}: {
+  title: string;
+  subtitle: string;
+  rows: Submission[];
+  total: number;
+  loading: boolean;
+  error: string | null;
+  filtersActive: boolean;
+  emptyMsg: string;
+  emptyFilteredMsg: string;
+  searchTerm: string;
+  onSearchChange: (v: string) => void;
+  trackFilter: string;
+  onTrackFilterChange: (v: string) => void;
+  paperIdFilter: string;
+  onPaperIdFilterChange: (v: string) => void;
+  tracks: string[];
+  paperIds: string[];
+  onClear: () => void;
+  onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
+  onViewInfo: (sub: Submission) => void;
+}) {
+  return (
+    <>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
+        <h3 className="font-serif text-xl font-bold">{title}</h3>
+        <p className="text-xs text-brand-text/60">{subtitle}</p>
+      </div>
+
+      {error && (
+        <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+          </div>
+        </div>
+      )}
+
+      <FilterPanel
+        searchTerm={searchTerm}
+        onSearchChange={onSearchChange}
+        trackFilter={trackFilter}
+        onTrackFilterChange={onTrackFilterChange}
+        paperIdFilter={paperIdFilter}
+        onPaperIdFilterChange={onPaperIdFilterChange}
+        tracks={tracks}
+        paperIds={paperIds}
+        resultCount={rows.length}
+        totalCount={total}
+        onClear={onClear}
+      />
+
+      {/* Desktop table */}
+      <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
+        <table className="w-full text-left border-collapse table-fixed">
+          <thead>
+            <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Paper Title</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Track</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Primary Author</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Submitted On</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Review Decision</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[19%] rounded-tr-xl">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-brand-accent/40">
+            {loading ? (
+              <tr>
+                <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="py-8 text-center text-brand-text/60">
+                  {filtersActive ? emptyFilteredMsg : emptyMsg}
+                </td>
+              </tr>
+            ) : (
+              rows.map((sub, idx) => (
+                <tr key={sub.id} className="bg-white">
+                  <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                    <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                    <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
+                  </td>
+                  <td className="py-4 px-5 align-top">
+                    <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                    <div className="mt-1">{statusBadge(sub.status)}</div>
+                  </td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
+                  <td className="py-4 px-5 align-top">{primaryAuthorLines(sub)}</td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
+                    {formatDateTime(sub.created_at) || '—'}
+                  </td>
+                  <td className="py-4 px-5 align-top">
+                    {reviewBadge(sub.review_decision, sub.review_updated_at)}
+                    {sub.review_feedback && (
+                      <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5 max-h-24 overflow-y-auto">
+                        {sub.review_feedback}
+                      </p>
+                    )}
+                  </td>
+                  <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-br-xl' : ''}`}>
+                    <div className="flex flex-col items-start gap-2">
+                      <button
+                        onClick={() => onOpenPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                        title={sub.manuscript_file || 'Paper PDF'}
+                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                      >
+                        <Eye className="w-4 h-4" /> View Paper
+                      </button>
+                      {sub.plagiarism_file && (
+                        <button
+                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                          title={sub.plagiarism_file || 'Plagiarism report'}
+                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                        >
+                          <Eye className="w-4 h-4" /> View Plag.
+                        </button>
+                      )}
+                      {sub.ai_plagiarism_file && (
+                        <button
+                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                          title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                        >
+                          <Eye className="w-4 h-4" /> View AI Plag.
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onViewInfo(sub)}
+                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                      >
+                        <Eye className="w-4 h-4" /> View Info
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Mobile cards */}
+      <div className="space-y-4 lg:hidden">
+        {loading ? (
+          <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+            Loading submissions...
+          </div>
+        ) : rows.length === 0 ? (
+          <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+            {filtersActive ? emptyFilteredMsg : emptyMsg}
+          </div>
+        ) : (
+          rows.map((sub) => (
+            <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
+                  <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
+                  <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
+                </div>
+                <div className="shrink-0">{statusBadge(sub.status)}</div>
+              </div>
+
+              <div className="mt-3">
+                <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
+                <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+              </div>
+
+              <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div>
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
+                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
+                  <div className="text-brand-text/90">{primaryAuthorLines(sub)}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
+                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
+                </div>
+              </div>
+
+              <div className="mt-3">
+                <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">Review Decision</div>
+                {reviewBadge(sub.review_decision, sub.review_updated_at)}
+                {sub.review_feedback && (
+                  <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5">
+                    {sub.review_feedback}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
+                <button
+                  onClick={() => onOpenPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                  title={sub.manuscript_file || 'Paper PDF'}
+                  className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                >
+                  <Eye className="w-3.5 h-3.5" /> View Paper
+                </button>
+                {sub.plagiarism_file && (
+                  <button
+                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                    title={sub.plagiarism_file || 'Plagiarism report'}
+                    className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> View Plag.
+                  </button>
+                )}
+                {sub.ai_plagiarism_file && (
+                  <button
+                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                    title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                    className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                  >
+                    <Eye className="w-3.5 h-3.5" /> View AI Plag.
+                  </button>
+                )}
+                <button
+                  onClick={() => onViewInfo(sub)}
+                  className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                >
+                  <Eye className="w-3.5 h-3.5" /> View Info
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </>
+  );
+}
+
+// ------------------------------------------------------------------
 // Main app
 // ------------------------------------------------------------------
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'users' | 'deleted' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'notAccepted' | 'noCorrections' | 'users' | 'deleted' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -984,7 +1594,7 @@ export default function App() {
   React.useEffect(() => {
     if (!token) return;
     const id = setInterval(() => {
-      if (activeTab === 'submissions' || activeTab === 'reviewed') fetchSubmissions({ silent: true });
+      if (activeTab === 'submissions' || activeTab === 'reviewed' || activeTab === 'notAccepted' || activeTab === 'noCorrections') fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
       else if (activeTab === 'users') fetchUsers({ silent: true });
     }, 180000);
@@ -1120,8 +1730,10 @@ export default function App() {
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(q || trackFilter || paperIdFilter);
   const isReviewed = (s: Submission) => !!s.review_decision && s.review_resubmitted !== 1;
-  const reviewedSubmissions = submissions.filter(isReviewed);
-  const pendingSubmissions = submissions.filter((s) => !isReviewed(s));
+  const reviewedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'ACCEPTED');
+  const notAcceptedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'NOT_ACCEPTED');
+  const noCorrectionSubmissions = submissions.filter((s) => s.no_corrections === 1);
+  const pendingSubmissions = submissions.filter((s) => !isReviewed(s) && s.no_corrections !== 1);
   const applyFilters = (list: Submission[]) =>
     list.filter((s) => {
       const matchSearch = matchesSearch(s, q);
@@ -1130,15 +1742,19 @@ export default function App() {
       return matchSearch && matchTrack && matchPaper;
     });
   const filteredSubmissions = applyFilters(pendingSubmissions).sort((a, b) => {
-    const aNC = a.no_corrections ? 1 : 0;
-    const bNC = b.no_corrections ? 1 : 0;
-    if (aNC !== bNC) return bNC - aNC;
     const aE = a.enquired ? 1 : 0;
     const bE = b.enquired ? 1 : 0;
     return bE - aE;
   });
   const filteredReviewed = applyFilters(reviewedSubmissions);
+  const filteredNotAccepted = applyFilters(notAcceptedSubmissions);
+  const filteredNoCorrections = applyFilters(noCorrectionSubmissions);
   const filteredDeleted = applyFilters(deletedSubmissions);
+  const clearFilters = () => {
+    setSearchTerm('');
+    setTrackFilter('');
+    setPaperIdFilter('');
+  };
 
   if (!token) {
     return (
@@ -1203,6 +1819,32 @@ export default function App() {
               </button>
 
               <button
+                onClick={() => setActiveTab('notAccepted')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'notAccepted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                  }`}
+              >
+                Not Accepted
+                {notAcceptedSubmissions.length > 0 && (
+                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'notAccepted' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'}`}>
+                    {notAcceptedSubmissions.length}
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('noCorrections')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'noCorrections' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                  }`}
+              >
+                No Corrections
+                {noCorrectionSubmissions.length > 0 && (
+                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'noCorrections' ? 'bg-amber-500 text-white' : 'bg-amber-600 text-white'}`}>
+                    {noCorrectionSubmissions.length}
+                  </span>
+                )}
+              </button>
+
+              <button
                 onClick={() => setActiveTab('deleted')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
@@ -1262,16 +1904,14 @@ export default function App() {
               </div>
             </div>
 
-            {error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" /> Error loading submissions: {error}
-                </div>
-              </div>
-            )}
-
-            {/* Search & Filters */}
-            <FilterPanel
+            <SubmissionListing
+              rows={filteredSubmissions}
+              total={pendingSubmissions.length}
+              loading={loading}
+              error={error ? `Error loading submissions: ${error}` : null}
+              filtersActive={filtersActive}
+              emptyMsg="No submissions found."
+              emptyFilteredMsg="No submissions match your search or filters."
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
               trackFilter={trackFilter}
@@ -1280,495 +1920,103 @@ export default function App() {
               onPaperIdFilterChange={setPaperIdFilter}
               tracks={tracks}
               paperIds={paperIds}
-              resultCount={filteredSubmissions.length}
-              totalCount={pendingSubmissions.length}
-              onClear={() => {
-                setSearchTerm('');
-                setTrackFilter('');
-                setPaperIdFilter('');
-              }}
+              onClear={clearFilters}
+              token={token}
+              refresh={fetchSubmissions}
+              onUnauthorized={handleLogout}
+              onStatusError={setError}
+              onOpenPdf={openPdf}
+              onViewInfo={setMoreInfoTarget}
+              onDelete={setDeleteTarget}
+              enquiredSaving={enquiredSaving}
+              noCorrectionsSaving={noCorrectionsSaving}
+              onToggleEnquired={handleEnquiredToggle}
+              onToggleNoCorrections={handleNoCorrectionsToggle}
             />
-
-            {/* Desktop table */}
-            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
-              <table className="w-full text-left border-collapse table-fixed">
-                <thead>
-                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Track</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Status</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[17%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%] rounded-tr-xl">More Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-brand-accent/40">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={8} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
-                    </tr>
-                  ) : filteredSubmissions.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} className="py-8 text-center text-brand-text/60">
-                        {filtersActive ? 'No submissions match your search or filters.' : 'No submissions found.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredSubmissions.map((sub, idx) => (
-                      <tr key={sub.id} className="bg-white">
-                        <td className={`py-4 px-5 align-top ${idx === filteredSubmissions.length - 1 ? 'rounded-bl-xl' : ''}`}>
-                          <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
-                          <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
-                        </td>
-                        <td className="py-4 px-5 align-top">
-                          <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
-                          {sub.abstract && (
-                            <div className="text-xs text-brand-text/50 font-normal mt-1 line-clamp-2 break-words">
-                              {sub.abstract}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
-                        <td className="py-4 px-5 align-top">
-                          {primaryAuthorLines(sub)}
-                        </td>
-                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
-                          {formatDateTime(sub.created_at) || '—'}
-                        </td>
-                        <td className="py-4 px-5 align-top">
-                          <StatusSelect
-                            sub={sub}
-                            token={token}
-                            onChanged={fetchSubmissions}
-                            onUnauthorized={handleLogout}
-                            onError={setError}
-                          />
-                        </td>
-                        <td className="py-4 px-5 align-top">
-                          <div className="flex flex-col items-start gap-2">
-                            <button
-                              onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
-                              title={sub.manuscript_file || 'Paper PDF'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                            >
-                              <Eye className="w-4 h-4" /> View Paper
-                            </button>
-                            {sub.plagiarism_file && (
-                              <button
-                                onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                                title={sub.plagiarism_file || 'Plagiarism report'}
-                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                              >
-                                <Eye className="w-4 h-4" /> View Plag.
-                              </button>
-                            )}
-                            {sub.ai_plagiarism_file && (
-                              <button
-                                onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                                title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                              >
-                                <Eye className="w-4 h-4" /> View AI Plag.
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                        <td className={`py-4 px-5 align-top ${idx === filteredSubmissions.length - 1 ? 'rounded-br-xl' : ''}`}>
-                          <div className="flex flex-col items-start gap-2">
-                            <button
-                              onClick={() => setMoreInfoTarget(sub)}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                            >
-                              <Eye className="w-4 h-4" /> View Info
-                            </button>
-                            <button
-                              onClick={() => setDeleteTarget(sub)}
-                              className="inline-flex items-center gap-1.5 text-red-600 font-medium text-xs whitespace-nowrap hover:text-red-700 hover:underline"
-                            >
-                              <Trash2 className="w-4 h-4" /> Delete
-                            </button>
-                            <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
-                              <label
-                                className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                                title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={!!sub.enquired}
-                                  disabled={enquiredSaving === sub.id}
-                                  onChange={() => handleEnquiredToggle(sub)}
-                                  className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                                />
-                                Enquired
-                              </label>
-                            </div>
-                            <div className="w-full">
-                              <label
-                                className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                                title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={!!sub.no_corrections}
-                                  disabled={noCorrectionsSaving === sub.id}
-                                  onChange={() => handleNoCorrectionsToggle(sub)}
-                                  className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                                />
-                                No Corrections
-                              </label>
-                            </div>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="space-y-4 lg:hidden">
-              {loading ? (
-                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  Loading submissions...
-                </div>
-              ) : filteredSubmissions.length === 0 ? (
-                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  {filtersActive ? 'No submissions match your search or filters.' : 'No submissions found.'}
-                </div>
-              ) : (
-                filteredSubmissions.map((sub) => (
-                  <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
-                        <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
-                        <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
-                      </div>
-                      <div className="shrink-0">
-                        <StatusSelect
-                          sub={sub}
-                          token={token}
-                          onChanged={fetchSubmissions}
-                          onUnauthorized={handleLogout}
-                          onError={setError}
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
-                      <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
-                        <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
-                        <div className="text-brand-text/90">{primaryAuthorLines(sub)}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
-                        <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
-                      <button
-                        onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
-                        title={sub.manuscript_file || 'Paper PDF'}
-                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View Paper
-                      </button>
-                      {sub.plagiarism_file && (
-                        <button
-                          onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                          title={sub.plagiarism_file || 'Plagiarism report'}
-                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> View Plag.
-                        </button>
-                      )}
-                      {sub.ai_plagiarism_file && (
-                        <button
-                          onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                          title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> View AI Plag.
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setMoreInfoTarget(sub)}
-                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View Info
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(sub)}
-                        className="flex items-center gap-1.5 text-red-600 font-medium text-xs hover:text-red-700 hover:underline"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" /> Delete
-                      </button>
-                      <label
-                        className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                        title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={!!sub.enquired}
-                          disabled={enquiredSaving === sub.id}
-                          onChange={() => handleEnquiredToggle(sub)}
-                          className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                        />
-                        Enquired
-                      </label>
-                      <label
-                        className="w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                        title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={!!sub.no_corrections}
-                          disabled={noCorrectionsSaving === sub.id}
-                          onChange={() => handleNoCorrectionsToggle(sub)}
-                          className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                        />
-                        No Corrections
-                      </label>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
           </>
         )}
 
         {activeTab === 'reviewed' && (
-          <>
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-              <h3 className="font-serif text-xl font-bold">Reviewed Files</h3>
-              <p className="text-xs text-brand-text/60">
-                Papers that reviewers have decided on. This section is view-only.
-              </p>
-            </div>
-
-            {error && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" /> Error loading submissions: {error}
-                </div>
-              </div>
-            )}
-
-            <FilterPanel
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              trackFilter={trackFilter}
-              onTrackFilterChange={setTrackFilter}
-              paperIdFilter={paperIdFilter}
-              onPaperIdFilterChange={setPaperIdFilter}
-              tracks={tracks}
-              paperIds={paperIds}
-              resultCount={filteredReviewed.length}
-              totalCount={reviewedSubmissions.length}
-              onClear={() => {
-                setSearchTerm('');
-                setTrackFilter('');
-                setPaperIdFilter('');
-              }}
-            />
-
-            {/* Desktop table */}
-            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
-              <table className="w-full text-left border-collapse table-fixed">
-                <thead>
-                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Track</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Submitted On</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Review Decision</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[19%] rounded-tr-xl">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-brand-accent/40">
-                  {loading ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
-                    </tr>
-                  ) : filteredReviewed.length === 0 ? (
-                    <tr>
-                      <td colSpan={7} className="py-8 text-center text-brand-text/60">
-                        {filtersActive ? 'No reviewed papers match your search or filters.' : 'No reviewed papers yet.'}
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredReviewed.map((sub, idx) => (
-                      <tr key={sub.id} className="bg-white">
-                        <td className={`py-4 px-5 align-top ${idx === filteredReviewed.length - 1 ? 'rounded-bl-xl' : ''}`}>
-                          <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
-                          <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
-                        </td>
-                        <td className="py-4 px-5 align-top">
-                          <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
-                          <div className="mt-1">{statusBadge(sub.status)}</div>
-                        </td>
-                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
-                        <td className="py-4 px-5 align-top">{primaryAuthorLines(sub)}</td>
-                        <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
-                          {formatDateTime(sub.created_at) || '—'}
-                        </td>
-                        <td className="py-4 px-5 align-top">
-                          {reviewBadge(sub.review_decision, sub.review_updated_at)}
-                          {sub.review_feedback && (
-                            <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5 max-h-24 overflow-y-auto">
-                              {sub.review_feedback}
-                            </p>
-                          )}
-                        </td>
-                        <td className={`py-4 px-5 align-top ${idx === filteredReviewed.length - 1 ? 'rounded-br-xl' : ''}`}>
-                          <div className="flex flex-col items-start gap-2">
-                            <button
-                              onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
-                              title={sub.manuscript_file || 'Paper PDF'}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                            >
-                              <Eye className="w-4 h-4" /> View Paper
-                            </button>
-                            {sub.plagiarism_file && (
-                              <button
-                                onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                                title={sub.plagiarism_file || 'Plagiarism report'}
-                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                              >
-                                <Eye className="w-4 h-4" /> View Plag.
-                              </button>
-                            )}
-                            {sub.ai_plagiarism_file && (
-                              <button
-                                onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                                title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                              >
-                                <Eye className="w-4 h-4" /> View AI Plag.
-                              </button>
-                            )}
-                            <button
-                              onClick={() => setMoreInfoTarget(sub)}
-                              className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                            >
-                              <Eye className="w-4 h-4" /> View Info
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="space-y-4 lg:hidden">
-              {loading ? (
-                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  Loading submissions...
-                </div>
-              ) : filteredReviewed.length === 0 ? (
-                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  {filtersActive ? 'No reviewed papers match your search or filters.' : 'No reviewed papers yet.'}
-                </div>
-              ) : (
-                filteredReviewed.map((sub) => (
-                  <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
-                        <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
-                        <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
-                      </div>
-                      <div className="shrink-0">{statusBadge(sub.status)}</div>
-                    </div>
-
-                    <div className="mt-3">
-                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
-                      <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
-                    </div>
-
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                      <div>
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
-                        <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
-                        <div className="text-brand-text/90">{primaryAuthorLines(sub)}</div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
-                        <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">Review Decision</div>
-                      {reviewBadge(sub.review_decision, sub.review_updated_at)}
-                      {sub.review_feedback && (
-                        <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5">
-                          {sub.review_feedback}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
-                      <button
-                        onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
-                        title={sub.manuscript_file || 'Paper PDF'}
-                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View Paper
-                      </button>
-                      {sub.plagiarism_file && (
-                        <button
-                          onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
-                          title={sub.plagiarism_file || 'Plagiarism report'}
-                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> View Plag.
-                        </button>
-                      )}
-                      {sub.ai_plagiarism_file && (
-                        <button
-                          onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
-                          title={sub.ai_plagiarism_file || 'AI plagiarism report'}
-                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                        >
-                          <Eye className="w-3.5 h-3.5" /> View AI Plag.
-                        </button>
-                      )}
-                      <button
-                        onClick={() => setMoreInfoTarget(sub)}
-                        className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
-                      >
-                        <Eye className="w-3.5 h-3.5" /> View Info
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
+          <ReviewSection
+            title="Reviewed Files"
+            subtitle="Papers reviewers have accepted. This section is view-only."
+            rows={filteredReviewed}
+            total={reviewedSubmissions.length}
+            loading={loading}
+            error={error ? `Error loading submissions: ${error}` : null}
+            filtersActive={filtersActive}
+            emptyMsg="No accepted papers yet."
+            emptyFilteredMsg="No accepted papers match your search or filters."
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            trackFilter={trackFilter}
+            onTrackFilterChange={setTrackFilter}
+            paperIdFilter={paperIdFilter}
+            onPaperIdFilterChange={setPaperIdFilter}
+            tracks={tracks}
+            paperIds={paperIds}
+            onClear={clearFilters}
+            onOpenPdf={openPdf}
+            onViewInfo={setMoreInfoTarget}
+          />
         )}
 
+        {activeTab === 'notAccepted' && (
+          <ReviewSection
+            title="Not Accepted Files"
+            subtitle="Papers reviewers have not accepted. These return to the submissions list automatically after the author updates their files."
+            rows={filteredNotAccepted}
+            total={notAcceptedSubmissions.length}
+            loading={loading}
+            error={error ? `Error loading submissions: ${error}` : null}
+            filtersActive={filtersActive}
+            emptyMsg="No not-accepted papers yet."
+            emptyFilteredMsg="No not-accepted papers match your search or filters."
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            trackFilter={trackFilter}
+            onTrackFilterChange={setTrackFilter}
+            paperIdFilter={paperIdFilter}
+            onPaperIdFilterChange={setPaperIdFilter}
+            tracks={tracks}
+            paperIds={paperIds}
+            onClear={clearFilters}
+            onOpenPdf={openPdf}
+            onViewInfo={setMoreInfoTarget}
+          />
+        )}
 
+        {activeTab === 'noCorrections' && (
+          <SubmissionListing
+            rows={filteredNoCorrections}
+            total={noCorrectionSubmissions.length}
+            loading={loading}
+            error={error ? `Error loading submissions: ${error}` : null}
+            filtersActive={filtersActive}
+            emptyMsg="No submissions marked as requiring no corrections yet."
+            emptyFilteredMsg="No submissions match your search or filters."
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            trackFilter={trackFilter}
+            onTrackFilterChange={setTrackFilter}
+            paperIdFilter={paperIdFilter}
+            onPaperIdFilterChange={setPaperIdFilter}
+            tracks={tracks}
+            paperIds={paperIds}
+            onClear={clearFilters}
+            token={token}
+            refresh={fetchSubmissions}
+            onUnauthorized={handleLogout}
+            onStatusError={setError}
+            onOpenPdf={openPdf}
+            onViewInfo={setMoreInfoTarget}
+            onDelete={setDeleteTarget}
+            enquiredSaving={enquiredSaving}
+            noCorrectionsSaving={noCorrectionsSaving}
+            onToggleEnquired={handleEnquiredToggle}
+            onToggleNoCorrections={handleNoCorrectionsToggle}
+          />
+        )}
 
         {activeTab === 'deleted' && (
           <>

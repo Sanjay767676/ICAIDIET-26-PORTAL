@@ -535,7 +535,7 @@ function ReviewEditor({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_reviewer_token') || '');
   const [reviewerName, setReviewerName] = useState<string>(() => sessionStorage.getItem('icaidiet_reviewer_user') || '');
-  const [activeTab, setActiveTab] = useState<'pending' | 'reviewed'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'reviewed' | 'notAccepted'>('pending');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, accepted: 0, notAccepted: 0 });
   const [loading, setLoading] = useState(false);
@@ -656,10 +656,19 @@ export default function App() {
   };
 
   const pendingCount = submissions.filter((s) => !s.review || s.review?.resubmitted === 1).length;
-  const reviewedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1).length;
+  const reviewedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED').length;
+  const notAcceptedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'NOT_ACCEPTED').length;
   const visible = activeTab === 'pending'
     ? submissions.filter((s) => !s.review || s.review?.resubmitted === 1)
-    : submissions.filter((s) => s.review && s.review.resubmitted !== 1);
+    : activeTab === 'notAccepted'
+      ? submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'NOT_ACCEPTED')
+      : submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED');
+
+  const emptyMessage = activeTab === 'pending'
+    ? 'No papers pending review.'
+    : activeTab === 'notAccepted'
+      ? 'No not-accepted papers yet. Papers you marked as not accepted will appear here.'
+      : 'No accepted papers yet.';
 
   const authButtons = (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
@@ -821,9 +830,20 @@ export default function App() {
               }`}
           >
             Reviewed
-            <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'reviewed' ? 'bg-green-500 text-white' : 'bg-brand-text text-white'
+            <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'reviewed' ? 'bg-green-500 text-white' : 'bg-green-500 text-white'
               }`}>
               {reviewedCount}
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('notAccepted')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'notAccepted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+              }`}
+          >
+            Not Accepted
+            <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'notAccepted' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'
+              }`}>
+              {notAcceptedCount}
             </span>
           </button>
         </div>
@@ -850,7 +870,7 @@ export default function App() {
               ) : visible.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="py-8 text-center text-brand-text/60">
-                    {activeTab === 'pending' ? 'No papers pending review.' : 'No reviewed papers yet.'}
+{emptyMessage}
                   </td>
                 </tr>
               ) : (
@@ -927,7 +947,7 @@ export default function App() {
             </div>
           ) : visible.length === 0 ? (
             <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-              {activeTab === 'pending' ? 'No papers pending review.' : 'No reviewed papers yet.'}
+              {emptyMessage}
             </div>
           ) : (
             visible.map((sub) => (
