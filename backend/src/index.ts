@@ -7,6 +7,9 @@ type Bindings = {
   BUCKET: R2Bucket;
   AUTH_SECRET: string;
   CLERK_SECRET_KEY: string;
+  RESEND_API_KEY?: string;
+  MAIL_FROM_EMAIL?: string;
+  MAIL_FROM_NAME?: string;
 };
 
 type Variables = {
@@ -190,6 +193,280 @@ function getBearer(c: any): string | null {
   if (!header.startsWith('Bearer ')) return null;
   return header.slice('Bearer '.length).trim();
 }
+
+// ------------------------------------------------------------------
+// Mail helpers (Resend). The Resend API is called directly via fetch —
+// the `resend` npm package is a thin wrapper around this same REST
+// endpoint, and calling it directly keeps the Worker dependency-free.
+// ------------------------------------------------------------------
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Replace {placeholder} tokens in a template with per-submission values.
+// Supported: {name}, {paper_title}, {paper_id}
+function renderMailBody(text: string, sub: any): string {
+  return (text || '')
+    .replace(/\{name\}/g, sub.recipient_name || sub.author_name || 'Author')
+    .replace(/\{paper_title\}/g, sub.title || '')
+    .replace(/\{paper_id\}/g, sub.paper_id || sub.submission_code || '');
+}
+
+async function sendViaResend(
+  c: Context<AppEnv>,
+  to: string,
+  subject: string,
+  body: string
+): Promise<{ ok: boolean; id?: string; error?: string }> {
+  const key = c.env.RESEND_API_KEY;
+  if (!key) {
+    return { ok: false, error: 'RESEND_API_KEY is not configured on the Worker.' };
+  }
+  const fromName = (c.env.MAIL_FROM_NAME as string) || 'ICAIDIET26';
+  const fromEmail = (c.env.MAIL_FROM_EMAIL as string) || 'onboarding@resend.dev';
+  const from = fromEmail.includes('<')
+    ? fromEmail
+    : `${fromName} <${fromEmail}>`;
+
+  let res: globalThis.Response;
+  try {
+    res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${key}`,
+      },
+      body: JSON.stringify({
+        from,
+        to: [to],
+        subject,
+        text: body,
+      }),
+    });
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : 'Could not reach the Resend API.' };
+  }
+
+  const data = (await res.json().catch(() => null)) as any;
+  if (!res.ok || !data || !data.id) {
+    const msg =
+      data && (data.message || data.error)
+        ? String(data.message || data.error)
+        : `Resend error ${res.status}`;
+    return { ok: false, error: msg };
+  }
+  return { ok: true, id: data.id };
+}
+
+// ------------------------------------------------------------------
+// Admin Endpoints — Mail templates + bulk mail queue
+// The queue ships one email per API call so the client can pace it at
+// ~1 email/second, matching the free-tier Resend rate limit.
+// ------------------------------------------------------------------
+
+app.get('/api/admin/mail-templates', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, name, subject, body, created_at, updated_at
+       FROM mail_templates ORDER BY created_at DESC`
+    ).all();
+    return c.json({ success: true, templates: results || [] });
+  } catch (error) {
+    console.error('Fetch mail templates error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+app.post('/api/admin/mail-templates', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+
+    const body = await c.req.json().catch(() => null);
+    const id = (body?.id || '').toString().trim();
+    const name = (body?.name || '').toString().trim();
+    const subject = (body?.subject || '').toString().trim();
+    const text = (body?.body || '').toString().trim();
+
+    if (!name || !subject || !text) {
+      return c.json({ success: false, error: 'Name, subject and body are all required.' }, 400);
+    }
+
+    const now = new Date().toISOString();
+    if (id) {
+      await c.env.DB.prepare(
+        `UPDATE mail_templates SET name = ?, subject = ?, body = ?, updated_at = ? WHERE id = ?`
+      ).bind(name, subject, text, now, id).run();
+      return c.json({ success: true, message: 'Mail template updated.', template: { id, name, subject, body: text, created_at: now, updated_at: now } });
+    }
+
+    const newId = crypto.randomUUID();
+    await c.env.DB.prepare(
+      `INSERT INTO mail_templates (id, name, subject, body, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`
+    ).bind(newId, name, subject, text, now, now).run();
+    return c.json({ success: true, message: 'Mail template created.', template: { id: newId, name, subject, body: text, created_at: now, updated_at: now } });
+  } catch (error) {
+    console.error('Save mail template error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+app.delete('/api/admin/mail-templates/:id', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+
+    const id = c.req.param('id');
+    await c.env.DB.prepare(`DELETE FROM mail_templates WHERE id = ?`).bind(id).run();
+    return c.json({ success: true, message: 'Mail template deleted.' });
+  } catch (error) {
+    console.error('Delete mail template error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// Enqueue one queued mail per selected submission. Nothing is sent here —
+// the client calls /mail/process repeatedly to send one per second.
+app.post('/api/admin/mail/enqueue', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+
+    const body = await c.req.json().catch(() => null);
+    const ids: string[] = Array.isArray(body?.submission_ids) ? body.submission_ids.map((x: any) => String(x)) : [];
+    const templateId = (body?.template_id || '').toString().trim();
+    if (ids.length === 0) return c.json({ success: false, error: 'Please select at least one submission.' }, 400);
+    if (!templateId) return c.json({ success: false, error: 'Please choose a mail template.' }, 400);
+
+    const template = await c.env.DB.prepare(`SELECT id, subject, body FROM mail_templates WHERE id = ?`)
+      .bind(templateId).first() as any;
+    if (!template) return c.json({ success: false, error: 'Mail template not found.' }, 404);
+
+    const now = new Date().toISOString();
+    const placeholders = ids.map(() => '?').join(',');
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, submission_code, paper_id, title, author_name, author_email FROM submissions
+       WHERE deleted_at IS NULL AND id IN (${placeholders})`
+    ).bind(...ids).all();
+
+    const subs = (results || []) as any[];
+    const logStatements: D1PreparedStatement[] = [];
+    let enqueued = 0;
+
+    for (const s of subs) {
+      const email = ((s.author_email || '') as string).trim();
+      const primary = await c.env.DB.prepare(
+        `SELECT first_name, last_name, email FROM authors
+         WHERE submission_id = ? AND is_primary = 1 LIMIT 1`
+      ).bind(s.id).first() as any;
+      const recipientEmail = (primary?.email || email).trim();
+      if (!recipientEmail) continue;
+
+      const recipientName =
+        [(primary?.first_name || '').trim(), (primary?.last_name || '').trim()].filter(Boolean).join(' ') ||
+        s.author_name ||
+        'Author';
+
+      const subject = renderMailBody(template.subject, {
+        recipient_name: recipientName,
+        title: s.title,
+        paper_id: s.paper_id,
+        submission_code: s.submission_code,
+      });
+      const text = renderMailBody(template.body, {
+        recipient_name: recipientName,
+        title: s.title,
+        paper_id: s.paper_id,
+        submission_code: s.submission_code,
+      });
+
+      logStatements.push(
+        c.env.DB.prepare(
+          `INSERT INTO mail_logs
+            (id, submission_id, template_id, recipient_name, recipient_email, paper_title, subject, body, status, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`
+        ).bind(crypto.randomUUID(), s.id, templateId, recipientName, recipientEmail, s.title, subject, text, now, now)
+      );
+      enqueued++;
+    }
+
+    await c.env.DB.batch(logStatements);
+    return c.json({
+      success: true,
+      message: `${enqueued} mail${enqueued === 1 ? '' : 's'} queued. Sending ${enqueued === 1 ? 'it' : 'them'} now...`,
+      enqueued,
+    });
+  } catch (error) {
+    console.error('Enqueue mail error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// Send ONE queued mail (oldest first). Returns the remaining queue size
+// so the client can keep calling until the queue is drained (~1/sec).
+app.post('/api/admin/mail/process', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+
+    const queued = await c.env.DB.prepare(
+      `SELECT id, recipient_email, subject, body FROM mail_logs
+       WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1`
+    ).first() as any;
+
+    if (!queued) {
+      const { results } = await c.env.DB.prepare(
+        `SELECT COUNT(*) AS total FROM mail_logs WHERE status IN ('queued', 'sending')`
+      ).first() as any;
+      return c.json({ success: true, processed: false, remaining: 0 });
+    }
+
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(`UPDATE mail_logs SET status = 'sending', updated_at = ? WHERE id = ?`)
+      .bind(now, queued.id).run();
+
+    const result = await sendViaResend(c, queued.recipient_email, queued.subject, queued.body);
+
+    if (result.ok) {
+      await c.env.DB.prepare(
+        `UPDATE mail_logs SET status = 'delivered', resend_id = ?, error = NULL, updated_at = ? WHERE id = ?`
+      ).bind(result.id || null, new Date().toISOString(), queued.id).run();
+    } else {
+      await c.env.DB.prepare(
+        `UPDATE mail_logs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
+      ).bind(result.error || 'Send failed.', new Date().toISOString(), queued.id).run();
+    }
+
+    const { results: remaining } = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM mail_logs WHERE status IN ('queued', 'sending')`
+    ).first() as any;
+
+    return c.json({
+      success: true,
+      processed: true,
+      status: result.ok ? 'delivered' : 'failed',
+      error: result.error || null,
+      remaining: Number(remaining?.n || 0),
+    });
+  } catch (error) {
+    console.error('Process mail queue error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
 
 // A profile is "complete" (submission-ready) when all required fields are filled.
 function isProfileComplete(p: any): boolean {
@@ -1089,7 +1366,8 @@ app.get('/api/admin/submissions', async (c) => {
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
-              (SELECT resubmitted FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_resubmitted
+              (SELECT resubmitted FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_resubmitted,
+              (SELECT status FROM mail_logs l WHERE l.submission_id = s.id ORDER BY l.created_at DESC LIMIT 1) AS mail_status
        FROM submissions s
        WHERE s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
@@ -1306,7 +1584,7 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const submission = await c.env.DB.prepare(
-      `SELECT id, user_id, created_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, user_id, status, created_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
@@ -1406,17 +1684,22 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
           .bind(now, submissionId),
       ];
 
-      // Re-uploading files after a review (Accepted or Not Accepted)
-      // moves the paper back to the reviewer's "To Review" queue and
-      // out of the admin's Reviewed / Not Accepted sections
-      // (resubmitted = 1) while keeping the previous feedback
-      // available to the author.
+      // Re-uploading files after a review moves the paper back to the
+      // reviewer's "To Review" queue and out of the admin's Reviewed /
+      // Not Accepted sections (resubmitted = 1) while keeping the
+      // previous feedback available to the author.
+      //
+      // Exception: if the paper has been Accepted by the reviewer and is
+      // in READY_FOR_REGISTRATION status, the author's file updates are
+      // just the conference-format resubmission that admin requested, so
+      // the paper STAYS in the admin Reviewed / Accepted section and does
+      // not go back to the reviewer queue.
       const flagged = await c.env.DB.prepare(
-        `SELECT id FROM reviews
+        `SELECT id, decision FROM reviews
          WHERE submission_id = ? AND resubmitted = 0
          LIMIT 1`
       ).bind(submissionId).first() as any;
-      if (flagged?.id) {
+      if (flagged?.id && !(submission.status === 'READY_FOR_REGISTRATION' && flagged.decision === 'ACCEPTED')) {
         editStatements.push(
           c.env.DB.prepare(
             `UPDATE reviews SET resubmitted = 1, updated_at = ? WHERE id = ?`

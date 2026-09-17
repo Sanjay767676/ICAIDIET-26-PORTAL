@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search } from 'lucide-react';
+import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -36,7 +36,17 @@ interface Submission {
   review_feedback?: string | null;
   review_updated_at?: string | null;
   review_resubmitted?: number;
+  mail_status?: string;
   authors?: Author[];
+}
+
+interface MailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 interface FileView {
@@ -99,6 +109,33 @@ function reviewBadge(decision?: string | null, updatedAt?: string | null) {
       </div>
       {updatedAt && <div className="text-[11px] text-brand-text/50 mt-0.5">{formatDateTime(updatedAt)}</div>}
     </div>
+  );
+}
+
+// Mail delivery status shown in the Reviewed / Not Accepted sections.
+//   queued / sending -> Sending (yellow)
+//   delivered        -> Delivered (green)
+//   failed           -> Not sent (red)
+function mailStatusBadge(status?: string) {
+  if (!status) return <span className="text-xs text-brand-text/40">—</span>;
+  if (status === 'delivered') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 whitespace-nowrap">
+        <CheckCircle2 className="w-3.5 h-3.5" /> Delivered
+      </span>
+    );
+  }
+  if (status === 'failed') {
+    return (
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 whitespace-nowrap">
+        <XCircle className="w-3.5 h-3.5" /> Not sent
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 whitespace-nowrap">
+      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending
+    </span>
   );
 }
 
@@ -1139,6 +1176,14 @@ function ReviewSection({
   onClear,
   onOpenPdf,
   onViewInfo,
+  mailTemplates,
+  selectedTemplateId,
+  onSelectedTemplateChange,
+  mailSelected,
+  onToggleMailSelect,
+  onToggleMailSelectAll,
+  onSendMail,
+  mailSending,
 }: {
   title: string;
   subtitle: string;
@@ -1160,12 +1205,62 @@ function ReviewSection({
   onClear: () => void;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
+  mailTemplates: MailTemplate[];
+  selectedTemplateId: string;
+  onSelectedTemplateChange: (v: string) => void;
+  mailSelected: string[];
+  onToggleMailSelect: (id: string) => void;
+  onToggleMailSelectAll: (list: Submission[]) => void;
+  onSendMail: () => void;
+  mailSending: boolean;
 }) {
+  const allSelected = rows.length > 0 && rows.every((s) => mailSelected.includes(s.id));
   return (
     <>
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-        <h3 className="font-serif text-xl font-bold">{title}</h3>
-        <p className="text-xs text-brand-text/60">{subtitle}</p>
+      <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-3 mb-4">
+        <div>
+          <h3 className="font-serif text-xl font-bold">{title}</h3>
+          <p className="text-xs text-brand-text/60 mt-1 max-w-2xl">{subtitle}</p>
+        </div>
+
+        {/* Mail controls */}
+        <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border-2 border-brand-accent px-3 py-2.5 shadow-sm">
+          <label
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-text/80 cursor-pointer select-none"
+            title="Select / deselect all visible papers"
+          >
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => onToggleMailSelectAll(rows)}
+              className="w-4 h-4 rounded accent-brand-accent cursor-pointer"
+            />
+            Select all
+          </label>
+          <select
+            value={selectedTemplateId}
+            onChange={(e) => onSelectedTemplateChange(e.target.value)}
+            disabled={mailSending}
+            className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all disabled:opacity-50"
+          >
+            <option value="">Choose template...</option>
+            {mailTemplates.map((t) => (
+              <option key={t.id} value={t.id}>{t.name}</option>
+            ))}
+          </select>
+          <button
+            onClick={onSendMail}
+            disabled={mailSending || mailSelected.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
+          >
+            <Mail className={`w-4 h-4 ${mailSending ? 'animate-pulse' : ''}`} />
+            {mailSending
+              ? 'Sending...'
+              : mailSelected.length > 0
+                ? `Send Email (${mailSelected.length})`
+                : 'Send Email'}
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -1195,30 +1290,42 @@ function ReviewSection({
         <table className="w-full text-left border-collapse table-fixed">
           <thead>
             <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Paper Title</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Track</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Primary Author</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Submitted On</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Review Decision</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[19%] rounded-tr-xl">Actions</th>
+              <th className="py-4 px-3 font-semibold text-sm text-brand-text uppercase tracking-wider w-[6%] rounded-tl-xl">Select</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[9%]">Paper ID</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[15%]">Paper Title</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[9%]">Track</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Submitted On</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Review Decision</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Mail Status</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%] rounded-tr-xl">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-accent/40">
             {loading ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                <td colSpan={9} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={7} className="py-8 text-center text-brand-text/60">
+                <td colSpan={9} className="py-8 text-center text-brand-text/60">
                   {filtersActive ? emptyFilteredMsg : emptyMsg}
                 </td>
               </tr>
             ) : (
               rows.map((sub, idx) => (
                 <tr key={sub.id} className="bg-white">
-                  <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                  <td className={`py-4 px-3 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                    <input
+                      type="checkbox"
+                      checked={mailSelected.includes(sub.id)}
+                      onChange={() => onToggleMailSelect(sub.id)}
+                      disabled={mailSending}
+                      className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                      aria-label={`Select ${sub.paper_id || sub.title}`}
+                    />
+                  </td>
+                  <td className="py-4 px-5 align-top">
                     <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                     <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
                   </td>
@@ -1239,6 +1346,7 @@ function ReviewSection({
                       </p>
                     )}
                   </td>
+                  <td className="py-4 px-5 align-top">{mailStatusBadge(sub.mail_status)}</td>
                   <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-br-xl' : ''}`}>
                     <div className="flex flex-col items-start gap-2">
                       <button
@@ -1295,6 +1403,16 @@ function ReviewSection({
           rows.map((sub) => (
             <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
               <div className="flex items-start justify-between gap-3">
+                <label className="shrink-0 cursor-pointer select-none" title="Select for mail">
+                  <input
+                    type="checkbox"
+                    checked={mailSelected.includes(sub.id)}
+                    onChange={() => onToggleMailSelect(sub.id)}
+                    disabled={mailSending}
+                    className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                    aria-label={`Select ${sub.paper_id || sub.title}`}
+                  />
+                </label>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
                   <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
@@ -1331,6 +1449,11 @@ function ReviewSection({
                     {sub.review_feedback}
                   </p>
                 )}
+              </div>
+
+              <div className="mt-3">
+                <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">Mail Status</div>
+                {mailStatusBadge(sub.mail_status)}
               </div>
 
               <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
@@ -1404,6 +1527,16 @@ export default function App() {
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
   const [mtReviewUntil, setMtReviewUntil] = useState<string>('');
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
+  const [mailTemplates, setMailTemplates] = useState<MailTemplate[]>([]);
+  const [mailTemplatesLoading, setMailTemplatesLoading] = useState(false);
+  const [mailTemplatesError, setMailTemplatesError] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>('');
+  const [mailSelected, setMailSelected] = useState<string[]>([]);
+  const [mailSending, setMailSending] = useState<boolean>(false);
+  const [mailSendError, setMailSendError] = useState<string | null>(null);
+  const [mailSendMessage, setMailSendMessage] = useState<string | null>(null);
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateDraft, setTemplateDraft] = useState<MailTemplate | null>(null);
 
   const handleLogin = (newToken: string, email: string) => {
     setToken(newToken);
@@ -1581,12 +1714,181 @@ export default function App() {
     }
   };
 
+  // ------------------------------------------------------------------
+  // Mail (Resend) — template management + one-at-a-time queue draining
+  // ------------------------------------------------------------------
+
+  const fetchMailTemplates = async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setMailTemplatesLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/mail-templates`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to load mail templates.');
+      }
+      setMailTemplates(data.templates || []);
+      setMailTemplatesError(null);
+    } catch (err) {
+      if (opts?.silent) {
+        console.error(err);
+      } else {
+        setMailTemplatesError(err instanceof Error ? err.message : 'Failed to load mail templates.');
+      }
+    } finally {
+      if (!opts?.silent) setMailTemplatesLoading(false);
+    }
+  };
+
+  const saveMailTemplate = async (tpl: MailTemplate) => {
+    setSavingTemplate(true);
+    setMailTemplatesError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/mail-templates`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ id: tpl.id || '', name: tpl.name, subject: tpl.subject, body: tpl.body }),
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to save mail template.');
+      }
+      await fetchMailTemplates({ silent: true });
+      setTemplateDraft(null);
+    } catch (err) {
+      setMailTemplatesError(err instanceof Error ? err.message : 'Failed to save mail template.');
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  const deleteMailTemplate = async (id: string) => {
+    if (!window.confirm('Delete this mail template?')) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/mail-templates/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to delete mail template.');
+      }
+      await fetchMailTemplates({ silent: true });
+    } catch (err) {
+      setMailTemplatesError(err instanceof Error ? err.message : 'Failed to delete mail template.');
+    }
+  };
+
+  const toggleMailSelect = (id: string) => {
+    setMailSelected((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const toggleMailSelectAll = (list: Submission[]) => {
+    const ids = list.map((s) => s.id);
+    setMailSelected((prev) => {
+      const allSelected = ids.every((id) => prev.includes(id));
+      if (allSelected) return prev.filter((id) => !ids.includes(id));
+      return [...new Set([...prev, ...ids])];
+    });
+  };
+
+  const processMailQueue = async () => {
+    let pending = true;
+    let processed = false;
+    while (pending && token) {
+      try {
+        const res = await fetch(`${API_URL}/api/admin/mail/process`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+          handleLogout();
+          return;
+        }
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.success) {
+          throw new Error(data?.error || 'Failed to process the mail queue.');
+        }
+        if (data.processed) {
+          processed = true;
+          fetchSubmissions({ silent: true });
+        }
+        pending = Number(data.remaining || 0) > 0;
+        if (pending) {
+          // Pace sends at ~1 per second to respect Resend's free-tier limit.
+          await new Promise((r) => setTimeout(r, 1200));
+        }
+      } catch (err) {
+        setMailSendError(err instanceof Error ? err.message : 'Failed to process the mail queue.');
+        return;
+      }
+    }
+    setMailSending(false);
+    setMailSendMessage(processed ? 'All selected mails have been sent.' : 'No mails were waiting in the queue.');
+  };
+
+  const handleSendMail = async () => {
+    if (mailSelected.length === 0) {
+      setMailSendError('Please select at least one paper to send mail to.');
+      return;
+    }
+    if (!selectedTemplateId) {
+      setMailSendError('Please choose a mail template before sending.');
+      return;
+    }
+    setMailSendError(null);
+    setMailSendMessage(null);
+    setMailSending(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/mail/enqueue`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ submission_ids: mailSelected, template_id: selectedTemplateId }),
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to queue the mails.');
+      }
+      setMailSelected([]);
+      setMailSendMessage(data.message || 'Mails queued.');
+      fetchSubmissions({ silent: true });
+      await processMailQueue();
+    } catch (err) {
+      setMailSendError(err instanceof Error ? err.message : 'Failed to send mails.');
+      setMailSending(false);
+    }
+  };
+
   React.useEffect(() => {
     if (token) {
       fetchSubmissions();
       fetchDeletedSubmissions();
       fetchUsers();
       fetchSettings();
+      fetchMailTemplates({ silent: true });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
@@ -1732,7 +2034,7 @@ export default function App() {
   const isReviewed = (s: Submission) => !!s.review_decision && s.review_resubmitted !== 1;
   const reviewedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'ACCEPTED');
   const notAcceptedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'NOT_ACCEPTED');
-  const noCorrectionSubmissions = submissions.filter((s) => s.no_corrections === 1);
+  const noCorrectionSubmissions = submissions.filter((s) => s.no_corrections === 1 && !isReviewed(s));
   const pendingSubmissions = submissions.filter((s) => !isReviewed(s) && s.no_corrections !== 1);
   const applyFilters = (list: Submission[]) =>
     list.filter((s) => {
@@ -1937,53 +2239,101 @@ export default function App() {
         )}
 
         {activeTab === 'reviewed' && (
-          <ReviewSection
-            title="Reviewed Files"
-            subtitle="Papers reviewers have accepted. This section is view-only."
-            rows={filteredReviewed}
-            total={reviewedSubmissions.length}
-            loading={loading}
-            error={error ? `Error loading submissions: ${error}` : null}
-            filtersActive={filtersActive}
-            emptyMsg="No accepted papers yet."
-            emptyFilteredMsg="No accepted papers match your search or filters."
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
-            trackFilter={trackFilter}
-            onTrackFilterChange={setTrackFilter}
-            paperIdFilter={paperIdFilter}
-            onPaperIdFilterChange={setPaperIdFilter}
-            tracks={tracks}
-            paperIds={paperIds}
-            onClear={clearFilters}
-            onOpenPdf={openPdf}
-            onViewInfo={setMoreInfoTarget}
-          />
+          <>
+            {mailSendError && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-4 border border-red-200 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> {mailSendError}
+                </div>
+              </div>
+            )}
+            {mailSendMessage && (
+              <div className="bg-green-50 text-green-700 p-4 rounded-xl mb-4 border border-green-200 text-sm">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" /> {mailSendMessage}
+                </div>
+              </div>
+            )}
+            <ReviewSection
+              title="Reviewed Files"
+              subtitle="Papers reviewers have accepted. This section is view-only."
+              rows={filteredReviewed}
+              total={reviewedSubmissions.length}
+              loading={loading}
+              error={error ? `Error loading submissions: ${error}` : null}
+              filtersActive={filtersActive}
+              emptyMsg="No accepted papers yet."
+              emptyFilteredMsg="No accepted papers match your search or filters."
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              trackFilter={trackFilter}
+              onTrackFilterChange={setTrackFilter}
+              paperIdFilter={paperIdFilter}
+              onPaperIdFilterChange={setPaperIdFilter}
+              tracks={tracks}
+              paperIds={paperIds}
+              onClear={clearFilters}
+              onOpenPdf={openPdf}
+              onViewInfo={setMoreInfoTarget}
+              mailTemplates={mailTemplates}
+              selectedTemplateId={selectedTemplateId}
+              onSelectedTemplateChange={setSelectedTemplateId}
+              mailSelected={mailSelected}
+              onToggleMailSelect={toggleMailSelect}
+              onToggleMailSelectAll={toggleMailSelectAll}
+              onSendMail={handleSendMail}
+              mailSending={mailSending}
+            />
+          </>
         )}
 
         {activeTab === 'notAccepted' && (
-          <ReviewSection
-            title="Not Accepted Files"
-            subtitle="Papers reviewers have not accepted. These return to the submissions list automatically after the author updates their files."
-            rows={filteredNotAccepted}
-            total={notAcceptedSubmissions.length}
-            loading={loading}
-            error={error ? `Error loading submissions: ${error}` : null}
-            filtersActive={filtersActive}
-            emptyMsg="No not-accepted papers yet."
-            emptyFilteredMsg="No not-accepted papers match your search or filters."
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
-            trackFilter={trackFilter}
-            onTrackFilterChange={setTrackFilter}
-            paperIdFilter={paperIdFilter}
-            onPaperIdFilterChange={setPaperIdFilter}
-            tracks={tracks}
-            paperIds={paperIds}
-            onClear={clearFilters}
-            onOpenPdf={openPdf}
-            onViewInfo={setMoreInfoTarget}
-          />
+          <>
+            {mailSendError && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-4 border border-red-200 text-sm">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> {mailSendError}
+                </div>
+              </div>
+            )}
+            {mailSendMessage && (
+              <div className="bg-green-50 text-green-700 p-4 rounded-xl mb-4 border border-green-200 text-sm">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" /> {mailSendMessage}
+                </div>
+              </div>
+            )}
+            <ReviewSection
+              title="Not Accepted Files"
+              subtitle="Papers reviewers have not accepted. These return to the submissions list automatically after the author updates their files."
+              rows={filteredNotAccepted}
+              total={notAcceptedSubmissions.length}
+              loading={loading}
+              error={error ? `Error loading submissions: ${error}` : null}
+              filtersActive={filtersActive}
+              emptyMsg="No not-accepted papers yet."
+              emptyFilteredMsg="No not-accepted papers match your search or filters."
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              trackFilter={trackFilter}
+              onTrackFilterChange={setTrackFilter}
+              paperIdFilter={paperIdFilter}
+              onPaperIdFilterChange={setPaperIdFilter}
+              tracks={tracks}
+              paperIds={paperIds}
+              onClear={clearFilters}
+              onOpenPdf={openPdf}
+              onViewInfo={setMoreInfoTarget}
+              mailTemplates={mailTemplates}
+              selectedTemplateId={selectedTemplateId}
+              onSelectedTemplateChange={setSelectedTemplateId}
+              mailSelected={mailSelected}
+              onToggleMailSelect={toggleMailSelect}
+              onToggleMailSelectAll={toggleMailSelectAll}
+              onSendMail={handleSendMail}
+              mailSending={mailSending}
+            />
+          </>
         )}
 
         {activeTab === 'noCorrections' && (
@@ -2203,6 +2553,152 @@ export default function App() {
                   <span className="text-xs text-brand-text/50">
                     Shown as "back online {new Date(mtReviewUntil).toLocaleString()}"
                   </span>
+                )}
+              </div>
+            </div>
+
+            <div className="border border-brand-text/10 rounded-xl mt-4">
+              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                <div>
+                  <h4 className="font-semibold text-brand-text">Mail Templates</h4>
+                  <p className="text-sm text-brand-text/60 mt-1">
+                    Templates used when sending emails to authors from the Reviewed / Not Accepted sections. Add
+                    placeholders and the system fills them automatically per paper.
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                    <span className="text-brand-text/50">Available placeholders:</span>
+                    <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{name}'}</code>
+                    <span className="text-brand-text/50">→ primary author name</span>
+                    <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_title}'}</code>
+                    <span className="text-brand-text/50">→ paper title</span>
+                    <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_id}'}</code>
+                    <span className="text-brand-text/50">→ paper ID</span>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setTemplateDraft({ id: '', name: '', subject: '', body: '' })}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0"
+                >
+                  <Mail className="w-4 h-4" /> New Template
+                </button>
+              </div>
+
+              {mailTemplatesError && (
+                <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2 border-b-2 border-brand-accent/40">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> {mailTemplatesError}
+                </div>
+              )}
+
+              {templateDraft && (
+                <div className="px-5 py-4 border-b-2 border-brand-accent/40 bg-brand-bg/40">
+                  <h5 className="font-semibold text-brand-text mb-3">{templateDraft.id ? 'Edit Template' : 'New Template'}</h5>
+                  <div className="grid gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-brand-text/80 mb-1">Template Name</label>
+                      <input
+                        value={templateDraft.name}
+                        onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })}
+                        placeholder="e.g. Accepted paper intimation"
+                        className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-brand-text/80 mb-1">Subject</label>
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                        <span className="text-xs text-brand-text/40">Insert:</span>
+                        {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setTemplateDraft(d => d ? { ...d, subject: d.subject + p } : d)}
+                            className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                      <input
+                        value={templateDraft.subject}
+                        onChange={(e) => setTemplateDraft({ ...templateDraft, subject: e.target.value })}
+                        placeholder="e.g. Regarding your paper {paper_title}"
+                        className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-brand-text/80 mb-1">Body</label>
+                      <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                        <span className="text-xs text-brand-text/40">Insert:</span>
+                        {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
+                          <button
+                            key={p}
+                            type="button"
+                            onClick={() => setTemplateDraft(d => d ? { ...d, body: d.body + p } : d)}
+                            className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
+                          >
+                            {p}
+                          </button>
+                        ))}
+                      </div>
+                      <textarea
+                        value={templateDraft.body}
+                        onChange={(e) => setTemplateDraft({ ...templateDraft, body: e.target.value })}
+                        rows={6}
+                        placeholder={'Dear {name},\n\nYour paper "{paper_title}" has been...'}
+                        className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-y font-mono"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => saveMailTemplate(templateDraft)}
+                        disabled={savingTemplate}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
+                      >
+                        {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                        {savingTemplate ? 'Saving...' : 'Save Template'}
+                      </button>
+                      <button
+                        onClick={() => setTemplateDraft(null)}
+                        disabled={savingTemplate}
+                        className="px-4 py-2 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors disabled:opacity-50"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="divide-y divide-brand-text/10">
+                {mailTemplatesLoading ? (
+                  <div className="px-5 py-4 text-sm text-brand-text/60">Loading templates...</div>
+                ) : mailTemplates.length === 0 ? (
+                  <div className="px-5 py-4 text-sm text-brand-text/60">
+                    No mail templates yet. Create one to send emails to authors.
+                  </div>
+                ) : (
+                  mailTemplates.map((t) => (
+                    <div key={t.id} className="px-5 py-4 flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <h5 className="font-semibold text-brand-text">{t.name}</h5>
+                        <p className="text-xs text-brand-text/50 font-medium mt-0.5 break-words">{t.subject}</p>
+                        <p className="text-sm text-brand-text/70 mt-1.5 whitespace-pre-wrap break-words">{t.body}</p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => setTemplateDraft({ id: t.id, name: t.name, subject: t.subject, body: t.body })}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => deleteMailTemplate(t.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-red-600 rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ))
                 )}
               </div>
             </div>
