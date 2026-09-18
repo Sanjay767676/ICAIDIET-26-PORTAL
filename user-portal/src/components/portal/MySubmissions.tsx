@@ -66,27 +66,44 @@ function isEdited(sub: MySubmission) {
 function reviewBanner(sub: MySubmission) {
   const hasReview = sub.review_decision || sub.review_feedback;
   if (!hasReview) return null;
-  const accepted = sub.review_decision === 'ACCEPTED';
+  const decision = sub.review_decision || '';
+  const accepted = decision === 'ACCEPTED';
+  const minor = decision === 'ACCEPTED_WITH_MINOR_CHANGES';
+  const major = decision === 'ACCEPTED_WITH_MAJOR_CHANGES';
+  const rejected = decision === 'NOT_ACCEPTED';
+  const needsChanges = minor || major || rejected;
+  const heading = accepted
+    ? 'Accepted — Ready for Registration'
+    : minor
+      ? 'Accepted with Minor Revisions Required'
+      : major
+        ? 'Accepted with Major Revisions Required'
+        : 'Revise & Resubmit';
+  const tone = accepted
+    ? 'bg-green-50 border-green-300'
+    : needsChanges
+      ? 'bg-yellow-50 border-yellow-300'
+      : 'bg-amber-50 border-amber-300';
   return (
     <div
-      className={`mt-4 rounded-xl border p-4 ${
-        accepted ? 'bg-green-50 border-green-300' : 'bg-amber-50 border-amber-300'
-      }`}
+      className={`mt-4 rounded-xl border p-4 ${tone}`}
     >
       <div className="flex items-center gap-2">
         {accepted ? (
           <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+        ) : minor || major ? (
+          <Pencil className="w-4 h-4 text-yellow-600 shrink-0" />
         ) : (
           <FileText className="w-4 h-4 text-amber-600 shrink-0" />
         )}
-        <span className="text-sm font-bold text-black">
-          {accepted ? 'Accepted — Ready for Registration' : 'Revise & Resubmit'}
+        <span className={`text-sm font-bold text-black ${accepted ? '' : minor || major ? 'text-yellow-800' : 'text-amber-800'}`}>
+          {heading}
         </span>
       </div>
-      {!accepted && (
+      {needsChanges && sub.review_feedback && (
         <p className="text-sm text-black/80 mt-2 leading-relaxed whitespace-pre-wrap">{sub.review_feedback}</p>
       )}
-      {!accepted && (
+      {needsChanges && (
         <p className="text-xs text-black/60 mt-2">
           Please correct the paper based on the reviewer feedback, then use "Edit Files" to upload the revised
           files. Your paper will be sent back to the reviewer for a new review.
@@ -364,13 +381,13 @@ export function MySubmissions({ getToken, onBack, onStart }: MySubmissionsProps)
   }, [getToken]);
 
   const handleSaved = () => {
+    const neededRevisions = editing?.review_decision && editing.review_decision !== 'ACCEPTED';
     setPopup({
       type: 'success',
       title: 'Files Updated',
-      message:
-        editing?.review_decision === 'NOT_ACCEPTED'
-          ? 'Your revised files have been uploaded. Your paper has been sent back to the reviewer for a new review.'
-          : 'Your uploaded files have been replaced with the edited versions.',
+      message: neededRevisions
+        ? 'Your revised files have been uploaded. Your paper has been sent back to the reviewer for a new review.'
+        : 'Your uploaded files have been replaced with the edited versions.',
     });
     setEditing(null);
     loadSubmissions();

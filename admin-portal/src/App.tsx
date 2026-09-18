@@ -100,13 +100,21 @@ function statusBadge(status: string) {
   );
 }
 
+const REVIEW_DECISION_META: Record<string, { label: string; box: string; text: string }> = {
+  ACCEPTED: { label: 'Accepted', box: 'bg-green-50 border-green-300', text: 'text-green-800' },
+  ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', box: 'bg-yellow-50 border-yellow-300', text: 'text-yellow-800' },
+  ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', box: 'bg-orange-50 border-orange-300', text: 'text-orange-800' },
+  NOT_ACCEPTED: { label: 'Not Accepted', box: 'bg-red-50 border-red-300', text: 'text-red-800' },
+};
+
 function reviewBadge(decision?: string | null, updatedAt?: string | null) {
-  const ok = decision === 'ACCEPTED';
+  const meta = decision ? REVIEW_DECISION_META[decision] : undefined;
+  const label = meta?.label ?? '—';
+  const box = meta?.box ?? 'bg-gray-50 border-gray-300';
+  const text = meta?.text ?? 'text-brand-text';
   return (
-    <div className={`rounded-lg border px-2.5 py-1.5 ${ok ? 'bg-green-50 border-green-300' : 'bg-red-50 border-red-300'}`}>
-      <div className={`text-xs font-semibold ${ok ? 'text-green-800' : 'text-red-800'}`}>
-        {decision === 'ACCEPTED' ? 'Accepted' : decision === 'NOT_ACCEPTED' ? 'Not Accepted' : '—'}
-      </div>
+    <div className={`rounded-lg border px-2.5 py-1.5 ${box}`}>
+      <div className={`text-xs font-semibold ${text}`}>{label}</div>
       {updatedAt && <div className="text-[11px] text-brand-text/50 mt-0.5">{formatDateTime(updatedAt)}</div>}
     </div>
   );
@@ -1809,16 +1817,23 @@ export default function App() {
   };
 
   const processMailQueue = async () => {
-    let pending = true;
     let processed = false;
-    while (pending && token) {
-      try {
+    let failed = false;
+    let runs = 0;
+    // Guard against an unbounded drain loop: always stop after a fixed
+    // number of batches; the admin can press Send again / Refresh to
+    // continue processing.
+    const MAX_RUNS = 200;
+    try {
+      while (token && runs < MAX_RUNS) {
+        runs += 1;
         const res = await fetch(`${API_URL}/api/admin/mail/process`, {
           method: 'POST',
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.status === 401) {
           handleLogout();
+          setMailSending(false);
           return;
         }
         const data = await res.json().catch(() => null);
@@ -1829,18 +1844,21 @@ export default function App() {
           processed = true;
           fetchSubmissions({ silent: true });
         }
-        pending = Number(data.remaining || 0) > 0;
-        if (pending) {
-          // Pace sends at ~1 per second to respect Resend's free-tier limit.
-          await new Promise((r) => setTimeout(r, 1200));
-        }
-      } catch (err) {
-        setMailSendError(err instanceof Error ? err.message : 'Failed to process the mail queue.');
-        return;
+        if (Number(data.remaining || 0) <= 0) break;
+        // Pace sends at ~1 per second to respect Resend's free-tier limit.
+        await new Promise((r) => setTimeout(r, 1200));
       }
+    } catch (err) {
+      failed = true;
+      setMailSendError(err instanceof Error ? err.message : 'Failed to process the mail queue.');
+    } finally {
+      setMailSending(false);
     }
-    setMailSending(false);
-    setMailSendMessage(processed ? 'All selected mails have been sent.' : 'No mails were waiting in the queue.');
+    if (processed) {
+      setMailSendMessage('All selected mails have been sent.');
+    } else if (!failed && runs < MAX_RUNS) {
+      setMailSendMessage('No mails were waiting in the queue.');
+    }
   };
 
   const handleSendMail = async () => {
@@ -2033,7 +2051,7 @@ export default function App() {
   const filtersActive = !!(q || trackFilter || paperIdFilter);
   const isReviewed = (s: Submission) => !!s.review_decision && s.review_resubmitted !== 1;
   const reviewedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'ACCEPTED');
-  const notAcceptedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'NOT_ACCEPTED');
+  const notAcceptedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision !== 'ACCEPTED');
   const noCorrectionSubmissions = submissions.filter((s) => s.no_corrections === 1 && !isReviewed(s));
   const pendingSubmissions = submissions.filter((s) => !isReviewed(s) && s.no_corrections !== 1);
   const applyFilters = (list: Submission[]) =>
@@ -2056,6 +2074,16 @@ export default function App() {
     setSearchTerm('');
     setTrackFilter('');
     setPaperIdFilter('');
+  };
+
+  // Switching tabs resets the mail selection so checked papers from the
+  // Reviewed section do not leak into the Needs Revisions section (and
+  // vice versa), and clears any stale send progress/result messages.
+  const changeTab = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setMailSelected([]);
+    setMailSendError(null);
+    setMailSendMessage(null);
   };
 
   if (!token) {
@@ -2095,7 +2123,7 @@ export default function App() {
             <h2 className="text-2xl sm:text-3xl font-bold font-serif mb-3 md:mb-2">Admin Dashboard</h2>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
               <button
-                onClick={() => setActiveTab('submissions')}
+                onClick={() => changeTab('submissions')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'submissions' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
               >
@@ -2108,7 +2136,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setActiveTab('reviewed')}
+                onClick={() => changeTab('reviewed')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'reviewed' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
               >
@@ -2121,20 +2149,20 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setActiveTab('notAccepted')}
+                onClick={() => changeTab('notAccepted')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'notAccepted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
               >
-                Not Accepted
+                Needs Revisions
                 {notAcceptedSubmissions.length > 0 && (
-                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'notAccepted' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'}`}>
+                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'notAccepted' ? 'bg-amber-500 text-white' : 'bg-amber-500 text-white'}`}>
                     {notAcceptedSubmissions.length}
                   </span>
                 )}
               </button>
 
               <button
-                onClick={() => setActiveTab('noCorrections')}
+                onClick={() => changeTab('noCorrections')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'noCorrections' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
               >
@@ -2147,7 +2175,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setActiveTab('deleted')}
+                onClick={() => changeTab('deleted')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
               >
@@ -2159,7 +2187,7 @@ export default function App() {
                 )}
               </button>
               <button
-                onClick={() => setActiveTab('settings')}
+                onClick={() => changeTab('settings')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
               >
@@ -2304,15 +2332,15 @@ export default function App() {
               </div>
             )}
             <ReviewSection
-              title="Not Accepted Files"
-              subtitle="Papers reviewers have not accepted. These return to the submissions list automatically after the author updates their files."
+              title="Files Awaiting Revisions"
+              subtitle="Papers whose review decision requires the author to revise. These return to the submissions list automatically after the author updates their files."
               rows={filteredNotAccepted}
               total={notAcceptedSubmissions.length}
               loading={loading}
               error={error ? `Error loading submissions: ${error}` : null}
               filtersActive={filtersActive}
-              emptyMsg="No not-accepted papers yet."
-              emptyFilteredMsg="No not-accepted papers match your search or filters."
+              emptyMsg="No papers awaiting revisions yet."
+              emptyFilteredMsg="No papers awaiting revisions match your search or filters."
               searchTerm={searchTerm}
               onSearchChange={setSearchTerm}
               trackFilter={trackFilter}
@@ -2562,7 +2590,7 @@ export default function App() {
                 <div>
                   <h4 className="font-semibold text-brand-text">Mail Templates</h4>
                   <p className="text-sm text-brand-text/60 mt-1">
-                    Templates used when sending emails to authors from the Reviewed / Not Accepted sections. Add
+                    Templates used when sending emails to authors from the Reviewed / Needs Revisions sections. Add
                     placeholders and the system fills them automatically per paper.
                   </p>
                   <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, CheckCircle2, Download, Eye, Loader2, LogOut, RefreshCw, Users, X, XCircle } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Download, Eye, Loader2, LogOut, PenLine, RefreshCw, Users, X, XCircle } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -11,11 +11,13 @@ interface Author {
   last_name: string;
 }
 
+type ReviewDecision = 'ACCEPTED' | 'ACCEPTED_WITH_MINOR_CHANGES' | 'ACCEPTED_WITH_MAJOR_CHANGES' | 'NOT_ACCEPTED';
+
 interface Review {
   id: string;
   submission_id: string;
   reviewer_id: string;
-  decision: 'ACCEPTED' | 'NOT_ACCEPTED';
+  decision: ReviewDecision;
   feedback: string;
   resubmitted?: number;
   created_at: string;
@@ -73,6 +75,17 @@ function statusBadge(status: string) {
       {meta.label}
     </span>
   );
+}
+
+const DECISION_META: Record<ReviewDecision, { label: string; cls: string }> = {
+  ACCEPTED: { label: 'Accepted', cls: 'bg-green-100 text-green-800 border-green-400' },
+  ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', cls: 'bg-yellow-100 text-yellow-800 border-yellow-400' },
+  ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-400' },
+  NOT_ACCEPTED: { label: 'Not Accepted', cls: 'bg-red-100 text-red-800 border-red-400' },
+};
+
+function decisionMeta(decision: ReviewDecision) {
+  return DECISION_META[decision] || DECISION_META.NOT_ACCEPTED;
 }
 
 function formatDate(iso: string) {
@@ -353,7 +366,7 @@ function FeedbackModal({
           onChange={(e) => onChange(e.target.value)}
           rows={5}
           autoFocus
-          placeholder="Explain why the paper is Not Accepted and what the author should improve..."
+          placeholder="Explain your decision and tell the author what to improve..."
           className="w-full px-4 py-2 rounded-lg bg-white border-stone-200 shadow-sm text-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-y mb-4"
         />
 
@@ -396,7 +409,7 @@ function ReviewEditor({
   onUnauthorized: () => void;
   onError: (msg: string) => void;
 }) {
-  const [decision, setDecision] = useState<'ACCEPTED' | 'NOT_ACCEPTED' | ''>(sub.review?.decision || '');
+  const [decision, setDecision] = useState<ReviewDecision | ''>(sub.review?.decision || '');
   const [feedback, setFeedback] = useState(sub.review?.feedback || '');
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
@@ -409,19 +422,23 @@ function ReviewEditor({
     setSavedAt(sub.review?.updated_at || null);
   }, [sub.review]);
 
-  const chooseNotAccepted = () => {
-    setDecision('NOT_ACCEPTED');
-    setModalError(null);
-    setFeedbackOpen(true);
+  const requiresFeedback = (d: ReviewDecision | '') => !!d && d !== 'ACCEPTED';
+
+  const chooseDecision = (d: ReviewDecision) => {
+    setDecision(d);
+    if (d !== 'ACCEPTED') {
+      setModalError(null);
+      setFeedbackOpen(true);
+    }
   };
 
   const save = async () => {
     if (!decision) {
-      onError('Please choose Accepted or Not Accepted for this paper.');
+      onError('Please choose a review decision for this paper.');
       return;
     }
-    if (decision === 'NOT_ACCEPTED' && !feedback.trim()) {
-      setModalError('Feedback is required when a paper is marked as Not Accepted.');
+    if (requiresFeedback(decision) && !feedback.trim()) {
+      setModalError('Feedback is required for this decision.');
       return;
     }
     setSaving(true);
@@ -452,39 +469,45 @@ function ReviewEditor({
     }
   };
 
-  const saveAccepted = async () => {
-    if (decision === 'NOT_ACCEPTED') {
+  const handleSaveClick = async () => {
+    if (!decision) {
+      onError('Please choose a review decision for this paper.');
+      return;
+    }
+    if (decision !== 'ACCEPTED') {
+      setModalError(null);
       setFeedbackOpen(true);
       return;
     }
     await save();
   };
 
+  const decisionButtons: ReviewDecision[] = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES', 'NOT_ACCEPTED'];
+
+  const decisionIcon = (d: ReviewDecision) =>
+    d === 'ACCEPTED' ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : d === 'NOT_ACCEPTED' ? <XCircle className="w-3.5 h-3.5 shrink-0" /> : d === 'ACCEPTED_WITH_MINOR_CHANGES' ? <PenLine className="w-3.5 h-3.5 shrink-0" /> : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />;
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setDecision('ACCEPTED')}
-          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${decision === 'ACCEPTED'
-            ? 'bg-green-100 text-green-800 border-green-400'
-            : 'border-brand-text/15 text-brand-text/70 hover:border-green-400 hover:bg-green-50'
-            }`}
-          aria-pressed={decision === 'ACCEPTED'}
-        >
-          <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> Accepted
-        </button>
-        <button
-          type="button"
-          onClick={chooseNotAccepted}
-          className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${decision === 'NOT_ACCEPTED'
-            ? 'bg-red-100 text-red-800 border-red-400'
-            : 'border-brand-text/15 text-brand-text/70 hover:border-red-400 hover:bg-red-50'
-            }`}
-          aria-pressed={decision === 'NOT_ACCEPTED'}
-        >
-          <XCircle className="w-3.5 h-3.5 shrink-0" /> Not Accepted
-        </button>
+        {decisionButtons.map((d) => {
+          const meta = decisionMeta(d);
+          const active = decision === d;
+          return (
+            <button
+              key={d}
+              type="button"
+              onClick={() => chooseDecision(d)}
+              className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${active
+                ? meta.cls
+                : 'border-brand-text/15 text-brand-text/70 hover:bg-brand-text/5'
+                }`}
+              aria-pressed={active}
+            >
+              {decisionIcon(d)} {meta.label}
+            </button>
+          );
+        })}
       </div>
 
       {savedAt && (
@@ -495,7 +518,7 @@ function ReviewEditor({
             </span>
           ) : (
             <span className="text-green-700">
-              {sub.review ? `Reviewed · ${formatDateTime(savedAt)}` : `Review saved · ${formatDateTime(savedAt)}`}
+              {sub.review ? `Reviewed · ${decisionMeta(sub.review.decision).label} · ${formatDateTime(savedAt)}` : `Review saved · ${formatDateTime(savedAt)}`}
             </span>
           )}
         </span>
@@ -503,7 +526,7 @@ function ReviewEditor({
 
       <button
         type="button"
-        onClick={saveAccepted}
+        onClick={handleSaveClick}
         disabled={saving || !decision}
         className="inline-flex items-center justify-center gap-1.5 w-full px-3 py-1.5 bg-brand-text text-white rounded-lg text-xs font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
       >
@@ -583,7 +606,7 @@ export default function App() {
         total: list.length,
         pending: list.filter((s) => !s.review || s.review?.resubmitted === 1).length,
         accepted: list.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED').length,
-        notAccepted: list.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'NOT_ACCEPTED').length,
+        notAccepted: list.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED').length,
       });
     } catch (err) {
       if (silent) {
@@ -657,17 +680,17 @@ export default function App() {
 
   const pendingCount = submissions.filter((s) => !s.review || s.review?.resubmitted === 1).length;
   const reviewedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED').length;
-  const notAcceptedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'NOT_ACCEPTED').length;
+  const notAcceptedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED').length;
   const visible = activeTab === 'pending'
     ? submissions.filter((s) => !s.review || s.review?.resubmitted === 1)
     : activeTab === 'notAccepted'
-      ? submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'NOT_ACCEPTED')
+      ? submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED')
       : submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED');
 
   const emptyMessage = activeTab === 'pending'
     ? 'No papers pending review.'
     : activeTab === 'notAccepted'
-      ? 'No not-accepted papers yet. Papers you marked as not accepted will appear here.'
+      ? 'No papers awaiting revision yet. Papers you marked with changes or as not accepted will appear here.'
       : 'No accepted papers yet.';
 
   const authButtons = (
@@ -774,7 +797,7 @@ export default function App() {
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
           <div className="min-w-0">
             <h2 className="text-2xl sm:text-3xl font-bold font-serif mb-3 md:mb-2">Reviewer Dashboard</h2>
-            <p className="text-sm text-brand-text/60">Review each paper and record your decision (Accept / Not Accept).</p>
+            <p className="text-sm text-brand-text/60">Review each paper and record your decision (Accepted / With Changes / Not Accepted).</p>
           </div>
           <button
             onClick={fetchSubmissions}
@@ -800,7 +823,7 @@ export default function App() {
           </div>
           <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/5 p-3 sm:p-4">
             <div className="text-2xl sm:text-3xl font-bold font-serif text-red-700">{stats.notAccepted}</div>
-            <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Not Accepted</div>
+            <div className="text-xs sm:text-sm text-brand-text/60 mt-1">Needs Revisions</div>
           </div>
         </div>
 
@@ -840,7 +863,7 @@ export default function App() {
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'notAccepted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
               }`}
           >
-            Not Accepted
+            Needs Revisions
             <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'notAccepted' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'
               }`}>
               {notAcceptedCount}

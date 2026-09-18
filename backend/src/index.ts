@@ -869,8 +869,9 @@ app.get('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) =
 // ------------------------------------------------------------------
 // Reviewer: Save (upsert) the review decision + feedback for a paper.
 // Requires reviewer Bearer token.
-// Decision must be ACCEPTED or NOT_ACCEPTED; when NOT_ACCEPTED the
-// reviewer must provide feedback.
+// Decision must be ACCEPTED, ACCEPTED_WITH_MINOR_CHANGES,
+// ACCEPTED_WITH_MAJOR_CHANGES or NOT_ACCEPTED. Feedback is required
+// for every decision except ACCEPTED.
 // ------------------------------------------------------------------
 app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) => {
   try {
@@ -880,11 +881,12 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
     const decision = ((body?.decision || '').toString()).trim().toUpperCase();
     const feedback = ((body?.feedback || '') as string).trim();
 
-    if (decision !== 'ACCEPTED' && decision !== 'NOT_ACCEPTED') {
-      return c.json({ success: false, error: 'Please choose whether the paper is Accepted or Not Accepted.' }, 400);
+    const VALID_DECISIONS = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES', 'NOT_ACCEPTED'];
+    if (!VALID_DECISIONS.includes(decision)) {
+      return c.json({ success: false, error: 'Please choose a review decision for this paper.' }, 400);
     }
-    if (decision === 'NOT_ACCEPTED' && !feedback) {
-      return c.json({ success: false, error: 'Feedback is required when a paper is marked as Not Accepted.' }, 400);
+    if (decision !== 'ACCEPTED' && !feedback) {
+      return c.json({ success: false, error: 'Feedback is required when the paper is not fully accepted.' }, 400);
     }
 
     const existing = await c.env.DB.prepare(
@@ -895,7 +897,8 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
     }
 
     // Reviewing a paper updates its workflow status:
-    //   ACCEPTED     -> READY_FOR_REGISTRATION (shown to user + admin)
+    //   ACCEPTED -> READY_FOR_REGISTRATION (shown to user + admin)
+    //   ACCEPTED_WITH_MINOR_CHANGES / ACCEPTED_WITH_MAJOR_CHANGES /
     //   NOT_ACCEPTED -> UNDER_REVIEW (author must revise; shown to user + admin)
     const nextStatus = decision === 'ACCEPTED' ? 'READY_FOR_REGISTRATION' : 'UNDER_REVIEW';
 
@@ -934,7 +937,11 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
       message:
         decision === 'ACCEPTED'
           ? 'Paper marked as Accepted and moved to Ready for Registration.'
-          : 'Paper marked as Not Accepted and feedback saved.',
+          : decision === 'ACCEPTED_WITH_MINOR_CHANGES'
+            ? 'Paper marked as Accepted with Minor Changes and feedback saved.'
+            : decision === 'ACCEPTED_WITH_MAJOR_CHANGES'
+              ? 'Paper marked as Accepted with Major Changes and feedback saved.'
+              : 'Paper marked as Not Accepted and feedback saved.',
       review: {
         id: reviewId,
         submission_id: submissionId,
@@ -1689,17 +1696,16 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
       // Not Accepted sections (resubmitted = 1) while keeping the
       // previous feedback available to the author.
       //
-      // Exception: if the paper has been Accepted by the reviewer and is
-      // in READY_FOR_REGISTRATION status, the author's file updates are
-      // just the conference-format resubmission that admin requested, so
-      // the paper STAYS in the admin Reviewed / Accepted section and does
-      // not go back to the reviewer queue.
+      // Exception: if the paper was Accepted (decision = ACCEPTED) by the
+      // reviewer, the author's file updates are just the final/registration
+      // resubmission, so the paper STAYS accepted in READY_FOR_REGISTRATION
+      // and does NOT go back to the reviewer queue.
       const flagged = await c.env.DB.prepare(
         `SELECT id, decision FROM reviews
          WHERE submission_id = ? AND resubmitted = 0
          LIMIT 1`
       ).bind(submissionId).first() as any;
-      if (flagged?.id && !(submission.status === 'READY_FOR_REGISTRATION' && flagged.decision === 'ACCEPTED')) {
+      if (flagged?.id && flagged.decision !== 'ACCEPTED') {
         editStatements.push(
           c.env.DB.prepare(
             `UPDATE reviews SET resubmitted = 1, updated_at = ? WHERE id = ?`
