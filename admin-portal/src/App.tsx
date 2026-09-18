@@ -27,8 +27,6 @@ interface Submission {
   status: string;
   created_at: string;
   deleted_at?: string | null;
-  enquired?: number;
-  no_corrections?: number;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
   ai_plagiarism_file?: string | null;
@@ -812,8 +810,7 @@ function FilterPanel({
 // ------------------------------------------------------------------
 // Reusable full submissions listing: search/filters + desktop table +
 // mobile cards with the complete action set (status editing, file
-// views, Enquired / No Corrections toggles, delete). Used by the
-// Submissions (main) tab and the No Corrections tab.
+// views, delete). Used by the Submissions (main) tab.
 // ------------------------------------------------------------------
 function SubmissionListing({
   rows,
@@ -839,10 +836,6 @@ function SubmissionListing({
   onOpenPdf,
   onViewInfo,
   onDelete,
-  enquiredSaving,
-  noCorrectionsSaving,
-  onToggleEnquired,
-  onToggleNoCorrections,
 }: {
   rows: Submission[];
   total: number;
@@ -867,10 +860,6 @@ function SubmissionListing({
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
   onDelete: (sub: Submission) => void;
-  enquiredSaving: string | null;
-  noCorrectionsSaving: string | null;
-  onToggleEnquired: (sub: Submission) => void;
-  onToggleNoCorrections: (sub: Submission) => void;
 }) {
   return (
     <>
@@ -996,36 +985,6 @@ function SubmissionListing({
                       >
                         <Trash2 className="w-4 h-4" /> Delete
                       </button>
-                      <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
-                        <label
-                          className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                          title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!!sub.enquired}
-                            disabled={enquiredSaving === sub.id}
-                            onChange={() => onToggleEnquired(sub)}
-                            className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                          />
-                          Enquired
-                        </label>
-                      </div>
-                      <div className="w-full">
-                        <label
-                          className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                          title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={!!sub.no_corrections}
-                            disabled={noCorrectionsSaving === sub.id}
-                            onChange={() => onToggleNoCorrections(sub)}
-                            className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                          />
-                          No Corrections
-                        </label>
-                      </div>
                     </div>
                   </td>
                 </tr>
@@ -1123,32 +1082,6 @@ function SubmissionListing({
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Delete
                 </button>
-                <label
-                  className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                  title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!sub.enquired}
-                    disabled={enquiredSaving === sub.id}
-                    onChange={() => onToggleEnquired(sub)}
-                    className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                  />
-                  Enquired
-                </label>
-                <label
-                  className="w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                  title={sub.no_corrections ? 'Marked — no corrections required.' : 'Mark submission as requiring no corrections'}
-                >
-                  <input
-                    type="checkbox"
-                    checked={!!sub.no_corrections}
-                    disabled={noCorrectionsSaving === sub.id}
-                    onChange={() => onToggleNoCorrections(sub)}
-                    className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
-                  />
-                  No Corrections
-                </label>
               </div>
             </div>
           ))
@@ -1511,7 +1444,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'notAccepted' | 'noCorrections' | 'users' | 'deleted' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'notAccepted' | 'users' | 'deleted' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -1525,8 +1458,6 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [enquiredSaving, setEnquiredSaving] = useState<string | null>(null);
-  const [noCorrectionsSaving, setNoCorrectionsSaving] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
@@ -1914,7 +1845,7 @@ export default function App() {
   React.useEffect(() => {
     if (!token) return;
     const id = setInterval(() => {
-      if (activeTab === 'submissions' || activeTab === 'reviewed' || activeTab === 'notAccepted' || activeTab === 'noCorrections') fetchSubmissions({ silent: true });
+      if (activeTab === 'submissions' || activeTab === 'reviewed' || activeTab === 'notAccepted') fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
       else if (activeTab === 'users') fetchUsers({ silent: true });
     }, 180000);
@@ -1965,64 +1896,6 @@ export default function App() {
     }
   };
 
-  const handleEnquiredToggle = async (sub: Submission) => {
-    const next = sub.enquired ? 0 : 1;
-    setEnquiredSaving(sub.id);
-    setError(null);
-    try {
-      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/enquired`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ enquired: next === 1 }),
-      });
-      if (res.status === 401) {
-        handleLogout();
-        return;
-      }
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || 'Failed to update enquiry status.');
-      }
-      setSubmissions((prev) => prev.map((s) => (s.id === sub.id ? { ...s, enquired: next } : s)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update enquiry status.');
-    } finally {
-      setEnquiredSaving(null);
-    }
-  };
-
-  const handleNoCorrectionsToggle = async (sub: Submission) => {
-    const next = sub.no_corrections ? 0 : 1;
-    setNoCorrectionsSaving(sub.id);
-    setError(null);
-    try {
-      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/no-corrections`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ noCorrections: next === 1 }),
-      });
-      if (res.status === 401) {
-        handleLogout();
-        return;
-      }
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || 'Failed to update No Corrections status.');
-      }
-      setSubmissions((prev) => prev.map((s) => (s.id === sub.id ? { ...s, no_corrections: next } : s)));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to update No Corrections status.');
-    } finally {
-      setNoCorrectionsSaving(null);
-    }
-  };
-
   const authButtons = (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
       <span className="text-xs sm:text-sm text-brand-text/60 truncate max-w-[45vw] sm:max-w-none">{adminEmail}</span>
@@ -2052,8 +1925,7 @@ export default function App() {
   const isReviewed = (s: Submission) => !!s.review_decision && s.review_resubmitted !== 1;
   const reviewedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'ACCEPTED');
   const notAcceptedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision !== 'ACCEPTED');
-  const noCorrectionSubmissions = submissions.filter((s) => s.no_corrections === 1 && !isReviewed(s));
-  const pendingSubmissions = submissions.filter((s) => !isReviewed(s) && s.no_corrections !== 1);
+  const pendingSubmissions = submissions.filter((s) => !isReviewed(s));
   const applyFilters = (list: Submission[]) =>
     list.filter((s) => {
       const matchSearch = matchesSearch(s, q);
@@ -2061,14 +1933,9 @@ export default function App() {
       const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
       return matchSearch && matchTrack && matchPaper;
     });
-  const filteredSubmissions = applyFilters(pendingSubmissions).sort((a, b) => {
-    const aE = a.enquired ? 1 : 0;
-    const bE = b.enquired ? 1 : 0;
-    return bE - aE;
-  });
+  const filteredSubmissions = applyFilters(pendingSubmissions);
   const filteredReviewed = applyFilters(reviewedSubmissions);
   const filteredNotAccepted = applyFilters(notAcceptedSubmissions);
-  const filteredNoCorrections = applyFilters(noCorrectionSubmissions);
   const filteredDeleted = applyFilters(deletedSubmissions);
   const clearFilters = () => {
     setSearchTerm('');
@@ -2162,19 +2029,6 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => changeTab('noCorrections')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'noCorrections' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                  }`}
-              >
-                No Corrections
-                {noCorrectionSubmissions.length > 0 && (
-                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'noCorrections' ? 'bg-amber-500 text-white' : 'bg-amber-600 text-white'}`}>
-                    {noCorrectionSubmissions.length}
-                  </span>
-                )}
-              </button>
-
-              <button
                 onClick={() => changeTab('deleted')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
@@ -2258,10 +2112,6 @@ export default function App() {
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
               onDelete={setDeleteTarget}
-              enquiredSaving={enquiredSaving}
-              noCorrectionsSaving={noCorrectionsSaving}
-              onToggleEnquired={handleEnquiredToggle}
-              onToggleNoCorrections={handleNoCorrectionsToggle}
             />
           </>
         )}
@@ -2362,38 +2212,6 @@ export default function App() {
               mailSending={mailSending}
             />
           </>
-        )}
-
-        {activeTab === 'noCorrections' && (
-          <SubmissionListing
-            rows={filteredNoCorrections}
-            total={noCorrectionSubmissions.length}
-            loading={loading}
-            error={error ? `Error loading submissions: ${error}` : null}
-            filtersActive={filtersActive}
-            emptyMsg="No submissions marked as requiring no corrections yet."
-            emptyFilteredMsg="No submissions match your search or filters."
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
-            trackFilter={trackFilter}
-            onTrackFilterChange={setTrackFilter}
-            paperIdFilter={paperIdFilter}
-            onPaperIdFilterChange={setPaperIdFilter}
-            tracks={tracks}
-            paperIds={paperIds}
-            onClear={clearFilters}
-            token={token}
-            refresh={fetchSubmissions}
-            onUnauthorized={handleLogout}
-            onStatusError={setError}
-            onOpenPdf={openPdf}
-            onViewInfo={setMoreInfoTarget}
-            onDelete={setDeleteTarget}
-            enquiredSaving={enquiredSaving}
-            noCorrectionsSaving={noCorrectionsSaving}
-            onToggleEnquired={handleEnquiredToggle}
-            onToggleNoCorrections={handleNoCorrectionsToggle}
-          />
         )}
 
         {activeTab === 'deleted' && (
