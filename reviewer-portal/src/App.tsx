@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, AlertTriangle, CheckCircle2, Download, Eye, Loader2, LogOut, PenLine, RefreshCw, Users, X, XCircle } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, Download, Eye, Loader2, LogOut, PenLine, RefreshCw, Search, Users, X, XCircle } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -29,6 +29,7 @@ interface Submission {
   submission_code: string;
   paper_id: string;
   title: string;
+  abstract?: string;
   track: string;
   status: string;
   author_name: string;
@@ -115,6 +116,114 @@ function AuthorNames({ sub }: { sub: Submission }) {
           {n}
         </span>
       ))}
+    </div>
+  );
+}
+
+function matchesSearch(sub: Submission, q: string) {
+  if (!q) return true;
+  const haystack = [
+    sub.title,
+    sub.paper_id,
+    sub.submission_code,
+    sub.abstract,
+    sub.track,
+    sub.author_name,
+    sub.author_email,
+    sub.review?.decision,
+    sub.review?.feedback,
+    ...(sub.authors || []).flatMap((a) => [a.first_name, a.last_name]),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(q);
+}
+
+// ------------------------------------------------------------------
+// Reusable search/filter bar (mirrors the admin portal's FilterPanel).
+// ------------------------------------------------------------------
+function FilterPanel({
+  searchTerm,
+  onSearchChange,
+  trackFilter,
+  onTrackFilterChange,
+  paperIdFilter,
+  onPaperIdFilterChange,
+  tracks,
+  paperIds,
+  resultCount,
+  totalCount,
+  onClear,
+}: {
+  searchTerm: string;
+  onSearchChange: (v: string) => void;
+  trackFilter: string;
+  onTrackFilterChange: (v: string) => void;
+  paperIdFilter: string;
+  onPaperIdFilterChange: (v: string) => void;
+  tracks: string[];
+  paperIds: string[];
+  resultCount: number;
+  totalCount: number;
+  onClear: () => void;
+}) {
+  const filtersActive = !!(searchTerm.trim() || trackFilter || paperIdFilter);
+  return (
+    <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 mb-4">
+      <div className="flex flex-col lg:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-brand-text/40 pointer-events-none" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Search by title, abstract, track, author, co-author, review feedback..."
+            className="w-full pl-9 pr-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          />
+        </div>
+        {tracks.length > 0 && (
+          <select
+            value={trackFilter}
+            onChange={(e) => onTrackFilterChange(e.target.value)}
+            className="w-full lg:w-52 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          >
+            <option value="">All Tracks</option>
+            {tracks.map((t) => (
+              <option key={t} value={t}>
+                {t.replace(/-/g, ' ')}
+              </option>
+            ))}
+          </select>
+        )}
+        {paperIds.length > 0 && (
+          <select
+            value={paperIdFilter}
+            onChange={(e) => onPaperIdFilterChange(e.target.value)}
+            className="w-full lg:w-48 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          >
+            <option value="">All Paper IDs</option>
+            {paperIds.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+        )}
+        {filtersActive && (
+          <button
+            onClick={onClear}
+            className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg border border-brand-text/20 text-sm font-medium text-brand-text hover:bg-brand-text/5 transition-colors whitespace-nowrap"
+          >
+            <X className="w-4 h-4" /> Clear
+          </button>
+        )}
+      </div>
+      {filtersActive && (
+        <div className="mt-2 text-xs text-brand-text/60">
+          Showing {resultCount} of {totalCount}
+        </div>
+      )}
     </div>
   );
 }
@@ -566,6 +675,9 @@ export default function App() {
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
   const [reviewMaintenance, setReviewMaintenance] = useState<{ active: boolean; until: string | null }>({ active: false, until: null });
   const [settingsChecked, setSettingsChecked] = useState<boolean>(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [trackFilter, setTrackFilter] = useState('');
+  const [paperIdFilter, setPaperIdFilter] = useState('');
 
   const handleLogin = (newToken: string, name: string) => {
     setToken(newToken);
@@ -681,17 +793,48 @@ export default function App() {
   const pendingCount = submissions.filter((s) => !s.review || s.review?.resubmitted === 1).length;
   const reviewedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED').length;
   const notAcceptedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED').length;
-  const visible = activeTab === 'pending'
+
+  const tracksList = Array.from(new Set(submissions.map((s) => s.track).filter(Boolean) as string[])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+  const paperIdsList = Array.from(new Set(submissions.map((s) => s.paper_id).filter(Boolean) as string[])).sort((a, b) =>
+    a.localeCompare(b)
+  );
+
+  const q = searchTerm.trim().toLowerCase();
+  const filtersActive = !!(q || trackFilter || paperIdFilter);
+  const applyFilters = (list: Submission[]) =>
+    list.filter((s) => {
+      const matchSearch = matchesSearch(s, q);
+      const matchTrack = !trackFilter || s.track === trackFilter;
+      const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
+      return matchSearch && matchTrack && matchPaper;
+    });
+
+  const baseVisible = activeTab === 'pending'
     ? submissions.filter((s) => !s.review || s.review?.resubmitted === 1)
     : activeTab === 'notAccepted'
       ? submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED')
       : submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED');
+  const visible = applyFilters(baseVisible);
 
   const emptyMessage = activeTab === 'pending'
-    ? 'No papers pending review.'
+    ? filtersActive
+      ? 'No papers match your search or filters.'
+      : 'No papers pending review.'
     : activeTab === 'notAccepted'
-      ? 'No papers awaiting revision yet. Papers you marked with changes or as not accepted will appear here.'
-      : 'No accepted papers yet.';
+      ? filtersActive
+        ? 'No papers match your search or filters.'
+        : 'No papers awaiting revision yet. Papers you marked with changes or as not accepted will appear here.'
+      : filtersActive
+        ? 'No papers match your search or filters.'
+        : 'No accepted papers yet.';
+
+  const clearFilters = () => {
+    setSearchTerm('');
+    setTrackFilter('');
+    setPaperIdFilter('');
+  };
 
   const authButtons = (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
@@ -870,6 +1013,20 @@ export default function App() {
             </span>
           </button>
         </div>
+
+        <FilterPanel
+          searchTerm={searchTerm}
+          onSearchChange={setSearchTerm}
+          trackFilter={trackFilter}
+          onTrackFilterChange={setTrackFilter}
+          paperIdFilter={paperIdFilter}
+          onPaperIdFilterChange={setPaperIdFilter}
+          tracks={tracksList}
+          paperIds={paperIdsList}
+          resultCount={visible.length}
+          totalCount={baseVisible.length}
+          onClear={clearFilters}
+        />
 
         {/* Desktop table */}
         <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
