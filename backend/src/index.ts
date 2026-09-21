@@ -91,6 +91,14 @@ function base64UrlDecode(str: string): Uint8Array {
   return bytes;
 }
 
+function chunkArray<T>(items: T[], size = 50): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
 async function getAuthSecret(c: any): Promise<string> {
   const secret = c.env.AUTH_SECRET;
   if (!secret) {
@@ -355,13 +363,18 @@ app.post('/api/admin/mail/enqueue', async (c) => {
     if (!template) return c.json({ success: false, error: 'Mail template not found.' }, 404);
 
     const now = new Date().toISOString();
-    const placeholders = ids.map(() => '?').join(',');
-    const { results } = await c.env.DB.prepare(
-      `SELECT id, submission_code, paper_id, title, author_name, author_email FROM submissions
-       WHERE deleted_at IS NULL AND id IN (${placeholders})`
-    ).bind(...ids).all();
-
-    const subs = (results || []) as any[];
+    const chunks = chunkArray(ids, 50);
+    const subResults = await Promise.all(
+      chunks.map(async (chunk) => {
+        const placeholders = chunk.map(() => '?').join(',');
+        const res = await c.env.DB.prepare(
+          `SELECT id, submission_code, paper_id, title, author_name, author_email FROM submissions
+           WHERE deleted_at IS NULL AND id IN (${placeholders})`
+        ).bind(...chunk).all();
+        return (res.results as any[]) || [];
+      })
+    );
+    const subs = subResults.flat();
     const logStatements: D1PreparedStatement[] = [];
     let enqueued = 0;
 
@@ -402,7 +415,9 @@ app.post('/api/admin/mail/enqueue', async (c) => {
       enqueued++;
     }
 
-    await c.env.DB.batch(logStatements);
+    for (const chunk of chunkArray(logStatements, 50)) {
+      await c.env.DB.batch(chunk);
+    }
     return c.json({
       success: true,
       message: `${enqueued} mail${enqueued === 1 ? '' : 's'} queued. Sending ${enqueued === 1 ? 'it' : 'them'} now...`,
@@ -754,26 +769,41 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
 
     if (submissions.length > 0) {
       const ids = submissions.map((s: any) => s.id as string);
-      const placeholders = ids.map(() => '?').join(',');
+      const chunks = chunkArray(ids, 50);
 
-      const authorRes = await c.env.DB.prepare(
-        `SELECT id, submission_id, is_primary, first_name, last_name
-         FROM authors
-         WHERE submission_id IN (${placeholders})
-         ORDER BY is_primary DESC, created_at ASC`
-      ).bind(...ids).all();
-      authorsBySubmission = (authorRes.results as any[] || []).reduce((acc: any, a: any) => {
+      const [authorResults, reviewResults] = await Promise.all([
+        Promise.all(
+          chunks.map(async (chunk) => {
+            const placeholders = chunk.map(() => '?').join(',');
+            const res = await c.env.DB.prepare(
+              `SELECT id, submission_id, is_primary, first_name, last_name
+               FROM authors
+               WHERE submission_id IN (${placeholders})
+               ORDER BY is_primary DESC, created_at ASC`
+            ).bind(...chunk).all();
+            return (res.results as any[]) || [];
+          })
+        ),
+        Promise.all(
+          chunks.map(async (chunk) => {
+            const placeholders = chunk.map(() => '?').join(',');
+            const res = await c.env.DB.prepare(
+              `SELECT id, submission_id, reviewer_id, decision, feedback, resubmitted, created_at, updated_at
+               FROM reviews
+               WHERE submission_id IN (${placeholders}) AND reviewer_id = ?`
+            ).bind(...chunk, reviewerId).all();
+            return (res.results as any[]) || [];
+          })
+        ),
+      ]);
+
+      authorsBySubmission = authorResults.flat().reduce((acc: any, a: any) => {
         const sid = a.submission_id;
         (acc[sid] = acc[sid] || []).push(a);
         return acc;
       }, {});
 
-      const reviewRes = await c.env.DB.prepare(
-        `SELECT id, submission_id, reviewer_id, decision, feedback, resubmitted, created_at, updated_at
-         FROM reviews
-         WHERE submission_id IN (${placeholders}) AND reviewer_id = ?`
-      ).bind(...ids, reviewerId).all();
-      reviewsBySubmission = (reviewRes.results as any[] || []).reduce((acc: any, r: any) => {
+      reviewsBySubmission = reviewResults.flat().reduce((acc: any, r: any) => {
         acc[r.submission_id] = r;
         return acc;
       }, {});
@@ -1384,14 +1414,20 @@ app.get('/api/admin/submissions', async (c) => {
     let authorsBySubmission: Record<string, any[]> = {};
     if (submissions.length > 0) {
       const ids = submissions.map((s: any) => s.id as string);
-      const placeholders = ids.map(() => '?').join(',');
-      const authorRes = await c.env.DB.prepare(
-        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
-         FROM authors
-         WHERE submission_id IN (${placeholders})
-         ORDER BY is_primary DESC, created_at ASC`
-      ).bind(...ids).all();
-      authorsBySubmission = (authorRes.results as any[] || []).reduce((acc: any, a: any) => {
+      const chunks = chunkArray(ids, 50);
+      const authorResults = await Promise.all(
+        chunks.map(async (chunk) => {
+          const placeholders = chunk.map(() => '?').join(',');
+          const res = await c.env.DB.prepare(
+            `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+             FROM authors
+             WHERE submission_id IN (${placeholders})
+             ORDER BY is_primary DESC, created_at ASC`
+          ).bind(...chunk).all();
+          return (res.results as any[]) || [];
+        })
+      );
+      authorsBySubmission = authorResults.flat().reduce((acc: any, a: any) => {
         const sid = a.submission_id;
         (acc[sid] = acc[sid] || []).push(a);
         return acc;
@@ -1444,14 +1480,20 @@ app.get('/api/admin/submissions/deleted', async (c) => {
     let authorsBySubmission: Record<string, any[]> = {};
     if (submissions.length > 0) {
       const ids = submissions.map((s: any) => s.id as string);
-      const placeholders = ids.map(() => '?').join(',');
-      const authorRes = await c.env.DB.prepare(
-        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
-         FROM authors
-         WHERE submission_id IN (${placeholders})
-         ORDER BY is_primary DESC, created_at ASC`
-      ).bind(...ids).all();
-      authorsBySubmission = (authorRes.results as any[] || []).reduce((acc: any, a: any) => {
+      const chunks = chunkArray(ids, 50);
+      const authorResults = await Promise.all(
+        chunks.map(async (chunk) => {
+          const placeholders = chunk.map(() => '?').join(',');
+          const res = await c.env.DB.prepare(
+            `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+             FROM authors
+             WHERE submission_id IN (${placeholders})
+             ORDER BY is_primary DESC, created_at ASC`
+          ).bind(...chunk).all();
+          return (res.results as any[]) || [];
+        })
+      );
+      authorsBySubmission = authorResults.flat().reduce((acc: any, a: any) => {
         const sid = a.submission_id;
         (acc[sid] = acc[sid] || []).push(a);
         return acc;

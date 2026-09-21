@@ -9,6 +9,9 @@ interface Author {
   is_primary: number;
   first_name: string;
   last_name: string;
+  phone?: string;
+  email?: string;
+  college?: string;
 }
 
 type ReviewDecision = 'ACCEPTED' | 'ACCEPTED_WITH_MINOR_CHANGES' | 'ACCEPTED_WITH_MAJOR_CHANGES' | 'NOT_ACCEPTED';

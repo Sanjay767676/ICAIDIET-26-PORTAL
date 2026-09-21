@@ -1117,6 +1117,7 @@ function ReviewSection({
   onClear,
   onOpenPdf,
   onViewInfo,
+  onDelete,
   mailTemplates,
   selectedTemplateId,
   onSelectedTemplateChange,
@@ -1146,6 +1147,7 @@ function ReviewSection({
   onClear: () => void;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
+  onDelete: (sub: Submission) => void;
   mailTemplates: MailTemplate[];
   selectedTemplateId: string;
   onSelectedTemplateChange: (v: string) => void;
@@ -1321,6 +1323,12 @@ function ReviewSection({
                       >
                         <Eye className="w-4 h-4" /> View Info
                       </button>
+                      <button
+                        onClick={() => onDelete(sub)}
+                        className="inline-flex items-center gap-1.5 text-red-600 font-medium text-xs whitespace-nowrap hover:text-red-700 hover:underline"
+                      >
+                        <Trash2 className="w-4 h-4" /> Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
@@ -1428,6 +1436,12 @@ function ReviewSection({
                   className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                 >
                   <Eye className="w-3.5 h-3.5" /> View Info
+                </button>
+                <button
+                  onClick={() => onDelete(sub)}
+                  className="flex items-center gap-1.5 text-red-600 font-medium text-xs hover:text-red-700 hover:underline"
+                >
+                  <Trash2 className="w-3.5 h-3.5" /> Delete
                 </button>
               </div>
             </div>
@@ -2153,6 +2167,7 @@ export default function App() {
               onClear={clearFilters}
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
+              onDelete={setDeleteTarget}
               mailTemplates={mailTemplates}
               selectedTemplateId={selectedTemplateId}
               onSelectedTemplateChange={setSelectedTemplateId}
@@ -2202,6 +2217,7 @@ export default function App() {
               onClear={clearFilters}
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
+              onDelete={setDeleteTarget}
               mailTemplates={mailTemplates}
               selectedTemplateId={selectedTemplateId}
               onSelectedTemplateChange={setSelectedTemplateId}
