@@ -67,6 +67,20 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
           </div>
         </div>
 
+        {/* Row 2.5: Deadline Extension Banner */}
+        <div className="w-full bg-red-600 border-y border-red-700 py-2.5 overflow-hidden z-40">
+          <div className="flex w-max animate-marquee items-center gap-12 px-4">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="flex items-center gap-12 whitespace-nowrap">
+                <span className="text-[#FFFFFF] font-times font-semibold uppercase tracking-widest text-[16px] tracking-[0.2em]">
+                  Submission Deadline Extended Till September 30<sup className="lowercase">th</sup>
+                </span>
+                <span className="text-[#FFFFFF]">|</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Row 3: Navigation and Profile */}
         <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-y-3">
           <div className="flex items-center gap-2 overflow-x-auto">

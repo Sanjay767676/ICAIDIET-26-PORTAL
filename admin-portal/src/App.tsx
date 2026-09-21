@@ -118,6 +118,17 @@ function reviewBadge(decision?: string | null, updatedAt?: string | null) {
   );
 }
 
+// Highlight badge shown when the author has re-uploaded a revised version
+// after a review decision that required changes. It tells the admin/reviewer
+// that the paper is ready for re-review.
+function UpdatedBadge({ label = 'Updated by author' }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-teal-100 text-teal-800 border border-teal-400 animate-pulse whitespace-nowrap">
+      <RefreshCw className="w-3 h-3" /> {label}
+    </span>
+  );
+}
+
 // Mail delivery status shown in the Reviewed / Not Accepted sections.
 //   queued / sending -> Sending (yellow)
 //   delivered        -> Delivered (green)
@@ -683,13 +694,11 @@ function MoreInfoModal({
                 <FileText className="w-3.5 h-3.5" /> Review Feedback
               </div>
               <div
-                className={`rounded-xl border p-3 ${sub.review_decision === 'ACCEPTED'
-                  ? 'bg-green-50 border-green-300'
-                  : 'bg-amber-50 border-amber-300'
+                className={`rounded-xl border p-3 ${REVIEW_DECISION_META[sub.review_decision]?.box ?? 'bg-amber-50 border-amber-300'
                   }`}
               >
-                <div className="flex flex-wrap items-center gap-2 font-semibold text-brand-text">
-                  <span>{sub.review_decision || 'No decision recorded'}</span>
+                <div className={`flex flex-wrap items-center gap-2 font-semibold ${REVIEW_DECISION_META[sub.review_decision]?.text ?? 'text-brand-text'}`}>
+                  <span>{REVIEW_DECISION_META[sub.review_decision]?.label ?? (sub.review_decision || 'No decision recorded')}</span>
                   {sub.review_updated_at && (
                     <span className="text-[11px] text-brand-text/50 font-medium ml-auto">
                       {formatDateTime(sub.review_updated_at)}
@@ -1257,7 +1266,7 @@ function ReviewSection({
               </tr>
             ) : (
               rows.map((sub, idx) => (
-                <tr key={sub.id} className="bg-white">
+                <tr key={sub.id} className={`${sub.review_resubmitted === 1 ? 'animate-updated-pulse bg-teal-50/50' : 'bg-white'}`}>
                   <td className={`py-4 px-3 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
                     <input
                       type="checkbox"
@@ -1283,6 +1292,9 @@ function ReviewSection({
                   </td>
                   <td className="py-4 px-5 align-top">
                     {reviewBadge(sub.review_decision, sub.review_updated_at)}
+                    {sub.review_resubmitted === 1 && (
+                      <div className="mt-1.5"><UpdatedBadge /></div>
+                    )}
                     {sub.review_feedback && (
                       <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5 max-h-24 overflow-y-auto">
                         {sub.review_feedback}
@@ -1350,7 +1362,7 @@ function ReviewSection({
           </div>
         ) : (
           rows.map((sub) => (
-            <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+            <div key={sub.id} className={`${sub.review_resubmitted === 1 ? 'animate-updated-pulse bg-teal-50/50 border-2 border-teal-400' : 'bg-white rounded-xl shadow-sm border-2 border-brand-accent'} rounded-xl shadow-sm p-4 sm:p-5`}>
               <div className="flex items-start justify-between gap-3">
                 <label className="shrink-0 cursor-pointer select-none" title="Select for mail">
                   <input
@@ -1393,6 +1405,9 @@ function ReviewSection({
               <div className="mt-3">
                 <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">Review Decision</div>
                 {reviewBadge(sub.review_decision, sub.review_updated_at)}
+                {sub.review_resubmitted === 1 && (
+                  <div className="mt-1.5"><UpdatedBadge /></div>
+                )}
                 {sub.review_feedback && (
                   <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5">
                     {sub.review_feedback}
@@ -1936,10 +1951,14 @@ export default function App() {
   );
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(q || trackFilter || paperIdFilter);
-  const isReviewed = (s: Submission) => !!s.review_decision && s.review_resubmitted !== 1;
-  const reviewedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision === 'ACCEPTED');
-  const notAcceptedSubmissions = submissions.filter((s) => isReviewed(s) && s.review_decision !== 'ACCEPTED');
-  const pendingSubmissions = submissions.filter((s) => !isReviewed(s));
+  const hasReview = (s: Submission) => !!s.review_decision;
+  const updatedFirst = (a: Submission, b: Submission) => Number(b.review_resubmitted === 1) - Number(a.review_resubmitted === 1);
+  const reviewedSubmissions = submissions.filter((s) => hasReview(s) && s.review_decision === 'ACCEPTED');
+  const notAcceptedSubmissions = submissions
+    .filter((s) => hasReview(s) && s.review_decision !== 'ACCEPTED')
+    .slice()
+    .sort(updatedFirst);
+  const pendingSubmissions = submissions.filter((s) => !hasReview(s));
   const applyFilters = (list: Submission[]) =>
     list.filter((s) => {
       const matchSearch = matchesSearch(s, q);
@@ -2198,7 +2217,7 @@ export default function App() {
             )}
             <ReviewSection
               title="Files Awaiting Revisions"
-              subtitle="Papers whose review decision requires the author to revise. These return to the submissions list automatically after the author updates their files."
+              subtitle="Papers whose review decision requires changes (minor, major or not accepted). They stay in this section while the author revises them; when an updated version is uploaded the paper is highlighted and ready for re-review."
               rows={filteredNotAccepted}
               total={notAcceptedSubmissions.length}
               loading={loading}

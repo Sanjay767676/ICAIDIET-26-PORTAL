@@ -92,6 +92,17 @@ function decisionMeta(decision: ReviewDecision) {
   return DECISION_META[decision] || DECISION_META.NOT_ACCEPTED;
 }
 
+// Highlight badge shown when the author has re-uploaded a revised version
+// after a review decision that required changes (minor / major / not
+// accepted). It tells the reviewer the paper is ready for re-review.
+function UpdatedBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-teal-100 text-teal-800 border border-teal-400 animate-pulse whitespace-nowrap">
+      <RefreshCw className="w-3 h-3" /> Updated by author
+    </span>
+  );
+}
+
 function formatDate(iso: string) {
   if (!iso) return '';
   const d = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
@@ -719,9 +730,9 @@ export default function App() {
       setSubmissions(list);
       setStats({
         total: list.length,
-        pending: list.filter((s) => !s.review || s.review?.resubmitted === 1).length,
-        accepted: list.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED').length,
-        notAccepted: list.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED').length,
+        pending: list.filter((s) => !s.review).length,
+        accepted: list.filter((s) => s.review && s.review.decision === 'ACCEPTED').length,
+        notAccepted: list.filter((s) => s.review && s.review.decision !== 'ACCEPTED').length,
       });
     } catch (err) {
       if (silent) {
@@ -793,9 +804,9 @@ export default function App() {
     setPdfView({ open: false, url: undefined, filename: undefined, kind: undefined, error: undefined });
   };
 
-  const pendingCount = submissions.filter((s) => !s.review || s.review?.resubmitted === 1).length;
-  const reviewedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED').length;
-  const notAcceptedCount = submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED').length;
+  const pendingCount = submissions.filter((s) => !s.review).length;
+  const reviewedCount = submissions.filter((s) => s.review && s.review.decision === 'ACCEPTED').length;
+  const notAcceptedCount = submissions.filter((s) => s.review && s.review.decision !== 'ACCEPTED').length;
 
   const tracksList = Array.from(new Set(submissions.map((s) => s.track).filter(Boolean) as string[])).sort((a, b) =>
     a.localeCompare(b)
@@ -814,11 +825,13 @@ export default function App() {
       return matchSearch && matchTrack && matchPaper;
     });
 
-  const baseVisible = activeTab === 'pending'
-    ? submissions.filter((s) => !s.review || s.review?.resubmitted === 1)
+  const baseVisible = (activeTab === 'pending'
+    ? submissions.filter((s) => !s.review)
     : activeTab === 'notAccepted'
-      ? submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision !== 'ACCEPTED')
-      : submissions.filter((s) => s.review && s.review.resubmitted !== 1 && s.review.decision === 'ACCEPTED');
+      ? submissions.filter((s) => s.review && s.review.decision !== 'ACCEPTED')
+      : submissions.filter((s) => s.review && s.review.decision === 'ACCEPTED'))
+    .slice()
+    .sort((a, b) => Number(!!b.review?.resubmitted) - Number(!!a.review?.resubmitted));
   const visible = applyFilters(baseVisible);
 
   const emptyMessage = activeTab === 'pending'
@@ -1058,7 +1071,7 @@ export default function App() {
                 </tr>
               ) : (
                 visible.map((sub, idx) => (
-                  <tr key={sub.id} className="bg-white">
+                  <tr key={sub.id} className={`${sub.review?.resubmitted === 1 ? 'animate-updated-pulse bg-teal-50/50' : 'bg-white'}`}>
                     <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-bl-xl' : ''}`}>
                       <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                       <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
@@ -1066,6 +1079,9 @@ export default function App() {
                     <td className="py-4 px-5 align-top">
                       <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
                       <div className="mt-1">{statusBadge(sub.status)}</div>
+                      {sub.review?.resubmitted === 1 && (
+                        <div className="mt-1"><UpdatedBadge /></div>
+                      )}
                     </td>
                     <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
                     <td className="py-4 px-5 align-top">
@@ -1134,12 +1150,15 @@ export default function App() {
             </div>
           ) : (
             visible.map((sub) => (
-              <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+              <div key={sub.id} className={`${sub.review?.resubmitted === 1 ? 'animate-updated-pulse bg-teal-50/50 border-2 border-teal-400' : 'bg-white rounded-xl shadow-sm border-2 border-brand-accent'} rounded-xl shadow-sm p-4 sm:p-5`}>
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper ID</div>
                     <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                     <div className="text-xs text-brand-text/60 mt-1">{sub.submission_code}</div>
+                    {sub.review?.resubmitted === 1 && (
+                      <div className="mt-1.5"><UpdatedBadge /></div>
+                    )}
                   </div>
                   <div className="shrink-0">{statusBadge(sub.status)}</div>
                 </div>

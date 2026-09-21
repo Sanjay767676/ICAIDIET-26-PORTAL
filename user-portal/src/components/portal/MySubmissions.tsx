@@ -40,6 +40,13 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   REVISION_REQUIRED: { label: 'Revision Required', cls: 'bg-purple-100 text-purple-800' },
 };
 
+const REVIEW_DECISION_META: Record<string, { label: string; text: string; box: string }> = {
+  ACCEPTED: { label: 'Accepted', text: 'text-green-800', box: 'bg-green-50 border-green-300' },
+  ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', text: 'text-yellow-800', box: 'bg-yellow-50 border-yellow-300' },
+  ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', text: 'text-orange-800', box: 'bg-orange-50 border-orange-300' },
+  NOT_ACCEPTED: { label: 'Not Accepted', text: 'text-red-800', box: 'bg-red-50 border-red-300' },
+};
+
 function statusBadge(status: string) {
   const meta =
     STATUS_META[status] || {
@@ -72,18 +79,13 @@ function reviewBanner(sub: MySubmission) {
   const major = decision === 'ACCEPTED_WITH_MAJOR_CHANGES';
   const rejected = decision === 'NOT_ACCEPTED';
   const needsChanges = minor || major || rejected;
-  const heading = accepted
-    ? 'Accepted — Ready for Registration'
-    : minor
-      ? 'Accepted with Minor Revisions Required'
-      : major
-        ? 'Accepted with Major Revisions Required'
-        : 'Revise & Resubmit';
-  const tone = accepted
-    ? 'bg-green-50 border-green-300'
-    : needsChanges
-      ? 'bg-yellow-50 border-yellow-300'
-      : 'bg-amber-50 border-amber-300';
+  const decisionMeta = REVIEW_DECISION_META[decision];
+  const heading = decisionMeta
+    ? decisionMeta.label
+    : accepted
+      ? 'Accepted — Ready for Registration'
+      : 'Not Accepted';
+  const tone = decisionMeta?.box ?? 'bg-amber-50 border-amber-300';
   return (
     <div
       className={`mt-4 rounded-xl border p-4 ${tone}`}
@@ -96,7 +98,7 @@ function reviewBanner(sub: MySubmission) {
         ) : (
           <FileText className="w-4 h-4 text-amber-600 shrink-0" />
         )}
-        <span className={`text-sm font-bold text-black ${accepted ? '' : minor || major ? 'text-yellow-800' : 'text-amber-800'}`}>
+        <span className={`text-sm font-bold ${decisionMeta?.text ?? 'text-black'}`}>
           {heading}
         </span>
       </div>
