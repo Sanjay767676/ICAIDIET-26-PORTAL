@@ -2344,6 +2344,43 @@ export default function App() {
             <div className="border border-brand-text/10 rounded-xl">
               <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
                 <div>
+                  <h4 className="font-semibold text-brand-text">Accepting Paper Submissions</h4>
+                  <p className="text-sm text-brand-text/60 mt-1">
+                    When on, the user portal accepts new paper submissions. When off, users cannot submit new
+                    papers (file updates are also blocked).
+                  </p>
+                </div>
+                <button
+                  onClick={() => setMtUserEnabled(!mtUserEnabled)}
+                  disabled={savingSettings}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-gray-200' : 'bg-brand-accent'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                  role="switch"
+                  aria-checked={!mtUserEnabled}
+                >
+                  <span className="sr-only">Toggle accepting paper submissions</span>
+                  <span
+                    aria-hidden="true"
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-0' : 'translate-x-5'}`}
+                  />
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+                <span
+                  className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${mtUserEnabled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                    }`}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${mtUserEnabled ? 'bg-red-600' : 'bg-green-600'}`} />
+                  {mtUserEnabled ? 'Not accepting submissions' : 'Accepting submissions'}
+                </span>
+                <span className="text-xs text-brand-text/50">
+                  Save the settings below to apply this change to the user portal.
+                </span>
+              </div>
+            </div>
+
+            <div className="border border-brand-text/10 rounded-xl mt-4">
+              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                <div>
                   <h4 className="font-semibold text-brand-text">User Portal Maintenance</h4>
                   <p className="text-sm text-brand-text/60 mt-1">
                     When on, users cannot create or update submissions and see a maintenance message.
