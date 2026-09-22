@@ -248,14 +248,14 @@ export default function DownloadPanel({ token, onUnauthorized }: { token: string
                       {g.filters.map((f) => (
                         <label
                           key={f.id}
-                          className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all ${filter === f.id ? 'border-brand-accent bg-brand-accent/5' : 'border-brand-text/10 hover:border-brand-text/25'}`}
+                          className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all shadow-sm ${filter === f.id ? 'border-amber-500 bg-amber-400' : 'bg-white border-transparent hover:border-brand-text/25'}`}
                         >
                           <input
                             type="radio"
                             name="export-filter"
                             checked={filter === f.id}
                             onChange={() => setFilter(f.id)}
-                            className="w-4 h-4 accent-brand-accent"
+                            className="w-4 h-4 accent-brand-text"
                           />
                           <span className="text-sm font-medium text-brand-text">{f.label}</span>
                         </label>
@@ -307,13 +307,13 @@ export default function DownloadPanel({ token, onUnauthorized }: { token: string
                     {columns.map((c) => (
                       <label
                         key={c.id}
-                        className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg border cursor-pointer transition-all ${selected.includes(c.id) ? 'border-brand-accent bg-brand-accent/5' : 'border-brand-text/10 hover:border-brand-text/25'}`}
+                        className={`flex items-center gap-3 px-3.5 py-2.5 rounded-lg border-2 cursor-pointer transition-all shadow-sm ${selected.includes(c.id) ? 'border-amber-500 bg-amber-400' : 'bg-white border-transparent hover:border-brand-text/25'}`}
                       >
                         <input
                           type="checkbox"
                           checked={selected.includes(c.id)}
                           onChange={() => toggleColumn(c.id)}
-                          className="w-4 h-4 rounded accent-brand-accent"
+                          className="w-4 h-4 rounded accent-brand-text"
                         />
                         <span className="text-sm text-brand-text">{c.label}</span>
                       </label>

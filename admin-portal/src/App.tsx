@@ -1146,18 +1146,7 @@ function ReviewSection({
   total,
   loading,
   error,
-  filtersActive,
   emptyMsg,
-  emptyFilteredMsg,
-  searchTerm,
-  onSearchChange,
-  trackFilter,
-  onTrackFilterChange,
-  paperIdFilter,
-  onPaperIdFilterChange,
-  tracks,
-  paperIds,
-  onClear,
   onOpenPdf,
   onViewInfo,
   onDelete,
@@ -1176,18 +1165,7 @@ function ReviewSection({
   total: number;
   loading: boolean;
   error: string | null;
-  filtersActive: boolean;
   emptyMsg: string;
-  emptyFilteredMsg: string;
-  searchTerm: string;
-  onSearchChange: (v: string) => void;
-  trackFilter: string;
-  onTrackFilterChange: (v: string) => void;
-  paperIdFilter: string;
-  onPaperIdFilterChange: (v: string) => void;
-  tracks: string[];
-  paperIds: string[];
-  onClear: () => void;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
   onDelete: (sub: Submission) => void;
@@ -1257,20 +1235,6 @@ function ReviewSection({
         </div>
       )}
 
-      <FilterPanel
-        searchTerm={searchTerm}
-        onSearchChange={onSearchChange}
-        trackFilter={trackFilter}
-        onTrackFilterChange={onTrackFilterChange}
-        paperIdFilter={paperIdFilter}
-        onPaperIdFilterChange={onPaperIdFilterChange}
-        tracks={tracks}
-        paperIds={paperIds}
-        resultCount={rows.length}
-        totalCount={total}
-        onClear={onClear}
-      />
-
       {/* Desktop table */}
       <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
         <table className="w-full text-left border-collapse table-fixed">
@@ -1295,7 +1259,7 @@ function ReviewSection({
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={9} className="py-8 text-center text-brand-text/60">
-                  {filtersActive ? emptyFilteredMsg : emptyMsg}
+                  {emptyMsg}
                 </td>
               </tr>
             ) : (
@@ -1392,7 +1356,7 @@ function ReviewSection({
           </div>
         ) : rows.length === 0 ? (
           <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-            {filtersActive ? emptyFilteredMsg : emptyMsg}
+            {emptyMsg}
           </div>
         ) : (
           rows.map((sub) => (
@@ -2007,22 +1971,24 @@ export default function App() {
   const paperIds = Array.from(new Set(submissions.map((s) => s.paper_id).filter(Boolean) as string[])).sort((a, b) =>
     a.localeCompare(b)
   );
-  const deletedTracks = Array.from(new Set(deletedSubmissions.map((s) => s.track).filter(Boolean) as string[])).sort((a, b) =>
-    a.localeCompare(b)
-  );
-  const deletedPaperIds = Array.from(new Set(deletedSubmissions.map((s) => s.paper_id).filter(Boolean) as string[])).sort((a, b) =>
-    a.localeCompare(b)
-  );
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(q || trackFilter || paperIdFilter);
   const hasReview = (s: Submission) => !!s.review_decision;
+  // Section membership is driven by the review decision / status strings so a
+  // paper is never ambiguous: any decision declaring "Accepted" (pure, or with
+  // minor/major changes) plus any accepted workflow status lands in Reviewed;
+  // anything explicitly not accepted or pending revision lands in Needs
+  // Revisions; everything else is still pending.
+  const ACCEPTED_DECISIONS = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES'];
+  const ACCEPTED_STATUSES = ['ACCEPTED', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
+  const REVISION_STATUSES = ['REVISION_REQUIRED', 'REJECTED'];
+  const isAccepted = (s: Submission) =>
+    ACCEPTED_DECISIONS.includes(s.review_decision) || ACCEPTED_STATUSES.includes(s.status);
+  const isPendingRevision = (s: Submission) => (hasReview(s) && !isAccepted(s)) || REVISION_STATUSES.includes(s.status);
   const updatedFirst = (a: Submission, b: Submission) => Number(b.review_resubmitted === 1) - Number(a.review_resubmitted === 1);
-  const reviewedSubmissions = submissions.filter((s) => hasReview(s) && s.review_decision === 'ACCEPTED');
-  const notAcceptedSubmissions = submissions
-    .filter((s) => hasReview(s) && s.review_decision !== 'ACCEPTED')
-    .slice()
-    .sort(updatedFirst);
-  const pendingSubmissions = submissions.filter((s) => !hasReview(s));
+  const reviewedSubmissions = submissions.filter(isAccepted);
+  const notAcceptedSubmissions = submissions.filter(isPendingRevision).slice().sort(updatedFirst);
+  const pendingSubmissions = submissions.filter((s) => !isAccepted(s) && !isPendingRevision(s));
   const applyFilters = (list: Submission[]) =>
     list.filter((s) => {
       const matchSearch = matchesSearch(s, q);
@@ -2030,10 +1996,10 @@ export default function App() {
       const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
       return matchSearch && matchTrack && matchPaper;
     });
-  const filteredSubmissions = applyFilters(pendingSubmissions);
-  const filteredReviewed = applyFilters(reviewedSubmissions);
-  const filteredNotAccepted = applyFilters(notAcceptedSubmissions);
-  const filteredDeleted = applyFilters(deletedSubmissions);
+  const filteredSubmissions = applyFilters(submissions);
+  const filteredReviewed = reviewedSubmissions;
+  const filteredNotAccepted = notAcceptedSubmissions;
+  const filteredDeleted = deletedSubmissions;
   const clearFilters = () => {
     setSearchTerm('');
     setTrackFilter('');
@@ -2048,6 +2014,7 @@ export default function App() {
     setMailSelected([]);
     setMailSendError(null);
     setMailSendMessage(null);
+    clearFilters();
   };
 
   if (!token) {
@@ -2194,7 +2161,7 @@ export default function App() {
 
             <SubmissionListing
               rows={filteredSubmissions}
-              total={pendingSubmissions.length}
+              total={submissions.length}
               loading={loading}
               error={error ? `Error loading submissions: ${error}` : null}
               filtersActive={filtersActive}
@@ -2240,23 +2207,12 @@ export default function App() {
             )}
             <ReviewSection
               title="Reviewed Files"
-              subtitle="Papers reviewers have accepted. This section is view-only."
+              subtitle="Papers reviewers have accepted (including those accepted with minor or major changes). This section is view-only."
               rows={filteredReviewed}
               total={reviewedSubmissions.length}
               loading={loading}
               error={error ? `Error loading submissions: ${error}` : null}
-              filtersActive={filtersActive}
               emptyMsg="No accepted papers yet."
-              emptyFilteredMsg="No accepted papers match your search or filters."
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              trackFilter={trackFilter}
-              onTrackFilterChange={setTrackFilter}
-              paperIdFilter={paperIdFilter}
-              onPaperIdFilterChange={setPaperIdFilter}
-              tracks={tracks}
-              paperIds={paperIds}
-              onClear={clearFilters}
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
               onDelete={setDeleteTarget}
@@ -2290,23 +2246,12 @@ export default function App() {
             )}
             <ReviewSection
               title="Files Awaiting Revisions"
-              subtitle="Papers whose review decision requires changes (minor, major or not accepted). They stay in this section while the author revises them; when an updated version is uploaded the paper is highlighted and ready for re-review."
+              subtitle="Papers whose review decision is not accepted (rejected / not accepted). They stay in this section while the author revises them; when an updated version is uploaded the paper is highlighted and ready for re-review."
               rows={filteredNotAccepted}
               total={notAcceptedSubmissions.length}
               loading={loading}
               error={error ? `Error loading submissions: ${error}` : null}
-              filtersActive={filtersActive}
               emptyMsg="No papers awaiting revisions yet."
-              emptyFilteredMsg="No papers awaiting revisions match your search or filters."
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              trackFilter={trackFilter}
-              onTrackFilterChange={setTrackFilter}
-              paperIdFilter={paperIdFilter}
-              onPaperIdFilterChange={setPaperIdFilter}
-              tracks={tracks}
-              paperIds={paperIds}
-              onClear={clearFilters}
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
               onDelete={setDeleteTarget}
@@ -2339,24 +2284,6 @@ export default function App() {
               </div>
             )}
 
-            <FilterPanel
-              searchTerm={searchTerm}
-              onSearchChange={setSearchTerm}
-              trackFilter={trackFilter}
-              onTrackFilterChange={setTrackFilter}
-              paperIdFilter={paperIdFilter}
-              onPaperIdFilterChange={setPaperIdFilter}
-              tracks={deletedTracks}
-              paperIds={deletedPaperIds}
-              resultCount={filteredDeleted.length}
-              totalCount={deletedSubmissions.length}
-              onClear={() => {
-                setSearchTerm('');
-                setTrackFilter('');
-                setPaperIdFilter('');
-              }}
-            />
-
             <div className="space-y-4">
               {deletedLoading ? (
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
@@ -2364,9 +2291,7 @@ export default function App() {
                 </div>
               ) : filteredDeleted.length === 0 ? (
                 <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-                  {filtersActive
-                    ? 'No deleted files match your search or filters.'
-                    : 'No deleted files. Deleted submissions will appear here.'}
+                  No deleted files. Deleted submissions will appear here.
                 </div>
               ) : (
                 filteredDeleted.map((sub) => {
