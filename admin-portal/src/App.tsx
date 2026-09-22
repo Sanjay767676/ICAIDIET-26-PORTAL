@@ -2727,7 +2727,7 @@ export default function App() {
         title="Delete Submission?"
         message={
           deleteTarget
-            ? `Move "${deleteTarget.paper_id || deleteTarget.submission_code}" — ${deleteTarget.title} to Deleted Files?\n\nIt will be hidden from the submissions list. You can recover it from the "Deleted Files" tab within 30 days, after which it will be permanently removed.`
+            ? `Move "${deleteTarget.paper_id || deleteTarget.submission_code}" — ${deleteTarget.title} to Deleted Files?\n\nAuthor: ${deleteTarget.author_name || 'Unknown'} <${deleteTarget.author_email || 'no email'}>\n\nThe submitter will no longer see this paper in their portal. You can recover it from the "Deleted Files" tab within 30 days, after which it will be permanently removed.`
             : ''
         }
         confirmLabel="Delete"
