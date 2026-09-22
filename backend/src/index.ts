@@ -62,7 +62,7 @@ function corsOrigins(c: any): string[] {
 
 app.use('*', (c, next) => {
   const origin = corsOrigins(c);
-  return cors({ origin, allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'], maxAge: 86400 })(c, next);
+  return cors({ origin, allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'], maxAge: 86400 })(c, next);
 });
 
 // ------------------------------------------------------------------
@@ -2116,6 +2116,148 @@ app.post('/api/admin/submissions/:id/no-corrections', async (c) => {
     });
   } catch (error) {
     console.error('Update submission no-corrections error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Replace the author list for a submission (phones, co-authors,
+// college names, emails). Deletes existing author rows and inserts the
+// new list atomically, and keeps submissions.author_name/author_email
+// in sync with the primary author.
+// ------------------------------------------------------------------
+app.put('/api/admin/submissions/:id/authors', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const submissionId = c.req.param('id');
+    const existing = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
+      .bind(submissionId).first();
+    if (!existing) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const raw = Array.isArray(body?.authors) ? body.authors : null;
+    if (!raw || raw.length === 0) {
+      return c.json({ success: false, error: 'Provide at least one author.' }, 400);
+    }
+
+    const authors = (raw as any[]).map((a) => ({
+      first_name: typeof a.first_name === 'string' ? a.first_name.trim() : '',
+      last_name: typeof a.last_name === 'string' ? a.last_name.trim() : '',
+      email: typeof a.email === 'string' ? a.email.trim() : '',
+      phone: typeof a.phone === 'string' ? a.phone.trim() : '',
+      college: typeof a.college === 'string' ? a.college.trim() : '',
+      is_primary: a.is_primary === true || a.is_primary === 1 || a.is_primary === '1' ? 1 : 0,
+    }));
+
+    if (authors.some((a) => !a.first_name || !a.last_name)) {
+      return c.json({ success: false, error: 'Every author needs a first and last name.' }, 400);
+    }
+    if (authors.filter((a) => a.is_primary === 1).length !== 1) {
+      return c.json({ success: false, error: 'Exactly one author must be marked as the primary (corresponding) author.' }, 400);
+    }
+    const primary = authors.find((a) => a.is_primary === 1)!;
+    if (!primary.email) {
+      return c.json({ success: false, error: 'The primary author must have an email address.' }, 400);
+    }
+
+    const now = new Date().toISOString();
+    const statements: D1PreparedStatement[] = [
+      c.env.DB.prepare(`DELETE FROM authors WHERE submission_id = ?`).bind(submissionId),
+    ];
+    for (const a of authors) {
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO authors (id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(crypto.randomUUID(), submissionId, a.is_primary, a.first_name, a.last_name, a.phone, a.email, a.college, now)
+      );
+    }
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE submissions SET author_name = ?, author_email = ?, updated_at = ? WHERE id = ?`
+      ).bind(`${primary.first_name} ${primary.last_name}`, primary.email, now, submissionId)
+    );
+
+    await c.env.DB.batch(statements);
+
+    const res = await c.env.DB.prepare(
+      `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+       FROM authors WHERE submission_id = ? ORDER BY is_primary DESC, created_at ASC`
+    ).bind(submissionId).all();
+
+    return c.json({ success: true, authors: res.results });
+  } catch (error) {
+    console.error('Update author list error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Full database backup (on-demand, read-only).
+// Every table is exported as JSON plus the R2 object manifest, and the
+// snapshot is returned straight to the admin's browser to be saved on
+// their own computer. Nothing is ever written or stored in the database
+// (D1 has no temp/backup table for this) and no rows are modified.
+// ------------------------------------------------------------------
+app.get('/api/admin/backup', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const tableRes = await c.env.DB.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+    ).all();
+    const tables = ((tableRes.results as any[]) || []).map((r) => r.name as string);
+
+    const backup: Record<string, any[]> = {};
+    for (const table of tables) {
+      const res = await c.env.DB.prepare(`SELECT * FROM "${table}"`).all();
+      backup[table] = (res.results as any[]) || [];
+    }
+
+    // R2 object manifest (best-effort) so the file storage is restorable too.
+    const r2Objects: { key: string; size: number; etag: string }[] = [];
+    try {
+      let cursor: string | undefined;
+      do {
+        const page = await c.env.BUCKET.list({ cursor, limit: 1000 });
+        for (const obj of page.objects) {
+          r2Objects.push({ key: obj.key, size: obj.size, etag: obj.etag });
+        }
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+    } catch (err) {
+      console.error('R2 manifest error:', err);
+    }
+
+    const exported_at = new Date().toISOString();
+    const backupData = {
+      application: 'icaidiet-conference-portal',
+      version: 1,
+      exported_at,
+      tables: backup,
+      r2_objects: r2Objects,
+    };
+
+    return c.json({ success: true, exported_at, backup: backupData });
+  } catch (error) {
+    console.error('Backup export error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle } from 'lucide-react';
+import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, PenSquare, Plus, UserRoundCheck } from 'lucide-react';
 import DownloadPanel from './components/DownloadPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -591,12 +591,272 @@ function ConfirmDialog({
 // ------------------------------------------------------------------
 // More info modal: full record details (no file actions)
 // ------------------------------------------------------------------
+// ------------------------------------------------------------------
+// Admin: Edit a submission's author list (phones, co-authors, college
+// names, emails). Saves via PUT /api/admin/submissions/:id/authors
+// ------------------------------------------------------------------
+interface AuthorDraft {
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone: string;
+  college: string;
+  is_primary: boolean;
+}
+
+function EditAuthorsModal({
+  sub,
+  token,
+  onUnauthorized,
+  onClose,
+  onSaved,
+}: {
+  sub: Submission;
+  token: string;
+  onUnauthorized: () => void;
+  onClose: () => void;
+  onSaved: (authors: Author[]) => void;
+}) {
+  const existing = sub.authors && sub.authors.length > 0 ? sub.authors : [];
+  const seedDrafts = (): AuthorDraft[] =>
+    existing.length > 0
+      ? existing.map((a) => ({
+          first_name: a.first_name || '',
+          last_name: a.last_name || '',
+          email: a.email || '',
+          phone: a.phone || '',
+          college: a.college || '',
+          is_primary: a.is_primary === 1,
+        }))
+      : [
+          {
+            first_name: (sub.author_name || '').split(' ')[0] || '',
+            last_name: (sub.author_name || '').split(' ').slice(1).join(' ') || '',
+            email: sub.author_email || '',
+            phone: '',
+            college: '',
+            is_primary: true,
+          },
+        ];
+
+  const [drafts, setDrafts] = useState<AuthorDraft[]>(seedDrafts);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const update = (i: number, patch: Partial<AuthorDraft>) =>
+    setDrafts((d) => d.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+
+  const setPrimary = (i: number) =>
+    setDrafts((d) => d.map((row, idx) => ({ ...row, is_primary: idx === i })));
+
+  const addAuthor = () =>
+    setDrafts((d) => [...d, { first_name: '', last_name: '', email: '', phone: '', college: '', is_primary: false }]);
+
+  const removeAuthor = (i: number) =>
+    setDrafts((d) => d.filter((_, idx) => idx !== i));
+
+  const save = async () => {
+    setError(null);
+    if (drafts.length === 0) {
+      setError('Add at least one author.');
+      return;
+    }
+    if (drafts.some((a) => !a.first_name.trim() || !a.last_name.trim())) {
+      setError('Every author needs a first and last name.');
+      return;
+    }
+    if (drafts.filter((a) => a.is_primary).length !== 1) {
+      setError('Exactly one author must be marked as the primary author.');
+      return;
+    }
+    const primary = drafts.find((a) => a.is_primary)!;
+    if (!primary.email.trim()) {
+      setError('The primary author must have an email address.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/authors`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          authors: drafts.map((a) => ({
+            first_name: a.first_name.trim(),
+            last_name: a.last_name.trim(),
+            email: a.email.trim(),
+            phone: a.phone.trim(),
+            college: a.college.trim(),
+            is_primary: a.is_primary ? 1 : 0,
+          })),
+        }),
+      });
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to save authors.');
+      }
+      onSaved((data.authors as Author[]) || []);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save authors.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-2 sm:p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { if (!saving) onClose(); }} />
+      <div className="relative w-full max-w-4xl max-h-[92vh] flex flex-col rounded-2xl bg-white shadow-2xl border-2 border-brand-accent overflow-hidden">
+        <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-4 bg-brand-text text-white">
+          <h2 className="font-serif font-bold text-lg sm:text-xl min-w-0 truncate">Edit Authors</h2>
+          <span className="text-xs font-medium text-white/70 shrink-0">{sub.paper_id || sub.submission_code}</span>
+          <button
+            onClick={() => { if (!saving) onClose(); }}
+            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors shrink-0"
+            aria-label="Close"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <p className="text-sm text-brand-text/60 mb-4">
+            <span className="font-semibold text-brand-text">{sub.title}</span> — fill in phone numbers, co-authors and
+            college names. Mark exactly one author as <span className="font-semibold text-brand-text">Primary</span> (the
+            corresponding author).
+          </p>
+
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3 mb-4">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+            </div>
+          )}
+
+          <div className="space-y-4">
+            {drafts.map((a, i) => (
+              <div key={i} className="border border-brand-accent/40 bg-brand-bg/40 rounded-xl p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-brand-text">
+                    <UserRoundCheck className="w-4 h-4 text-brand-accent" /> Author {i + 1}
+                  </span>
+                  <div className="flex items-center gap-3">
+                    <label className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-text/80 cursor-pointer select-none">
+                      <input
+                        type="radio"
+                        name="primary-author"
+                        checked={a.is_primary}
+                        onChange={() => setPrimary(i)}
+                        className="w-4 h-4 accent-brand-accent cursor-pointer"
+                      />
+                      Primary
+                    </label>
+                    {drafts.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => removeAuthor(i)}
+                        disabled={saving}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-red-600 rounded-lg border border-red-200 hover:bg-red-50 transition-colors disabled:opacity-50"
+                      >
+                        <X className="w-3.5 h-3.5" /> Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">First name</label>
+                    <input
+                      value={a.first_name}
+                      onChange={(e) => update(i, { first_name: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">Last name</label>
+                    <input
+                      value={a.last_name}
+                      onChange={(e) => update(i, { last_name: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={a.email}
+                      onChange={(e) => update(i, { email: e.target.value })}
+                      placeholder="author@university.edu"
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">Phone</label>
+                    <input
+                      type="tel"
+                      value={a.phone}
+                      onChange={(e) => update(i, { phone: e.target.value })}
+                      placeholder="+91 00000 00000"
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    />
+                  </div>
+                  <div className="col-span-2">
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">College / Institution</label>
+                    <input
+                      value={a.college}
+                      onChange={(e) => update(i, { college: e.target.value })}
+                      placeholder="University / College name"
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={addAuthor}
+            disabled={saving}
+            className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 hover:border-brand-accent transition-colors disabled:opacity-50"
+          >
+            <Plus className="w-4 h-4" /> Add Co-author
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">
+          <button
+            onClick={save}
+            disabled={saving}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+            {saving ? 'Saving...' : 'Save Authors'}
+          </button>
+          <button
+            onClick={() => { if (!saving) onClose(); }}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-brand-text/70 hover:bg-brand-text/5 transition-colors disabled:opacity-50 ml-auto"
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MoreInfoModal({
   sub,
   onClose,
+  onEditAuthors,
 }: {
   sub: Submission | null;
   onClose: () => void;
+  onEditAuthors?: (sub: Submission) => void;
 }) {
   if (!sub) return null;
   const authors = sub.authors || [];
@@ -718,6 +978,14 @@ function MoreInfoModal({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">
+          {onEditAuthors && (
+            <button
+              onClick={() => onEditAuthors(sub)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-brand-text hover:bg-brand-accent transition-colors"
+            >
+              <PenSquare className="w-4 h-4" /> Edit Authors
+            </button>
+          )}
           <button
             onClick={onClose}
             className="inline-flex items-center px-4 py-2 rounded-lg text-sm font-medium text-brand-text/70 hover:bg-brand-text/5 transition-colors ml-auto"
@@ -846,6 +1114,7 @@ function SubmissionListing({
   onStatusError,
   onOpenPdf,
   onViewInfo,
+  onEditAuthors,
   onDelete,
   enquiredSaving,
   onToggleEnquired,
@@ -872,6 +1141,7 @@ function SubmissionListing({
   onStatusError: (msg: string) => void;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
+  onEditAuthors: (sub: Submission) => void;
   onDelete: (sub: Submission) => void;
   enquiredSaving: string | null;
   onToggleEnquired: (sub: Submission) => void;
@@ -993,6 +1263,12 @@ function SubmissionListing({
                         className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                       >
                         <Eye className="w-4 h-4" /> View Info
+                      </button>
+                      <button
+                        onClick={() => onEditAuthors(sub)}
+                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                      >
+                        <PenSquare className="w-4 h-4" /> Edit Authors
                       </button>
                       <button
                         onClick={() => onDelete(sub)}
@@ -1149,6 +1425,7 @@ function ReviewSection({
   emptyMsg,
   onOpenPdf,
   onViewInfo,
+  onEditAuthors,
   onDelete,
   mailTemplates,
   selectedTemplateId,
@@ -1168,6 +1445,7 @@ function ReviewSection({
   emptyMsg: string;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
+  onEditAuthors: (sub: Submission) => void;
   onDelete: (sub: Submission) => void;
   mailTemplates: MailTemplate[];
   selectedTemplateId: string;
@@ -1334,6 +1612,12 @@ function ReviewSection({
                         <Eye className="w-4 h-4" /> View Info
                       </button>
                       <button
+                        onClick={() => onEditAuthors(sub)}
+                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                      >
+                        <PenSquare className="w-4 h-4" /> Edit Authors
+                      </button>
+                      <button
                         onClick={() => onDelete(sub)}
                         className="inline-flex items-center gap-1.5 text-red-600 font-medium text-xs whitespace-nowrap hover:text-red-700 hover:underline"
                       >
@@ -1482,6 +1766,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
   const [moreInfoTarget, setMoreInfoTarget] = useState<Submission | null>(null);
+  const [editAuthorsTarget, setEditAuthorsTarget] = useState<Submission | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -1494,6 +1779,9 @@ export default function App() {
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
   const [mtReviewUntil, setMtReviewUntil] = useState<string>('');
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
+  const [backingUp, setBackingUp] = useState(false);
+  const [backupMessage, setBackupMessage] = useState<string | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
   const [mailTemplates, setMailTemplates] = useState<MailTemplate[]>([]);
   const [mailTemplatesLoading, setMailTemplatesLoading] = useState(false);
   const [mailTemplatesError, setMailTemplatesError] = useState<string | null>(null);
@@ -1522,6 +1810,15 @@ export default function App() {
     setPdfView({ open: false });
     sessionStorage.removeItem('icaidiet_admin_token');
     sessionStorage.removeItem('icaidiet_admin_user');
+  };
+
+  const handleAuthorsSaved = (authors: Author[]) => {
+    const subId = editAuthorsTarget?.id;
+    setEditAuthorsTarget(null);
+    if (subId) {
+      setMoreInfoTarget((prev) => (prev && prev.id === subId ? { ...prev, authors } : prev));
+    }
+    fetchSubmissions({ silent: true });
   };
 
   const fetchUsers = async (opts?: { silent?: boolean }) => {
@@ -1589,6 +1886,44 @@ export default function App() {
       setError(err instanceof Error ? err.message : 'Failed to update settings.');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  const downloadBackup = async () => {
+    setBackingUp(true);
+    setBackupError(null);
+    setBackupMessage(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/backup`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success || !data?.backup) {
+        throw new Error(data?.error || 'Failed to create backup.');
+      }
+      const blob = new Blob([JSON.stringify(data.backup, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      const stamp = (data.exported_at || new Date().toISOString()).slice(0, 19).replace(/[:T]/g, '-');
+      a.href = url;
+      a.download = `icaidiet-backup-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      const tableCount = Object.keys(data.backup.tables || {}).length;
+      const r2Count = Array.isArray(data.backup.r2_objects) ? data.backup.r2_objects.length : 0;
+      setBackupMessage(
+        `Backup downloaded to your computer (${tableCount} tables, ${r2Count} files on record). Stored only on your machine — nothing was written to or kept in the database.`
+      );
+    } catch (err) {
+      setBackupError(err instanceof Error ? err.message : 'Backup failed.');
+    } finally {
+      setBackingUp(false);
     }
   };
 
@@ -2182,6 +2517,7 @@ export default function App() {
               onStatusError={setError}
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
+              onEditAuthors={setEditAuthorsTarget}
               onDelete={setDeleteTarget}
               enquiredSaving={enquiredSaving}
               onToggleEnquired={handleEnquiredToggle}
@@ -2215,6 +2551,7 @@ export default function App() {
               emptyMsg="No accepted papers yet."
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
+              onEditAuthors={setEditAuthorsTarget}
               onDelete={setDeleteTarget}
               mailTemplates={mailTemplates}
               selectedTemplateId={selectedTemplateId}
@@ -2254,6 +2591,7 @@ export default function App() {
               emptyMsg="No papers awaiting revisions yet."
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
+              onEditAuthors={setEditAuthorsTarget}
               onDelete={setDeleteTarget}
               mailTemplates={mailTemplates}
               selectedTemplateId={selectedTemplateId}
@@ -2623,6 +2961,38 @@ export default function App() {
               </div>
             </div>
 
+            <div className="border border-brand-text/10 rounded-xl mt-4">
+              <div className="flex items-start justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                <div>
+                  <h4 className="font-semibold text-brand-text">Full Backup / Download</h4>
+                  <p className="text-sm text-brand-text/60 mt-1">
+                    Download a complete snapshot of all data (every table, plus the record of stored paper files) as a
+                    single JSON file saved straight to your computer. The backup is generated on demand, is never stored
+                    in the database, and is deleted from our servers the moment it leaves — keep a copy somewhere safe.
+                    Take one before any risky maintenance.
+                  </p>
+                </div>
+                <button
+                  onClick={downloadBackup}
+                  disabled={backingUp}
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0 disabled:opacity-50 shadow"
+                >
+                  {backingUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  {backingUp ? 'Creating backup...' : 'Download Backup'}
+                </button>
+              </div>
+              {backupError && (
+                <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" /> {backupError}
+                </div>
+              )}
+              {backupMessage && (
+                <div className="px-5 py-3 text-sm text-green-700 flex items-center gap-2 bg-green-50">
+                  <CheckCircle2 className="w-4 h-4 shrink-0" /> {backupMessage}
+                </div>
+              )}
+            </div>
+
             <div className="flex items-center justify-end gap-3 mt-6">
               <button
                 onClick={savePortalSettings}
@@ -2670,6 +3040,15 @@ export default function App() {
       <MoreInfoModal
         sub={moreInfoTarget}
         onClose={() => setMoreInfoTarget(null)}
+        onEditAuthors={setEditAuthorsTarget}
+      />
+
+      <EditAuthorsModal
+        sub={editAuthorsTarget}
+        token={token}
+        onUnauthorized={handleLogout}
+        onClose={() => setEditAuthorsTarget(null)}
+        onSaved={handleAuthorsSaved}
       />
     </div>
   );
