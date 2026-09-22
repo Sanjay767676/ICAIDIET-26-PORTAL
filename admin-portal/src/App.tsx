@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle } from 'lucide-react';
+import DownloadPanel from './components/DownloadPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -1506,7 +1507,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'notAccepted' | 'users' | 'deleted' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'notAccepted' | 'users' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -2137,6 +2138,13 @@ export default function App() {
                 )}
               </button>
               <button
+                onClick={() => changeTab('downloads')}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'downloads' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+                  }`}
+              >
+                <Download className="w-4 h-4 inline-block mr-1 align-[-2px]" /> Downloads
+              </button>
+              <button
                 onClick={() => changeTab('settings')}
                 className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
                   }`}
@@ -2416,6 +2424,10 @@ export default function App() {
             </div>
           </>
         )}
+        {activeTab === 'downloads' && (
+          <DownloadPanel token={token} onUnauthorized={handleLogout} />
+        )}
+
         {activeTab === 'settings' && (
           <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-6 sm:p-8 max-w-3xl mt-6">
             <h3 className="font-serif text-xl font-bold mb-1">Portal Settings</h3>

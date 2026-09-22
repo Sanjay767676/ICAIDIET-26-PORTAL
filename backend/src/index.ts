@@ -438,21 +438,20 @@ app.post('/api/admin/mail/process', async (c) => {
     const verified = await verifyToken(c, token);
     if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
 
+    const now = new Date().toISOString();
+
+    // Atomically claim the oldest queued mail. A single UPDATE...RETURNING
+    // means two concurrent /mail/process calls can never pick the same row
+    // and send a duplicate email.
     const queued = await c.env.DB.prepare(
-      `SELECT id, recipient_email, subject, body FROM mail_logs
-       WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1`
-    ).first() as any;
+      `UPDATE mail_logs SET status = 'sending', updated_at = ?
+       WHERE id = (SELECT id FROM mail_logs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1)
+       RETURNING id, recipient_email, subject, body`
+    ).bind(now).first() as any;
 
     if (!queued) {
-      const { results } = await c.env.DB.prepare(
-        `SELECT COUNT(*) AS total FROM mail_logs WHERE status IN ('queued', 'sending')`
-      ).first() as any;
       return c.json({ success: true, processed: false, remaining: 0 });
     }
-
-    const now = new Date().toISOString();
-    await c.env.DB.prepare(`UPDATE mail_logs SET status = 'sending', updated_at = ? WHERE id = ?`)
-      .bind(now, queued.id).run();
 
     const result = await sendViaResend(c, queued.recipient_email, queued.subject, queued.body);
 
@@ -534,34 +533,29 @@ async function ensureUserForClerk(c: Context<AppEnv>, clerkUserId: string, clerk
   ).bind(clerkUserId).first() as any;
   if (legacy?.user_id) return legacy.user_id;
 
-  if (clerkEmail) {
-    const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
-      .bind(clerkEmail).first() as any;
-    if (existing?.id) return existing.id;
+  // Email fallback for token-only identities: a synthesized per-Clerk address.
+  const email = (clerkEmail || `${clerkUserId}@clerk.local`).trim().toLowerCase();
 
-    const userId = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const name = clerkEmail.split('@')[0] || 'User';
-    await c.env.DB.prepare(
-      `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).bind(userId, name, clerkEmail, 'clerk-managed', 'USER', now, now).run();
-    return userId;
-  }
-
-  // No email on the token: fall back to a per-Clerk-user identifier.
-  const fallbackEmail = `${clerkUserId}@clerk.local`;
   const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
-    .bind(fallbackEmail).first() as any;
+    .bind(email).first() as any;
   if (existing?.id) return existing.id;
 
+  // Race-safe: two concurrent requests (e.g. /users/sync + /users/me firing
+  // together) can both miss the SELECT above. ON CONFLICT turns the second
+  // INSERT into a no-op instead of failing with a unique-key error, then we
+  // re-select the (now guaranteed) row.
   const userId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const name = email.split('@')[0] || 'User';
   await c.env.DB.prepare(
     `INSERT INTO users (id, name, email, password_hash, role, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).bind(userId, 'User', fallbackEmail, 'clerk-managed', 'USER', now, now).run();
-  return userId;
+     VALUES (?, ?, ?, ?, 'USER', ?, ?)
+     ON CONFLICT(email) DO NOTHING`
+  ).bind(userId, name, email, 'clerk-managed', now, now).run();
+
+  const row = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+    .bind(email).first() as any;
+  return row!.id;
 }
 
 function clientIp(c: any): string {
@@ -570,7 +564,10 @@ function clientIp(c: any): string {
 
 function rateLimit(c: any, key: string, limit: number, windowMs: number): boolean {
   const now = Date.now();
-  const fullKey = `${clientIp(c)}:${key}`;
+  // Key on the signed-in user when available so throttling follows the
+  // user (not just their IP, which can change on mobile / NAT networks).
+  const identity = (typeof c.get === 'function' && (c.get('clerkUserId') as string | undefined)) || clientIp(c);
+  const fullKey = `${identity}:${key}`;
   const bucket = rateBuckets.get(fullKey);
   if (!bucket || bucket.resetAt < now) {
     rateBuckets.set(fullKey, { count: 1, resetAt: now + windowMs });
@@ -605,6 +602,153 @@ function validateFile(file: File): { ok: boolean; reason?: string } {
 function sanitizeFilename(name: string): string {
   const base = name.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '');
   return base || 'document';
+}
+
+// ------------------------------------------------------------------
+// Excel (.xlsx) generation — dependency-free OOXML + ZIP (stored).
+// Lets the admin export submissions as a real .xlsx without shipping
+// a heavy spreadsheet library to the Worker bundle.
+// ------------------------------------------------------------------
+
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+function crc32(buf: Uint8Array): number {
+  let c = 0xffffffff;
+  for (let i = 0; i < buf.length; i++) c = CRC_TABLE[(c ^ buf[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function zipDateTime(): { time: number; date: number } {
+  const d = new Date();
+  const time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1);
+  const date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  return { time, date };
+}
+
+// Build a ZIP archive using STORED (uncompressed) entries — valid for
+// text XML parts and keeps the writer dependency-free and fast.
+function buildZip(entries: { name: string; data: Uint8Array }[]): Uint8Array {
+  const enc = new TextEncoder();
+  const localParts: Uint8Array[] = [];
+  const centralParts: Uint8Array[] = [];
+  const { time, date } = zipDateTime();
+  let offset = 0;
+
+  for (const e of entries) {
+    const name = enc.encode(e.name);
+    const crc = crc32(e.data);
+    const sz = e.data.length;
+
+    const lh = new DataView(new ArrayBuffer(30));
+    lh.setUint32(0, 0x04034b50, true);
+    lh.setUint16(4, 20, true); // version needed
+    lh.setUint16(6, 0x0800, true); // UTF-8 filenames
+    lh.setUint16(8, 0, true); // method: stored
+    lh.setUint16(10, time, true);
+    lh.setUint16(12, date, true);
+    lh.setUint32(14, crc, true);
+    lh.setUint32(18, sz, true);
+    lh.setUint32(22, sz, true);
+    lh.setUint16(26, name.length, true);
+    lh.setUint16(28, 0, true);
+    localParts.push(new Uint8Array(lh.buffer), name, e.data);
+
+    const ch = new DataView(new ArrayBuffer(46));
+    ch.setUint32(0, 0x02014b50, true);
+    ch.setUint16(4, 20, true);
+    ch.setUint16(6, 20, true);
+    ch.setUint16(8, 0x0800, true);
+    ch.setUint16(10, 0, true);
+    ch.setUint16(12, time, true);
+    ch.setUint16(14, date, true);
+    ch.setUint32(16, crc, true);
+    ch.setUint32(20, sz, true);
+    ch.setUint32(24, sz, true);
+    ch.setUint16(28, name.length, true);
+    ch.setUint16(30, 0, true);
+    ch.setUint16(32, 0, true);
+    ch.setUint16(34, 0, true);
+    ch.setUint16(36, 0, true);
+    ch.setUint32(38, 0, true);
+    ch.setUint32(42, offset, true);
+    centralParts.push(new Uint8Array(ch.buffer), name);
+
+    offset += 30 + name.length + sz;
+  }
+
+  const centralLen = centralParts.reduce((n, p) => n + p.length, 0);
+  const eocd = new DataView(new ArrayBuffer(22));
+  eocd.setUint32(0, 0x06054b50, true);
+  eocd.setUint16(4, 0, true);
+  eocd.setUint16(6, 0, true);
+  eocd.setUint16(8, entries.length, true);
+  eocd.setUint16(10, entries.length, true);
+  eocd.setUint32(12, centralLen, true);
+  eocd.setUint32(16, offset, true);
+  eocd.setUint16(20, 0, true);
+
+  const out = new Uint8Array(offset + centralLen + 22);
+  let pos = 0;
+  for (const p of localParts) { out.set(p, pos); pos += p.length; }
+  for (const p of centralParts) { out.set(p, pos); pos += p.length; }
+  out.set(new Uint8Array(eocd.buffer), pos);
+  return out;
+}
+
+function xlsxColLetter(i: number): string {
+  let s = '';
+  let n = i + 1;
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
+}
+
+function xlsxEscape(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function generateXlsx(headers: string[], rows: string[][]): Uint8Array {
+  const enc = new TextEncoder();
+  const esc = xlsxEscape;
+
+  const sheetCells = (vals: string[], rowNum: number) =>
+    vals
+      .map((v, i) => `<c r="${xlsxColLetter(i)}${rowNum}" t="inlineStr"><is><t xml:space="preserve">${esc(v)}</t></is></c>`)
+      .join('');
+
+  let sheetXml =
+    `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n` +
+    `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`;
+  sheetXml += `<row r="1">${sheetCells(headers, 1)}</row>`;
+  rows.forEach((r, i) => {
+    sheetXml += `<row r="${i + 2}">${sheetCells(r, i + 2)}</row>`;
+  });
+  sheetXml += `</sheetData></worksheet>`;
+
+  const parts = [
+    { name: '[Content_Types].xml', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`) },
+    { name: '_rels/.rels', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`) },
+    { name: 'xl/workbook.xml', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Submissions" sheetId="1" r:id="rId1"/></sheets></workbook>`) },
+    { name: 'xl/_rels/workbook.xml.rels', data: enc.encode(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`) },
+    { name: 'xl/worksheets/sheet1.xml', data: enc.encode(sheetXml) },
+  ];
+
+  return buildZip(parts);
 }
 
 // ------------------------------------------------------------------
@@ -933,33 +1077,24 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
     const nextStatus = decision === 'ACCEPTED' ? 'READY_FOR_REGISTRATION' : 'UNDER_REVIEW';
 
     const now = new Date().toISOString();
-    const current = await c.env.DB.prepare(
-      `SELECT id FROM reviews WHERE submission_id = ? AND reviewer_id = ? LIMIT 1`
-    ).bind(submissionId, reviewerId).first() as any;
 
-    let reviewId: string;
-    const statements: D1PreparedStatement[] = [];
-    if (current?.id) {
-      statements.push(
-        c.env.DB.prepare(
-          `UPDATE reviews SET decision = ?, feedback = ?, resubmitted = 0, updated_at = ? WHERE id = ?`
-        ).bind(decision, feedback, now, current.id)
-      );
-      reviewId = current.id;
-    } else {
-      reviewId = crypto.randomUUID();
-      statements.push(
-        c.env.DB.prepare(
-          `INSERT INTO reviews (id, submission_id, reviewer_id, decision, feedback, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`
-        ).bind(reviewId, submissionId, reviewerId, decision, feedback, now, now)
-      );
-    }
-    statements.push(
+    // Atomic upsert (UNIQUE(submission_id, reviewer_id)) so concurrent
+    // save attempts for the same paper never race to the INSERT.
+    const reviewId = crypto.randomUUID();
+    const statements: D1PreparedStatement[] = [
+      c.env.DB.prepare(
+        `INSERT INTO reviews (id, submission_id, reviewer_id, decision, feedback, resubmitted, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 0, ?, ?)
+         ON CONFLICT(submission_id, reviewer_id) DO UPDATE SET
+           decision = excluded.decision,
+           feedback = excluded.feedback,
+           resubmitted = 0,
+           updated_at = excluded.updated_at`
+      ).bind(reviewId, submissionId, reviewerId, decision, feedback, now, now),
       c.env.DB.prepare(
         `UPDATE submissions SET status = ?, updated_at = ? WHERE id = ?`
-      ).bind(nextStatus, now, submissionId)
-    );
+      ).bind(nextStatus, now, submissionId),
+    ];
     await c.env.DB.batch(statements);
 
     return c.json({
@@ -1091,30 +1226,20 @@ app.post('/api/users/profile', requireClerkAuth, async (c) => {
       `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
     ).bind(name, user.id).run();
 
-    // Upsert the profile row (link via clerk_id, fallback to user_id for legacy rows)
-    let profile = await c.env.DB.prepare(`SELECT id FROM user_profiles WHERE clerk_id = ?`)
-      .bind(clerkUserId).first() as any;
-    if (!profile) {
-      profile = await c.env.DB.prepare(`SELECT id FROM user_profiles WHERE user_id = ?`)
-        .bind(user.id).first() as any;
-    }
-
+    // Race-safe upsert on the unique user_id (also covers legacy rows).
     const now = new Date().toISOString();
-    let profileId: string;
-    if (profile) {
-      await c.env.DB.prepare(
-        `UPDATE user_profiles
-         SET institution = ?, department = ?, country = ?, phone = ?, clerk_id = ?, updated_at = ?
-         WHERE id = ?`
-      ).bind(institution, department, country, phone, clerkUserId, now, profile.id).run();
-      profileId = profile.id;
-    } else {
-      profileId = crypto.randomUUID();
-      await c.env.DB.prepare(
-        `INSERT INTO user_profiles (id, user_id, institution, department, country, phone, clerk_id, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(profileId, user.id, institution, department, country, phone, clerkUserId, now, now).run();
-    }
+    const profileId = crypto.randomUUID();
+    await c.env.DB.prepare(
+      `INSERT INTO user_profiles (id, user_id, institution, department, country, phone, clerk_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id) DO UPDATE SET
+         institution = excluded.institution,
+         department = excluded.department,
+         country = excluded.country,
+         phone = excluded.phone,
+         clerk_id = excluded.clerk_id,
+         updated_at = excluded.updated_at`
+    ).bind(profileId, user.id, institution, department, country, phone, clerkUserId, now, now).run();
 
     const saved = await c.env.DB.prepare(
       `SELECT p.id, p.user_id, p.institution, p.department, p.country, p.phone, u.name, u.email
@@ -1238,7 +1363,10 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
     }
 
     const submissionId = crypto.randomUUID();
-    const submissionCode = `SUB-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7).toUpperCase()}`;
+    // Cryptographically unique code (crypto.randomUUID) — no collision risk
+    // under concurrent submissions. The `submission_code` column is UNIQUE,
+    // so a math-random based code could 500 the request under burst load.
+    const submissionCode = `SUB-${crypto.randomUUID().replace(/-/g, '').slice(0, 10).toUpperCase()}`;
     const now = new Date().toISOString();
     const paperKey = `submissions/${submissionId}-PAPER-${sanitizeFilename(file.name)}`;
     const plagKey = `submissions/${submissionId}-PLAGIARISM-${sanitizeFilename(plagiarismFile.name)}`;
@@ -1987,6 +2115,191 @@ app.post('/api/admin/submissions/:id/no-corrections', async (c) => {
     });
   } catch (error) {
     console.error('Update submission no-corrections error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Export submissions data (requires admin Bearer token)
+// Level 1 = a status/review filter; Level 2 = the columns to include.
+// Returns a real .xlsx file: <date>_<FILTER>.xlsx
+// ------------------------------------------------------------------
+
+const EXPORT_STATUS_FILTERS = new Set(['SUBMITTED', 'UNDER_REVIEW', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY']);
+const EXPORT_REVIEW_FILTERS = new Set(['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES', 'NOT_ACCEPTED']);
+
+const EXPORT_FILTER_LABELS: Record<string, string> = {
+  ALL: 'ALL_ENTRIES',
+  SUBMITTED: 'SUBMITTED',
+  UNDER_REVIEW: 'UNDER_REVIEW',
+  READY_FOR_REGISTRATION: 'READY_FOR_REGISTRATION',
+  READY_FOR_CAMERA_READY: 'READY_FOR_CAMERA_READY',
+  ACCEPTED: 'ACCEPTED',
+  ACCEPTED_WITH_MINOR_CHANGES: 'ACCEPTED_WITH_MINOR_CHANGES',
+  ACCEPTED_WITH_MAJOR_CHANGES: 'ACCEPTED_WITH_MAJOR_CHANGES',
+  NOT_ACCEPTED: 'NOT_ACCEPTED',
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  SUBMITTED: 'Submitted',
+  UNDER_REVIEW: 'Under Review',
+  READY_FOR_REGISTRATION: 'Ready for Registration',
+  READY_FOR_CAMERA_READY: 'Ready for Camera Ready',
+};
+
+const DECISION_LABELS: Record<string, string> = {
+  ACCEPTED: 'Accepted',
+  ACCEPTED_WITH_MINOR_CHANGES: 'Accepted with Minor Changes',
+  ACCEPTED_WITH_MAJOR_CHANGES: 'Accepted with Major Changes',
+  NOT_ACCEPTED: 'Not Accepted',
+};
+
+const fmtExportDate = (v?: string | null): string =>
+  v ? new Date(v).toISOString().slice(0, 19).replace('T', ' ') + ' UTC' : '';
+
+const exportPrimaryAuthor = (s: any): any =>
+  (s.authors || []).find((a: any) => a.is_primary === 1) || (s.authors || [])[0] || null;
+
+const exportCoAuthors = (s: any): any[] => (s.authors || []).filter((a: any) => !a.is_primary);
+
+// Every exportable column maps to a fixed picker — no user-controlled SQL.
+const EXPORT_COLUMNS: { id: string; label: string; pick: (s: any) => string }[] = [
+  { id: 'submission_code', label: 'Submission Code', pick: (s) => s.submission_code || '' },
+  { id: 'paper_id', label: 'Paper ID', pick: (s) => s.paper_id || '' },
+  { id: 'title', label: 'Title', pick: (s) => s.title || '' },
+  { id: 'abstract', label: 'Abstract', pick: (s) => s.abstract || '' },
+  { id: 'keywords', label: 'Keywords', pick: (s) => s.keywords || '' },
+  { id: 'track', label: 'Track', pick: (s) => (s.track || '').replace(/-/g, ' ') },
+  { id: 'status', label: 'Status', pick: (s) => STATUS_LABELS[s.status] || s.status || '' },
+  { id: 'review_decision', label: 'Review Decision', pick: (s) => (s.review_decision ? DECISION_LABELS[s.review_decision] || s.review_decision : '') },
+  { id: 'review_feedback', label: 'Review Feedback', pick: (s) => s.review_feedback || '' },
+  { id: 'author_name', label: 'Primary Author Name', pick: (s) => s.author_name || '' },
+  { id: 'author_email', label: 'Primary Author Email', pick: (s) => s.author_email || '' },
+  { id: 'author_phone', label: 'Primary Author Phone', pick: (s) => (exportPrimaryAuthor(s)?.phone || '') as string },
+  { id: 'author_institution', label: 'Primary Author Institution', pick: (s) => (exportPrimaryAuthor(s)?.college || '') as string },
+  { id: 'co_authors', label: 'Co-Authors', pick: (s) => exportCoAuthors(s).map((a: any) => `${a.first_name} ${a.last_name}`.trim()).filter(Boolean).join('; ') },
+  { id: 'co_author_emails', label: 'Co-Author Emails', pick: (s) => exportCoAuthors(s).map((a: any) => a.email || '').filter(Boolean).join('; ') },
+  { id: 'submitted_at', label: 'Submitted At', pick: (s) => fmtExportDate(s.submitted_at) },
+  { id: 'updated_at', label: 'Last Updated', pick: (s) => fmtExportDate(s.updated_at) },
+  { id: 'enquired', label: 'Enquired', pick: (s) => (s.enquired ? 'Yes' : 'No') },
+  { id: 'no_corrections', label: 'No Corrections', pick: (s) => (s.no_corrections ? 'Yes' : 'No') },
+  { id: 'manuscript_file', label: 'Manuscript Filename', pick: (s) => s.manuscript_file || '' },
+  { id: 'plagiarism_file', label: 'Plagiarism Filename', pick: (s) => s.plagiarism_file || '' },
+  { id: 'ai_plagiarism_file', label: 'AI Plagiarism Filename', pick: (s) => s.ai_plagiarism_file || '' },
+  { id: 'mail_status', label: 'Mail Status', pick: (s) => s.mail_status || '' },
+];
+
+app.get('/api/admin/export/columns', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+
+    return c.json({
+      success: true,
+      filters: Object.entries(EXPORT_FILTER_LABELS).map(([id, label]) => ({ id, label })),
+      columns: EXPORT_COLUMNS.map(({ id, label }) => ({ id, label })),
+    });
+  } catch (error) {
+    console.error('Export columns error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+app.post('/api/admin/export', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+
+    const body = await c.req.json().catch(() => null);
+    const filter = String(body?.filter || 'ALL').trim().toUpperCase();
+    const requested = Array.isArray(body?.columns) ? body.columns.map(String) : [];
+
+    if (filter !== 'ALL' && !EXPORT_STATUS_FILTERS.has(filter) && !EXPORT_REVIEW_FILTERS.has(filter)) {
+      return c.json({ success: false, error: 'Invalid filter. Please choose a status or review filter.' }, 400);
+    }
+    const selected = EXPORT_COLUMNS.filter((col) => requested.includes(col.id));
+    if (selected.length === 0) {
+      return c.json({ success: false, error: 'Please select at least one column to export.' }, 400);
+    }
+
+    // Deleted submissions are never exported; only live records.
+    const conds: string[] = ['s.deleted_at IS NULL'];
+    const params: string[] = [];
+    if (filter === 'ALL') {
+      // no extra condition
+    } else if (EXPORT_STATUS_FILTERS.has(filter)) {
+      conds.push('s.status = ?');
+      params.push(filter);
+    } else {
+      conds.push(
+        '(SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = ?'
+      );
+      params.push(filter);
+    }
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT s.submission_code, s.paper_id, s.title, s.abstract, s.keywords, s.track, s.status,
+              s.author_name, s.author_email, s.created_at AS submitted_at, s.updated_at, s.enquired, s.no_corrections,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
+              (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
+              (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
+              (SELECT status FROM mail_logs l WHERE l.submission_id = s.id ORDER BY l.created_at DESC LIMIT 1) AS mail_status
+       FROM submissions s
+       WHERE ${conds.join(' AND ')}
+       ORDER BY s.created_at DESC`
+    ).bind(...params).all();
+
+    const subs = (results as any[] | undefined) || [];
+    let authorsBySubmission: Record<string, any[]> = {};
+    if (subs.length > 0) {
+      const ids = subs.map((s: any) => s.id as string);
+      const chunks = chunkArray(ids, 50);
+      const authorResults = await Promise.all(
+        chunks.map(async (chunk) => {
+          const placeholders = chunk.map(() => '?').join(',');
+          const res = await c.env.DB.prepare(
+            `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college
+             FROM authors
+             WHERE submission_id IN (${placeholders})
+             ORDER BY is_primary DESC, created_at ASC`
+          ).bind(...chunk).all();
+          return (res.results as any[]) || [];
+        })
+      );
+      authorsBySubmission = authorResults.flat().reduce((acc: any, a: any) => {
+        const sid = a.submission_id;
+        (acc[sid] = acc[sid] || []).push(a);
+        return acc;
+      }, {});
+    }
+
+    const headers = selected.map((col) => col.label);
+    const rows = subs.map((s: any) => {
+      s.authors = authorsBySubmission[s.id] || [];
+      return selected.map((col) => col.pick(s));
+    });
+
+    const xlsx = generateXlsx(headers, rows);
+    const fileName = `${new Date().toISOString().slice(0, 10)}_${EXPORT_FILTER_LABELS[filter]}.xlsx`;
+
+    return new Response(xlsx, {
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="${fileName}"`,
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  } catch (error) {
+    console.error('Export submissions error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
