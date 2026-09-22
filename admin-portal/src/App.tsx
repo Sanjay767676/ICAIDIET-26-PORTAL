@@ -27,6 +27,7 @@ interface Submission {
   status: string;
   created_at: string;
   deleted_at?: string | null;
+  enquired?: number;
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
   ai_plagiarism_file?: string | null;
@@ -845,6 +846,8 @@ function SubmissionListing({
   onOpenPdf,
   onViewInfo,
   onDelete,
+  enquiredSaving,
+  onToggleEnquired,
 }: {
   rows: Submission[];
   total: number;
@@ -869,6 +872,8 @@ function SubmissionListing({
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
   onDelete: (sub: Submission) => void;
+  enquiredSaving: string | null;
+  onToggleEnquired: (sub: Submission) => void;
 }) {
   return (
     <>
@@ -994,6 +999,21 @@ function SubmissionListing({
                       >
                         <Trash2 className="w-4 h-4" /> Delete
                       </button>
+                      <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
+                        <label
+                          className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                          title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={!!sub.enquired}
+                            disabled={enquiredSaving === sub.id}
+                            onChange={() => onToggleEnquired(sub)}
+                            className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                          />
+                          Enquired
+                        </label>
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -1091,6 +1111,19 @@ function SubmissionListing({
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Delete
                 </button>
+                <label
+                  className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                  title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={!!sub.enquired}
+                    disabled={enquiredSaving === sub.id}
+                    onChange={() => onToggleEnquired(sub)}
+                    className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                  />
+                  Enquired
+                </label>
               </div>
             </div>
           ))
@@ -1487,6 +1520,7 @@ export default function App() {
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [enquiredSaving, setEnquiredSaving] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
@@ -1925,6 +1959,35 @@ export default function App() {
     }
   };
 
+  const handleEnquiredToggle = async (sub: Submission) => {
+    const next = sub.enquired ? 0 : 1;
+    setEnquiredSaving(sub.id);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/enquired`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ enquired: next === 1 }),
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to update enquiry status.');
+      }
+      setSubmissions((prev) => prev.map((s) => (s.id === sub.id ? { ...s, enquired: next } : s)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update enquiry status.');
+    } finally {
+      setEnquiredSaving(null);
+    }
+  };
+
   const authButtons = (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
       <span className="text-xs sm:text-sm text-brand-text/60 truncate max-w-[45vw] sm:max-w-none">{adminEmail}</span>
@@ -2145,6 +2208,8 @@ export default function App() {
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
               onDelete={setDeleteTarget}
+              enquiredSaving={enquiredSaving}
+              onToggleEnquired={handleEnquiredToggle}
             />
           </>
         )}

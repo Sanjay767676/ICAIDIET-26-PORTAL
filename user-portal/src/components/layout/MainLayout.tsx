@@ -101,6 +101,13 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
           </div>
 
           <div className="flex items-center gap-3 ml-4">
+            <a 
+              href="https://www.icaidiet26.tech" 
+              className="px-4 py-2 bg-white text-brand-text border border-brand-text/20 rounded-lg text-sm font-medium hover:bg-brand-text/5 hover:-translate-y-0.5 transition-all shadow-sm whitespace-nowrap flex items-center gap-2"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              Home
+            </a>
             <Show when="signed-out">
               <SignInButton mode="modal">
                 <button className="px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent hover:-translate-y-0.5 transition-all shadow whitespace-nowrap">
