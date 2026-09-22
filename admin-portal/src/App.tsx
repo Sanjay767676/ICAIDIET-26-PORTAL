@@ -611,12 +611,13 @@ function EditAuthorsModal({
   onClose,
   onSaved,
 }: {
-  sub: Submission;
+  sub: Submission | null;
   token: string;
   onUnauthorized: () => void;
   onClose: () => void;
   onSaved: (authors: Author[]) => void;
 }) {
+  if (!sub) return null;
   const existing = sub.authors && sub.authors.length > 0 ? sub.authors : [];
   const seedDrafts = (): AuthorDraft[] =>
     existing.length > 0
