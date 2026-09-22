@@ -507,7 +507,7 @@ async function resolveUserProfile(
   if (byClerk) return byClerk;
 
   if (clerkEmail) {
-    const user = await c.env.DB.prepare(`SELECT id, name, email FROM users WHERE email = ?`)
+    const user = await c.env.DB.prepare(`SELECT id, name, email FROM users WHERE lower(email) = lower(?)`)
       .bind(clerkEmail).first() as any;
     if (user) {
       const byUser = await c.env.DB.prepare(
@@ -536,7 +536,7 @@ async function ensureUserForClerk(c: Context<AppEnv>, clerkUserId: string, clerk
   // Email fallback for token-only identities: a synthesized per-Clerk address.
   const email = (clerkEmail || `${clerkUserId}@clerk.local`).trim().toLowerCase();
 
-  const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+  const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE lower(email) = ?`)
     .bind(email).first() as any;
   if (existing?.id) return existing.id;
 
@@ -553,7 +553,7 @@ async function ensureUserForClerk(c: Context<AppEnv>, clerkUserId: string, clerk
      ON CONFLICT(email) DO NOTHING`
   ).bind(userId, name, email, 'clerk-managed', now, now).run();
 
-  const row = await c.env.DB.prepare(`SELECT id FROM users WHERE email = ?`)
+  const row = await c.env.DB.prepare(`SELECT id FROM users WHERE lower(email) = ?`)
     .bind(email).first() as any;
   return row!.id;
 }
@@ -1718,9 +1718,10 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
        FROM submissions s
-       WHERE s.user_id = ? AND s.deleted_at IS NULL
+       WHERE s.deleted_at IS NULL
+         AND (s.user_id = ? OR (lower(trim(s.author_email)) = lower(?) AND trim(coalesce(?, '')) <> ''))
        ORDER BY s.created_at DESC`
-    ).bind(userId).all();
+    ).bind(userId, clerkEmail, clerkEmail).all();
 
     return c.json({ success: true, submissions: results as any[] });
   } catch (error) {
