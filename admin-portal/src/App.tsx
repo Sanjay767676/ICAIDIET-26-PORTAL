@@ -1756,7 +1756,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'reviewed' | 'notAccepted' | 'users' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'minorChanges' | 'majorChanges' | 'readyForRegistration' | 'reviewed' | 'notAccepted' | 'users' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -2209,7 +2209,7 @@ export default function App() {
   React.useEffect(() => {
     if (!token) return;
     const id = setInterval(() => {
-      if (activeTab === 'submissions' || activeTab === 'reviewed' || activeTab === 'notAccepted') fetchSubmissions({ silent: true });
+      if (['submissions', 'minorChanges', 'majorChanges', 'readyForRegistration', 'reviewed', 'notAccepted'].includes(activeTab)) fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
       else if (activeTab === 'users') fetchUsers({ silent: true });
     }, 180000);
@@ -2526,7 +2526,42 @@ export default function App() {
           </>
         )}
 
-        {activeTab === 'reviewed' && (
+                {['minorChanges', 'majorChanges', 'readyForRegistration'].includes(activeTab) && (
+          <SubmissionListing
+            rows={
+              activeTab === 'minorChanges' ? filteredMinor :
+              activeTab === 'majorChanges' ? filteredMajor :
+              filteredReadyForReg
+            }
+            total={submissions.length}
+            loading={loading}
+            error={error ? `Error loading submissions: ${error}` : null}
+            filtersActive={filtersActive}
+            emptyMsg="No papers in this section."
+            emptyFilteredMsg="No submissions match your search or filters."
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            trackFilter={trackFilter}
+            onTrackFilterChange={setTrackFilter}
+            paperIdFilter={paperIdFilter}
+            onPaperIdFilterChange={setPaperIdFilter}
+            tracks={tracks}
+            paperIds={paperIds}
+            onClear={clearFilters}
+            token={token}
+            refresh={fetchSubmissions}
+            onUnauthorized={handleLogout}
+            onStatusError={setError}
+            onOpenPdf={openPdf}
+            onViewInfo={setMoreInfoTarget}
+            onEditAuthors={setEditAuthorsTarget}
+            onDelete={setDeleteTarget}
+            enquiredSaving={enquiredSaving}
+            onToggleEnquired={handleEnquiredToggle}
+          />
+        )}
+
+        {activeTab === "reviewed" && (
           <>
             {mailSendError && (
               <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-4 border border-red-200 text-sm">
