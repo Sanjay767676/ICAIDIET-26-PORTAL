@@ -2221,7 +2221,7 @@ app.get('/api/admin/backup', async (c) => {
     }
 
     const tableRes = await c.env.DB.prepare(
-      `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name`
     ).all();
     const tables = ((tableRes.results as any[]) || []).map((r) => r.name as string);
 

@@ -1756,7 +1756,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -2209,7 +2209,7 @@ export default function App() {
   React.useEffect(() => {
     if (!token) return;
     const id = setInterval(() => {
-      if (['submissions', 'accepted', 'minorChanges', 'majorChanges'].includes(activeTab)) fetchSubmissions({ silent: true });
+      if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates'].includes(activeTab)) fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
       else if (activeTab === 'users') fetchUsers({ silent: true });
     }, 180000);
@@ -2342,6 +2342,21 @@ export default function App() {
     const filteredMajor = masterApply(majorSubmissionsList);
     const filteredAccepted = masterApply(acceptedSubmissionsList);
     const filteredDeleted = masterApply(deletedSubmissions);
+    // Find titles that appear more than once (case insensitive)
+    const titleCounts: Record<string, number> = {};
+    submissions.forEach(s => {
+      const t = (s.title || '').trim().toLowerCase();
+      if (t) {
+        titleCounts[t] = (titleCounts[t] || 0) + 1;
+      }
+    });
+    const duplicatesSubmissionsList = submissions.filter(s => {
+      const t = (s.title || '').trim().toLowerCase();
+      return t && titleCounts[t] > 1;
+    });
+
+    const filteredDuplicates = masterApply(duplicatesSubmissionsList);
+
   const clearFilters = () => {
     setSearchTerm('');
     setTrackFilter('');
@@ -2451,6 +2466,17 @@ export default function App() {
                   )}
                 </button>
                 <button
+                  onClick={() => changeTab('duplicates')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'duplicates' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Duplicates
+                  {duplicatesSubmissionsList.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'duplicates' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'}`}>
+                      {duplicatesSubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
                   onClick={() => changeTab('settings')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
                 >
@@ -2528,12 +2554,13 @@ export default function App() {
           </>
         )}
 
-                {['accepted', 'minorChanges', 'majorChanges'].includes(activeTab) && (
+                {['accepted', 'minorChanges', 'majorChanges', 'duplicates'].includes(activeTab) && (
           <SubmissionListing
             rows={
               activeTab === 'minorChanges' ? filteredMinor :
               activeTab === 'majorChanges' ? filteredMajor :
               activeTab === 'accepted' ? filteredAccepted :
+              activeTab === 'duplicates' ? filteredDuplicates :
               filteredAccepted
             }
             total={submissions.length}
