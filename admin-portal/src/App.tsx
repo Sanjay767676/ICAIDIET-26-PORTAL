@@ -1756,7 +1756,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'minorChanges' | 'majorChanges' | 'readyForRegistration' | 'reviewed' | 'notAccepted' | 'users' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [users, setUsers] = useState<PortalUser[]>([]);
@@ -2209,7 +2209,7 @@ export default function App() {
   React.useEffect(() => {
     if (!token) return;
     const id = setInterval(() => {
-      if (['submissions', 'minorChanges', 'majorChanges', 'readyForRegistration', 'reviewed', 'notAccepted'].includes(activeTab)) fetchSubmissions({ silent: true });
+      if (['submissions', 'accepted', 'minorChanges', 'majorChanges'].includes(activeTab)) fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
       else if (activeTab === 'users') fetchUsers({ silent: true });
     }, 180000);
@@ -2389,76 +2389,72 @@ export default function App() {
           <div className="min-w-0">
             <h2 className="text-2xl sm:text-3xl font-bold font-serif mb-3 md:mb-2">Admin Dashboard</h2>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
-              <button
-                onClick={() => changeTab('submissions')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'submissions' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                  }`}
-              >
-                Submissions
-                {pendingSubmissions.length > 0 && (
-                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'submissions' ? 'bg-amber-500 text-white' : 'bg-brand-text text-white'}`}>
-                    {pendingSubmissions.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => changeTab('reviewed')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'reviewed' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                  }`}
-              >
-                Reviewed
-                {reviewedSubmissions.length > 0 && (
-                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'reviewed' ? 'bg-green-500 text-white' : 'bg-green-500 text-white'}`}>
-                    {reviewedSubmissions.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => changeTab('notAccepted')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'notAccepted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                  }`}
-              >
-                Needs Revisions
-                {notAcceptedSubmissions.length > 0 && (
-                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'notAccepted' ? 'bg-amber-500 text-white' : 'bg-amber-500 text-white'}`}>
-                    {notAcceptedSubmissions.length}
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => changeTab('deleted')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                  }`}
-              >
-                Deleted Files
-                {deletedSubmissions.length > 0 && (
-                  <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'deleted' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'}`}>
-                    {deletedSubmissions.length}
-                  </span>
-                )}
-              </button>
-              <button
-                onClick={() => changeTab('downloads')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'downloads' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                  }`}
-              >
-                <Download className="w-4 h-4 inline-block mr-1 align-[-2px]" /> Downloads
-              </button>
-              <button
-                onClick={() => changeTab('settings')}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
-                  }`}
-              >
-                Settings
-              </button>
+                <button
+                  onClick={() => changeTab('submissions')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'submissions' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Submissions
+                  {mainSubmissionsList.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'submissions' ? 'bg-amber-500 text-white' : 'bg-brand-text text-white'}`}>
+                      {mainSubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => changeTab('accepted')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'accepted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Accepted
+                  {acceptedSubmissionsList.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'accepted' ? 'bg-green-500 text-white' : 'bg-green-600 text-white'}`}>
+                      {acceptedSubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => changeTab('minorChanges')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'minorChanges' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Accepted with minor changes
+                  {minorSubmissionsList.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'minorChanges' ? 'bg-green-500 text-white' : 'bg-brand-text text-white'}`}>
+                      {minorSubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => changeTab('majorChanges')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'majorChanges' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Accepted with major changes
+                  {majorSubmissionsList.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'majorChanges' ? 'bg-amber-600 text-white' : 'bg-brand-text text-white'}`}>
+                      {majorSubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => changeTab('deleted')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Deleted Files
+                  {deletedSubmissions.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'deleted' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'}`}>
+                      {deletedSubmissions.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => changeTab('settings')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Settings
+                </button>
+              </div>
             </div>
-          </div>
-          <button
-            onClick={() => {
-              fetchSubmissions();
+            <button
+              onClick={() => {
+                fetchSubmissions();
               fetchDeletedSubmissions();
               fetchUsers();
               fetchSettings();
@@ -2526,12 +2522,13 @@ export default function App() {
           </>
         )}
 
-                {['minorChanges', 'majorChanges', 'readyForRegistration'].includes(activeTab) && (
+                {['accepted', 'minorChanges', 'majorChanges'].includes(activeTab) && (
           <SubmissionListing
             rows={
               activeTab === 'minorChanges' ? filteredMinor :
               activeTab === 'majorChanges' ? filteredMajor :
-              filteredReadyForReg
+              activeTab === 'accepted' ? filteredAccepted :
+              filteredAccepted
             }
             total={submissions.length}
             loading={loading}
@@ -2559,86 +2556,6 @@ export default function App() {
             enquiredSaving={enquiredSaving}
             onToggleEnquired={handleEnquiredToggle}
           />
-        )}
-
-        {activeTab === "reviewed" && (
-          <>
-            {mailSendError && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-4 border border-red-200 text-sm">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" /> {mailSendError}
-                </div>
-              </div>
-            )}
-            {mailSendMessage && (
-              <div className="bg-green-50 text-green-700 p-4 rounded-xl mb-4 border border-green-200 text-sm">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" /> {mailSendMessage}
-                </div>
-              </div>
-            )}
-            <ReviewSection
-              title="Reviewed Files"
-              subtitle="Papers reviewers have accepted (including those accepted with minor or major changes). This section is view-only."
-              rows={filteredReviewed}
-              total={reviewedSubmissions.length}
-              loading={loading}
-              error={error ? `Error loading submissions: ${error}` : null}
-              emptyMsg="No accepted papers yet."
-              onOpenPdf={openPdf}
-              onViewInfo={setMoreInfoTarget}
-              onEditAuthors={setEditAuthorsTarget}
-              onDelete={setDeleteTarget}
-              mailTemplates={mailTemplates}
-              selectedTemplateId={selectedTemplateId}
-              onSelectedTemplateChange={setSelectedTemplateId}
-              mailSelected={mailSelected}
-              onToggleMailSelect={toggleMailSelect}
-              onToggleMailSelectAll={toggleMailSelectAll}
-              onSendMail={handleSendMail}
-              mailSending={mailSending}
-            />
-          </>
-        )}
-
-        {activeTab === 'notAccepted' && (
-          <>
-            {mailSendError && (
-              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-4 border border-red-200 text-sm">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" /> {mailSendError}
-                </div>
-              </div>
-            )}
-            {mailSendMessage && (
-              <div className="bg-green-50 text-green-700 p-4 rounded-xl mb-4 border border-green-200 text-sm">
-                <div className="flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" /> {mailSendMessage}
-                </div>
-              </div>
-            )}
-            <ReviewSection
-              title="Files Awaiting Revisions"
-              subtitle="Papers whose review decision is not accepted (rejected / not accepted). They stay in this section while the author revises them; when an updated version is uploaded the paper is highlighted and ready for re-review."
-              rows={filteredNotAccepted}
-              total={notAcceptedSubmissions.length}
-              loading={loading}
-              error={error ? `Error loading submissions: ${error}` : null}
-              emptyMsg="No papers awaiting revisions yet."
-              onOpenPdf={openPdf}
-              onViewInfo={setMoreInfoTarget}
-              onEditAuthors={setEditAuthorsTarget}
-              onDelete={setDeleteTarget}
-              mailTemplates={mailTemplates}
-              selectedTemplateId={selectedTemplateId}
-              onSelectedTemplateChange={setSelectedTemplateId}
-              mailSelected={mailSelected}
-              onToggleMailSelect={toggleMailSelect}
-              onToggleMailSelectAll={toggleMailSelectAll}
-              onSendMail={handleSendMail}
-              mailSending={mailSending}
-            />
-          </>
         )}
 
         {activeTab === 'deleted' && (
