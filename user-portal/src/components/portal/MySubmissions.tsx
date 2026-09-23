@@ -28,6 +28,8 @@ interface MySubmissionsProps {
   getToken: () => Promise<string | null>;
   onBack: () => void;
   onStart: () => void;
+  maintenanceMode?: boolean;
+  maintenanceUntil?: string | null;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -328,7 +330,7 @@ function EditFilesModal({
   );
 }
 
-export function MySubmissions({ getToken, onBack, onStart }: MySubmissionsProps) {
+export function MySubmissions({ getToken, onBack, onStart, maintenanceMode = false, maintenanceUntil = null }: MySubmissionsProps) {
   const [subs, setSubs] = useState<MySubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<MySubmission | null>(null);
@@ -470,22 +472,33 @@ export function MySubmissions({ getToken, onBack, onStart }: MySubmissionsProps)
 
               {reviewBanner(sub)}
 
-              <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/10 pt-4">
-                <div className="flex items-center gap-3 flex-wrap min-w-0">
-                  <span className="text-sm text-black/80 capitalize">{sub.track?.replace(/-/g, ' ')}</span>
-                  {isEdited(sub) && (
-                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
-                      <Pencil className="w-3 h-3" /> Files edited
-                    </span>
-                  )}
-                </div>
-                <button
-                  onClick={() => setEditing(sub)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white bg-brand-text hover:bg-brand-accent transition-all shadow"
-                >
-                  <Pencil className="w-4 h-4" /> Edit Files
-                </button>
-              </div>
+      {maintenanceMode && (
+        <div className="mt-4 rounded-xl border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">
+          The submission portal is under maintenance and file updates are disabled.
+          {maintenanceUntil
+            ? <> We expect the portal to be back online {new Date(maintenanceUntil).toLocaleString()}.</>
+            : ' Please check back again later.'}
+        </div>
+      )}
+
+      <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/10 pt-4">
+        <div className="flex items-center gap-3 flex-wrap min-w-0">
+          <span className="text-sm text-black/80 capitalize">{sub.track?.replace(/-/g, ' ')}</span>
+          {isEdited(sub) && (
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+              <Pencil className="w-3 h-3" /> Files edited
+            </span>
+          )}
+        </div>
+        {!maintenanceMode && (
+          <button
+            onClick={() => setEditing(sub)}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white bg-brand-text hover:bg-brand-accent transition-all shadow"
+          >
+            <Pencil className="w-4 h-4" /> Edit Files
+          </button>
+        )}
+      </div>
             </div>
           ))}
         </div>

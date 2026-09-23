@@ -124,6 +124,8 @@ export default function App() {
               getToken={getToken}
               onBack={() => navigate('home')}
               onStart={() => navigate('wizard')}
+              maintenanceMode={maintenanceMode}
+              maintenanceUntil={maintenanceUntil}
             />
           </Show>
         )}
