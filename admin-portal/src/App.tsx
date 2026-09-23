@@ -2322,20 +2322,26 @@ export default function App() {
     ACCEPTED_DECISIONS.includes(s.review_decision) || ACCEPTED_STATUSES.includes(s.status);
   const isPendingRevision = (s: Submission) => (hasReview(s) && !isAccepted(s)) || REVISION_STATUSES.includes(s.status);
   const updatedFirst = (a: Submission, b: Submission) => Number(b.review_resubmitted === 1) - Number(a.review_resubmitted === 1);
-  const reviewedSubmissions = submissions.filter(isAccepted);
-  const notAcceptedSubmissions = submissions.filter(isPendingRevision).slice().sort(updatedFirst);
-  const pendingSubmissions = submissions.filter((s) => !isAccepted(s) && !isPendingRevision(s));
-  const applyFilters = (list: Submission[]) =>
-    list.filter((s) => {
-      const matchSearch = matchesSearch(s, q);
-      const matchTrack = !trackFilter || s.track === trackFilter;
-      const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
-      return matchSearch && matchTrack && matchPaper;
-    });
-  const filteredSubmissions = applyFilters(submissions);
-  const filteredReviewed = reviewedSubmissions;
-  const filteredNotAccepted = notAcceptedSubmissions;
-  const filteredDeleted = deletedSubmissions;
+      const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED');
+    const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES');
+    const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES');
+    const acceptedSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY');
+
+    const applyFilters = (list: Submission[]) =>
+      list.filter((s) => {
+        const matchSearch = matchesSearch(s, q);
+        const matchTrack = !trackFilter || s.track === trackFilter;
+        const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
+        return matchSearch && matchTrack && matchPaper;
+      });
+
+    const masterApply = (fallbackList: Submission[]) => q ? applyFilters(submissions) : applyFilters(fallbackList);
+
+    const filteredSubmissions = masterApply(mainSubmissionsList);
+    const filteredMinor = masterApply(minorSubmissionsList);
+    const filteredMajor = masterApply(majorSubmissionsList);
+    const filteredAccepted = masterApply(acceptedSubmissionsList);
+    const filteredDeleted = masterApply(deletedSubmissions);
   const clearFilters = () => {
     setSearchTerm('');
     setTrackFilter('');
