@@ -254,6 +254,24 @@ function renderMailBody(text: string, sub: any): string {
     .replace(/\{paper_id\}/g, sub.paper_id || sub.submission_code || '');
 }
 
+// Convert a template body written with simple HTML (e.g. <b>, <br>, <p>)
+// into readable plain text so non-HTML clients still get sensible content.
+function mailHtmlToText(html: string): string {
+  return (html || '')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<\/p>/gi, '\n\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+// Wrap a template body into a minimal HTML document for Resend. Templates
+// may use tags like <b>, <i>, <u>, <br>, <p>; bare line breaks are kept.
+function mailHtmlBody(text: string): string {
+  const content = (text || '').replace(/\n/g, '<br/>');
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a">${content}</div>`;
+}
+
 async function sendViaResend(
   c: Context<AppEnv>,
   to: string,
@@ -282,7 +300,8 @@ async function sendViaResend(
         from,
         to: [to],
         subject,
-        text: body,
+        text: mailHtmlToText(body),
+        html: mailHtmlBody(body),
       }),
     });
   } catch (err) {
