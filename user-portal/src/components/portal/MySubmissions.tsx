@@ -14,17 +14,25 @@ function RegistrationForm({ sub, getToken, onSaved }: { sub: MySubmission; getTo
 if (sub.payment_status === 'APPROVED') {
     return (
       <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-xl">
-        <div className="flex items-center gap-2 text-green-800 font-semibold">
+        <div className="flex items-center gap-2 text-green-800 font-semibold flex-wrap">
           <CheckCircle2 className="w-5 h-5" /> Registration Complete!
+          <span className="text-[11px] bg-green-100 border border-green-300 text-green-800 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">
+            Payment Confirmed
+          </span>
         </div>
         <p className="text-sm text-green-700 mt-1">Your payment has been verified and your registration is confirmed.</p>
-        <p className="text-sm text-green-700 mt-1">Type: {sub.registration_type} | UTR: {sub.utr_transaction_id}</p>
+        {(sub.registration_type || sub.utr_transaction_id) && (
+          <p className="text-sm text-green-700 mt-1">Type: {sub.registration_type} | UTR: {sub.utr_transaction_id}</p>
+        )}
+        {sub.payment_approved_at && (
+          <p className="text-[11px] text-green-700/60 mt-1">Approved on {formatDate(sub.payment_approved_at)}</p>
+        )}
       </div>
     );
   }
 
-  const awaitingVerification = !!(sub.payment_proof_url && sub.utr_transaction_id) && sub.payment_status !== 'REJECTED';
-  const isRejected = sub.payment_status === 'REJECTED';
+  const hasSubmitted = !!(sub.payment_proof_url && sub.utr_transaction_id);
+  const isRejected = hasSubmitted && sub.payment_status === 'REJECTED';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,24 +80,30 @@ if (sub.payment_status === 'APPROVED') {
 
 return (
     <>
-      {isRejected && (
-        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl">
-          <div className="flex items-center gap-2 text-red-800 font-semibold">
-            <XCircle className="w-5 h-5" /> Payment Proof Rejected
+      {hasSubmitted && !isRejected && (
+        <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-xl">
+          <div className="flex items-center gap-2 text-green-800 font-semibold flex-wrap">
+            <ShieldCheck className="w-5 h-5" /> Your payment details have been submitted
+            <span className="text-[11px] bg-green-100 border border-green-300 text-green-800 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">
+              Submitted
+            </span>
           </div>
-          <p className="text-sm text-red-700 mt-1">
-            Your payment proof was rejected. Please upload a valid screenshot and resubmit the details below.
+          <p className="text-sm text-green-700 mt-1">
+            Your payment details have been received and are awaiting admin verification. You can update them below if
+            needed.
           </p>
         </div>
       )}
-      {awaitingVerification && (
-        <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
-          <div className="flex items-center gap-2 text-amber-800 font-semibold">
-            <ShieldCheck className="w-5 h-5" /> Payment Under Verification
+      {isRejected && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-center gap-2 text-red-800 font-semibold flex-wrap">
+            <XCircle className="w-5 h-5" /> Your payment has been declined
+            <span className="text-[11px] bg-red-100 border border-red-300 text-red-700 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide">
+              Declined
+            </span>
           </div>
-          <p className="text-sm text-amber-700 mt-1">
-            Your payment details have been received and are awaiting admin verification. You can update them below if
-            needed.
+          <p className="text-sm text-red-700 mt-1">
+            Please recheck your payment details and resubmit the correct proof below.
           </p>
         </div>
       )}
@@ -163,6 +177,7 @@ registration_type?: string | null;
   payment_proof_url?: string | null;
   payment_status?: string | null;
   payment_approved_at?: string | null;
+  payment_submitted_at?: string | null;
 }
 
 interface MySubmissionsProps {
@@ -202,6 +217,33 @@ function statusBadge(status: string) {
       {meta.label}
     </span>
   );
+}
+
+function paymentBadge(sub: MySubmission) {
+  const status = sub.payment_status;
+  if (!status) return null;
+  if (status === 'APPROVED') {
+    return (
+      <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 border border-green-200">
+        Payment Confirmed
+      </span>
+    );
+  }
+  if (status === 'REJECTED') {
+    return (
+      <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-200">
+        Payment Declined
+      </span>
+    );
+  }
+  if (sub.payment_proof_url && sub.utr_transaction_id) {
+    return (
+      <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 border border-blue-200">
+        Submitted
+      </span>
+    );
+  }
+  return null;
 }
 
 function formatDate(iso: string) {
@@ -605,6 +647,7 @@ export function MySubmissions({ getToken, onBack, onStart, maintenanceMode = fal
                 <div className="flex items-center gap-3 shrink-0">
                   <span className="text-xs text-black/60">{formatDate(sub.created_at)}</span>
                   {statusBadge(sub.status)}
+                  {paymentBadge(sub)}
                 </div>
               </div>
 

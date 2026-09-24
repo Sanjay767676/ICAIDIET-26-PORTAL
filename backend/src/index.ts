@@ -5,6 +5,7 @@ import { verifyToken as clerkVerifyToken } from '@clerk/backend';
 type Bindings = {
   DB: D1Database;
   BUCKET: R2Bucket;
+  PROOF_BUCKET: R2Bucket;
   AUTH_SECRET: string;
   CLERK_SECRET_KEY: string;
   RESEND_API_KEY?: string;
@@ -1521,7 +1522,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1706,7 +1707,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at, s.updated_at, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at, s.updated_at, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2711,18 +2712,19 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
         400
       );
     }
-    const storageKey = `payment-proofs/${submissionId}-${Date.now()}${ext}`;
+    const storageKey = `proof/${submissionId}-${Date.now()}${ext}`;
     const arrayBuffer = await file.arrayBuffer();
 
-    await c.env.BUCKET.put(storageKey, arrayBuffer, {
+    await c.env.PROOF_BUCKET.put(storageKey, arrayBuffer, {
       httpMetadata: { contentType: file.type || 'application/octet-stream' },
     });
 
+    const now = new Date().toISOString();
     await c.env.DB.prepare(
       `UPDATE submissions
-       SET payment_proof_url = ?, payment_status = 'PENDING', payment_approved_at = NULL, updated_at = ?
+       SET payment_proof_url = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ?
        WHERE id = ?`
-    ).bind(storageKey, new Date().toISOString(), submissionId).run();
+    ).bind(storageKey, now, now, submissionId).run();
 
     return c.json({ success: true, payment_proof_url: storageKey, payment_status: 'PENDING' });
   } catch (err: any) {
@@ -2752,12 +2754,13 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
 
     const body = await c.req.json().catch(() => ({}));
     const { registration_type, utr_transaction_id } = body;
+    const now = new Date().toISOString();
 
     await c.env.DB.prepare(
-      `UPDATE submissions SET registration_type = ?, utr_transaction_id = ?, updated_at = ? WHERE id = ?`
-    ).bind(registration_type || null, utr_transaction_id || null, new Date().toISOString(), submissionId).run();
+      `UPDATE submissions SET registration_type = ?, utr_transaction_id = ?, payment_status = 'PENDING', payment_submitted_at = ?, updated_at = ? WHERE id = ?`
+    ).bind(registration_type || null, utr_transaction_id || null, now, now, submissionId).run();
 
-    return c.json({ success: true });
+    return c.json({ success: true, payment_status: 'PENDING' });
   } catch (err: any) {
     console.error('Register submission error:', err);
     return c.json({ success: false, error: 'Failed to save registration details.' }, 500);
@@ -2783,7 +2786,10 @@ app.get('/api/admin/submissions/:id/payment-proof', async (c) => {
       return c.json({ success: false, error: 'No payment proof uploaded for this submission.' }, 404);
     }
 
-    const object = await c.env.BUCKET.get(sub.payment_proof_url);
+    let object = await c.env.PROOF_BUCKET.get(sub.payment_proof_url);
+    if (!object) {
+      object = await c.env.BUCKET.get(sub.payment_proof_url);
+    }
     if (!object) {
       return c.json({ success: false, error: 'Payment proof file not found in storage.' }, 404);
     }

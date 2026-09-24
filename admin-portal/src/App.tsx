@@ -43,6 +43,7 @@ interface Submission {
   utr_transaction_id?: string | null;
   payment_status?: string | null;
   payment_approved_at?: string | null;
+  payment_submitted_at?: string | null;
 }
 
 interface MailTemplate {
@@ -918,19 +919,26 @@ function PaymentModal({
               <div className="font-semibold text-sm mt-0.5">{sub.author_name || '—'}</div>
               <div className="text-xs text-brand-text/60">{sub.author_email}</div>
             </div>
-            <div>
+<div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Payment Verification</div>
               <div className="mt-1">
                 {isApproved ? (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-green-700" /> Approved
+                    <CheckCircle2 className="w-3.5 h-3.5 text-green-700" /> Payment Confirmed
+                  </span>
+                ) : sub.payment_status === 'REJECTED' ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 border border-red-300">
+                    Declined
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
-                    Pending Verification
+                    Submitted
                   </span>
                 )}
               </div>
+              {sub.payment_approved_at && (
+                <div className="text-[11px] text-brand-text/50 mt-1">{formatDateTime(sub.payment_approved_at)}</div>
+              )}
             </div>
           </div>
 
@@ -945,10 +953,17 @@ function PaymentModal({
                 <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.registration_type || '—'}</div>
               </div>
 
-              <div>
+<div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">UTR / Transaction ID</div>
                 <div className="font-mono font-semibold text-sm text-brand-accent mt-0.5 select-all">
                   {sub.utr_transaction_id || '—'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submitted Date</div>
+                <div className="font-semibold text-sm text-brand-text mt-0.5">
+                  {formatDateTime(sub.payment_submitted_at) || '—'}
                 </div>
               </div>
 
@@ -1013,14 +1028,19 @@ function MoreInfoModal({
   onClose,
   onViewPayment,
   onEditAuthors,
+  onApprovePayment,
+  onDeclinePayment,
 }: {
   sub: Submission | null;
   onClose: () => void;
   onViewPayment?: (sub: Submission) => void;
   onEditAuthors?: (sub: Submission) => void;
+  onApprovePayment?: (sub: Submission) => void;
+  onDeclinePayment?: (sub: Submission) => void;
 }) {
   if (!sub) return null;
   const authors = sub.authors || [];
+  const hasPayment = !!(sub.payment_proof_url || sub.utr_transaction_id || sub.registration_type || sub.payment_status);
   return (
     <div className="fixed inset-0 z-[105] flex items-center justify-center p-2 sm:p-4">
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
@@ -1153,6 +1173,22 @@ function MoreInfoModal({
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-brand-text border border-brand-text/15 hover:bg-brand-text/5 transition-colors"
             >
               <UserRoundCheck className="w-4 h-4" /> Edit Authors
+            </button>
+          )}
+          {hasPayment && onApprovePayment && sub.payment_status !== 'APPROVED' && (
+            <button
+              onClick={() => onApprovePayment(sub)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-green-600 hover:bg-green-700 transition-colors shadow-sm"
+            >
+              <CheckCircle2 className="w-4 h-4" /> Approve Payment
+            </button>
+          )}
+          {hasPayment && onDeclinePayment && sub.payment_status !== 'REJECTED' && (
+            <button
+              onClick={() => onDeclinePayment(sub)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors shadow-sm"
+            >
+              <XCircle className="w-4 h-4" /> Decline Payment
             </button>
           )}
           <button
@@ -1986,11 +2022,36 @@ export default function App() {
   };
 
   
-  const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt: string | null) => {
+const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt: string | null) => {
     setSubmissions((prev) =>
       prev.map((s) => (s.id === subId ? { ...s, payment_status: newStatus, payment_approved_at: approvedAt } : s))
     );
     setPaymentTarget((prev) => (prev && prev.id === subId ? { ...prev, payment_status: newStatus, payment_approved_at: approvedAt } : prev));
+    setMoreInfoTarget((prev) => (prev && prev.id === subId ? { ...prev, payment_status: newStatus, payment_approved_at: approvedAt } : prev));
+  };
+
+  const handlePaymentStatusAction = async (sub: Submission, newStatus: 'APPROVED' | 'REJECTED') => {
+    const ok = window.confirm(
+      newStatus === 'APPROVED'
+        ? `Approve the payment for "${sub.title}"?`
+        : `Decline the payment for "${sub.title}"?`
+    );
+    if (!ok) return;
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/payment-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to update payment status.');
+      }
+      handlePaymentStatusChanged(sub.id, newStatus, data.payment_approved_at || null);
+      fetchSubmissions({ silent: true });
+    } catch (err: any) {
+      window.alert(err.message || 'Error updating payment status.');
+    }
   };
 
   const handleAuthorsSaved = (authors: Author[]) => {
@@ -2473,7 +2534,7 @@ export default function App() {
       const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED');
     const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES');
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES');
-    const paymentsSubmissionsList = submissions.filter(s => s.payment_status || s.payment_proof_url || s.utr_transaction_id || s.registration_type);
+    const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED');
     const acceptedSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY');
 
     const applyFilters = (list: Submission[]) =>
@@ -3288,6 +3349,8 @@ export default function App() {
         onClose={() => setMoreInfoTarget(null)}
         onViewPayment={setPaymentTarget}
         onEditAuthors={setEditAuthorsTarget}
+        onApprovePayment={(s) => handlePaymentStatusAction(s, 'APPROVED')}
+        onDeclinePayment={(s) => handlePaymentStatusAction(s, 'REJECTED')}
       />
 
       <PaymentModal
