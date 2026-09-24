@@ -2590,13 +2590,16 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
         return matchSearch && matchTrack && matchPaper;
       });
 
-    const masterApply = (list: Submission[]) => applyFilters(list);
+const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]) => {
+      const list = q && globalSearchList ? globalSearchList : fallbackList;
+      return applyFilters(list);
+    };
 
-    const filteredSubmissions = masterApply(mainSubmissionsList);
-    const filteredMinor = masterApply(minorSubmissionsList);
-    const filteredMajor = masterApply(majorSubmissionsList);
-    const filteredPayments = masterApply(paymentsSubmissionsList);
-    const filteredAccepted = masterApply(acceptedSubmissionsList);
+    const filteredSubmissions = masterApply(mainSubmissionsList, submissions);
+    const filteredMinor = masterApply(minorSubmissionsList, submissions);
+    const filteredMajor = masterApply(majorSubmissionsList, submissions);
+    const filteredPayments = masterApply(paymentsSubmissionsList, submissions);
+    const filteredAccepted = masterApply(acceptedSubmissionsList, submissions);
     const filteredDeleted = masterApply(deletedSubmissions);
     // Find titles that appear more than once (case insensitive)
     const titleCounts: Record<string, number> = {};
@@ -2611,7 +2614,7 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
       return t && titleCounts[t] > 1;
     });
 
-    const filteredDuplicates = masterApply(duplicatesSubmissionsList);
+    const filteredDuplicates = masterApply(duplicatesSubmissionsList, submissions);
 
   const clearFilters = () => {
     setSearchTerm('');
