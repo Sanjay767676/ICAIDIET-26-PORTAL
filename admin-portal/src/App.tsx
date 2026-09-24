@@ -868,7 +868,7 @@ function PaymentModal({
   const hasPayment = !!(sub.payment_proof_url || sub.utr_transaction_id || sub.registration_type);
   const isApproved = sub.payment_status === 'APPROVED';
 
-  const handleToggleApproval = async (newStatus: 'APPROVED' | 'PENDING') => {
+  const handleToggleApproval = async (newStatus: 'APPROVED' | 'REJECTED' | 'PENDING') => {
     setSaving(true);
     setError(null);
     try {
@@ -986,18 +986,19 @@ function PaymentModal({
 
         <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">
           <div>
-            {hasPayment && (
-              isApproved ? (
-                <button
-                  type="button"
-                  onClick={() => handleToggleApproval('PENDING')}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
-                  Revoke Payment Approval
-                </button>
-              ) : (
+{hasPayment && (
+            isApproved ? (
+              <button
+                type="button"
+                onClick={() => handleToggleApproval('PENDING')}
+                disabled={saving}
+                className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors disabled:opacity-50"
+              >
+                {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                Revoke Payment Approval
+              </button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleToggleApproval('APPROVED')}
@@ -1007,8 +1008,20 @@ function PaymentModal({
                   {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
                   Approve Payment & Paper
                 </button>
-              )
-            )}
+                {sub.payment_status !== 'REJECTED' && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleApproval('REJECTED')}
+                    disabled={saving}
+                    className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow transition-all disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+                    Decline Payment
+                  </button>
+                )}
+              </div>
+            )
+          )}
           </div>
           <button
             onClick={onClose}
