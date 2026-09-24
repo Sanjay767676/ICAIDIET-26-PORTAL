@@ -67,6 +67,36 @@ app.use('*', (c, next) => {
 });
 
 // ------------------------------------------------------------------
+// Admin auth guard. Every /api/admin/* endpoint (except login) must
+// present a token whose subject is an ADMIN user row. Reviewer tokens
+// (subject `reviewer:<id>`) and look-alike HMAC tokens are rejected,
+// so a reviewer can never read or mutate admin data.
+// ------------------------------------------------------------------
+app.use('/api/admin/*', async (c, next) => {
+  if (c.req.method === 'OPTIONS' || c.req.path === '/api/admin/login') {
+    return next();
+  }
+  const token = getBearer(c);
+  if (!token) {
+    return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+  }
+  const verified = await verifyToken(c, token);
+  if (!verified.ok) {
+    return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+  }
+  const subject = verified.subject || '';
+  if (subject.startsWith('reviewer:')) {
+    return c.json({ success: false, error: 'Forbidden. Admin access is required.' }, 403);
+  }
+  const admin = await c.env.DB.prepare(`SELECT id FROM users WHERE id = ? AND role = 'ADMIN'`)
+    .bind(subject).first() as any;
+  if (!admin) {
+    return c.json({ success: false, error: 'Forbidden. Admin access is required.' }, 403);
+  }
+  return next();
+});
+
+// ------------------------------------------------------------------
 // Helpers
 // ------------------------------------------------------------------
 
@@ -209,9 +239,11 @@ function getBearer(c: any): string | null {
 // endpoint, and calling it directly keeps the Worker dependency-free.
 // ------------------------------------------------------------------
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+// ------------------------------------------------------------------
+// Admin Endpoints — Mail templates + bulk mail queue
+// The queue ships one email per API call so the client can pace it at
+// ~1 email/second, matching the free-tier Resend rate limit.
+// ------------------------------------------------------------------
 
 // Replace {placeholder} tokens in a template with per-submission values.
 // Supported: {name}, {paper_title}, {paper_id}
@@ -466,7 +498,7 @@ app.post('/api/admin/mail/process', async (c) => {
       ).bind(result.error || 'Send failed.', new Date().toISOString(), queued.id).run();
     }
 
-    const { results: remaining } = await c.env.DB.prepare(
+    const remaining = await c.env.DB.prepare(
       `SELECT COUNT(*) AS n FROM mail_logs WHERE status IN ('queued', 'sending')`
     ).first() as any;
 
@@ -975,7 +1007,10 @@ app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => 
   try {
     const submissionId = c.req.param('id');
     let docType = (c.req.query('type') || '').toUpperCase();
-    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
+    if (!docType) docType = 'MANUSCRIPT';
+    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') {
+      return c.json({ success: false, error: 'Unsupported file type requested.' }, 400);
+    }
 
     const file = await c.env.DB.prepare(
       `SELECT storage_key, original_filename, mime_type FROM submission_files
@@ -1245,8 +1280,8 @@ app.post('/api/users/profile', requireClerkAuth, async (c) => {
     const saved = await c.env.DB.prepare(
       `SELECT p.id, p.user_id, p.institution, p.department, p.country, p.phone, u.name, u.email
        FROM user_profiles p JOIN users u ON u.id = p.user_id
-       WHERE p.id = ?`
-    ).bind(profileId).first() as any;
+       WHERE p.user_id = ?`
+    ).bind(user.id).first() as any;
 
     return c.json({ success: true, hasProfile: true, profile: saved });
   } catch (error) {
@@ -1522,7 +1557,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1655,7 +1690,10 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
 
     const submissionId = c.req.param('id');
     let docType = (c.req.query('type') || '').toUpperCase();
-    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') docType = 'MANUSCRIPT';
+    if (!docType) docType = 'MANUSCRIPT';
+    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') {
+      return c.json({ success: false, error: 'Unsupported file type requested.' }, 400);
+    }
 
     const file = await c.env.DB.prepare(
       `SELECT storage_key, original_filename, mime_type FROM submission_files
@@ -1707,7 +1745,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at, s.updated_at, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2233,19 +2271,25 @@ app.get('/api/admin/backup', async (c) => {
     }
 
     // R2 object manifest (best-effort) so the file storage is restorable too.
-    const r2Objects: { key: string; size: number; etag: string }[] = [];
-    try {
-      let cursor: string | undefined;
-      do {
-        const page = await c.env.BUCKET.list({ cursor, limit: 1000 });
-        for (const obj of page.objects) {
-          r2Objects.push({ key: obj.key, size: obj.size, etag: obj.etag });
-        }
-        cursor = page.truncated ? page.cursor : undefined;
-      } while (cursor);
-    } catch (err) {
-      console.error('R2 manifest error:', err);
-    }
+    // Covers both buckets: the papers bucket (icaidietpdfs) and the payment
+    // proofs bucket (proof).
+    const r2Objects: { key: string; size: number; etag: string; bucket: string }[] = [];
+    const listBucket = async (bucket: R2Bucket, bucketName: string) => {
+      try {
+        let cursor: string | undefined;
+        do {
+          const page = await bucket.list({ cursor, limit: 1000 });
+          for (const obj of page.objects) {
+            r2Objects.push({ key: obj.key, size: obj.size, etag: obj.etag, bucket: bucketName });
+          }
+          cursor = page.truncated ? page.cursor : undefined;
+        } while (cursor);
+      } catch (err) {
+        console.error(`R2 manifest error (${bucketName}):`, err);
+      }
+    };
+    await listBucket(c.env.BUCKET, 'icaidietpdfs');
+    await listBucket(c.env.PROOF_BUCKET, 'proof');
 
     const exported_at = new Date().toISOString();
     const backupData = {
@@ -2386,7 +2430,7 @@ app.post('/api/admin/export', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.submission_code, s.paper_id, s.title, s.abstract, s.keywords, s.track, s.status,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.keywords, s.track, s.status,
               s.author_name, s.author_email, s.created_at AS submitted_at, s.updated_at, s.enquired, s.no_corrections,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
@@ -2648,6 +2692,13 @@ async function purgeExpiredDeleted(env: Bindings) {
        )`
     ).bind(cutoff).all();
 
+    // Payment-proof blobs live in the proof bucket (key prefix `proof/`),
+    // not in submission_files, so they must be collected separately.
+    const proofRes = await env.DB.prepare(
+      `SELECT payment_proof_url FROM submissions
+       WHERE deleted_at IS NOT NULL AND deleted_at < ? AND payment_proof_url IS NOT NULL AND payment_proof_url <> ''`
+    ).bind(cutoff).all();
+
     await env.DB.batch([
       env.DB.prepare(
         `DELETE FROM authors WHERE submission_id IN (
@@ -2660,6 +2711,11 @@ async function purgeExpiredDeleted(env: Bindings) {
          )`
       ).bind(cutoff),
       env.DB.prepare(
+        `DELETE FROM mail_logs WHERE submission_id IN (
+           SELECT id FROM submissions WHERE deleted_at IS NOT NULL AND deleted_at < ?
+         )`
+      ).bind(cutoff),
+      env.DB.prepare(
         `DELETE FROM submissions WHERE deleted_at IS NOT NULL AND deleted_at < ?`
       ).bind(cutoff),
     ]);
@@ -2667,6 +2723,12 @@ async function purgeExpiredDeleted(env: Bindings) {
     for (const f of (fileRes.results as any[] || [])) {
       if (f && f.storage_key) {
         await env.BUCKET.delete(f.storage_key).catch(() => { });
+      }
+    }
+    for (const p of (proofRes.results as any[] || [])) {
+      if (p && p.payment_proof_url) {
+        await env.PROOF_BUCKET.delete(p.payment_proof_url).catch(() => { });
+        await env.BUCKET.delete(p.payment_proof_url).catch(() => { });
       }
     }
   } catch (error) {
@@ -2689,10 +2751,14 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const submission = await c.env.DB.prepare(
-      `SELECT id, user_id FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, user_id, author_email FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
-    if (submission.user_id !== userId) return c.json({ success: false, error: 'Unauthorized.' }, 403);
+    const ownsSubmission =
+      submission.user_id === userId ||
+      ((clerkEmail || '').trim().toLowerCase() !== '' &&
+        (submission.author_email || '').trim().toLowerCase() === clerkEmail.trim().toLowerCase());
+    if (!ownsSubmission) return c.json({ success: false, error: 'Unauthorized.' }, 403);
 
     const eligibility = await registrationEligible(c.env, submissionId as string);
     if (!eligibility.ok) return c.json({ success: false, error: eligibility.error }, 403);
@@ -2712,6 +2778,16 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
         400
       );
     }
+
+    // Free any previous proof object so re-uploads can't orphan R2 blobs.
+    const prev = await c.env.DB.prepare(
+      `SELECT payment_proof_url FROM submissions WHERE id = ?`
+    ).bind(submissionId).first() as any;
+    if (prev?.payment_proof_url) {
+      await c.env.PROOF_BUCKET.delete(prev.payment_proof_url).catch(() => { });
+      await c.env.BUCKET.delete(prev.payment_proof_url).catch(() => { });
+    }
+
     const storageKey = `proof/${submissionId}-${Date.now()}${ext}`;
     const arrayBuffer = await file.arrayBuffer();
 
@@ -2744,21 +2820,43 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const submission = await c.env.DB.prepare(
-      `SELECT id, user_id FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, user_id, author_email, payment_proof_url FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
-    if (submission.user_id !== userId) return c.json({ success: false, error: 'Unauthorized.' }, 403);
+    const ownsSubmission =
+      submission.user_id === userId ||
+      ((clerkEmail || '').trim().toLowerCase() !== '' &&
+        (submission.author_email || '').trim().toLowerCase() === clerkEmail.trim().toLowerCase());
+    if (!ownsSubmission) return c.json({ success: false, error: 'Unauthorized.' }, 403);
 
     const eligibility = await registrationEligible(c.env, submissionId as string);
     if (!eligibility.ok) return c.json({ success: false, error: eligibility.error }, 403);
 
     const body = await c.req.json().catch(() => ({}));
-    const { registration_type, utr_transaction_id } = body;
+    const { registration_type, author_type, utr_transaction_id } = body;
     const now = new Date().toISOString();
 
+    const registrationType = (registration_type || '').trim();
+    const authorType = (author_type || '').trim();
+    const utr = (utr_transaction_id || '').trim();
+
+    if (!registrationType || !authorType || !utr) {
+      return c.json(
+        { success: false, error: 'Registration type, author type, and transaction ID are required.' },
+        400
+      );
+    }
+
+    // Registration must never be submitted without an uploaded payment proof.
+    if (!submission.payment_proof_url) {
+      return c.json({ success: false, error: 'Please upload your payment proof before registering.' }, 400);
+    }
+
+    // Reset the workflow flags when re-registering after a decline so the
+    // admin sees the submission as pending again (not silently re-approved).
     await c.env.DB.prepare(
-      `UPDATE submissions SET registration_type = ?, utr_transaction_id = ?, payment_status = 'PENDING', payment_submitted_at = ?, updated_at = ? WHERE id = ?`
-    ).bind(registration_type || null, utr_transaction_id || null, now, now, submissionId).run();
+      `UPDATE submissions SET registration_type = ?, author_type = ?, utr_transaction_id = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ? WHERE id = ?`
+    ).bind(registrationType, authorType, utr, now, now, submissionId).run();
 
     return c.json({ success: true, payment_status: 'PENDING' });
   } catch (err: any) {
@@ -2822,6 +2920,12 @@ app.post('/api/admin/submissions/:id/payment-status', async (c) => {
     const body = await c.req.json().catch(() => ({}));
     const status = body.status === 'APPROVED' ? 'APPROVED' : body.status === 'REJECTED' ? 'REJECTED' : 'PENDING';
     const approvedAt = status === 'APPROVED' ? new Date().toISOString() : null;
+
+    const exists = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
+      .bind(submissionId).first() as any;
+    if (!exists) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
 
     await c.env.DB.prepare(
       `UPDATE submissions SET payment_status = ?, payment_approved_at = ?, updated_at = ? WHERE id = ?`

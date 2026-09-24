@@ -336,6 +336,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, name: string) => vo
 function PdfViewer({ file, token, onClose }: { file: FileView; token: string; onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const frameRef = useRef<HTMLIFrameElement>(null);
+  const objectUrlRef = useRef<string | null>(null);
 
   const loadPdf = useCallback(async () => {
     if (!file.url) return;
@@ -346,13 +347,23 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
       return;
     }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    if (frameRef.current) frameRef.current.src = url;
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    objectUrlRef.current = URL.createObjectURL(blob);
+    if (frameRef.current) frameRef.current.src = objectUrlRef.current;
   }, [file.url, token]);
 
   useEffect(() => {
     loadPdf();
   }, [loadPdf]);
+
+  useEffect(() => {
+    return () => {
+      if (objectUrlRef.current) {
+        URL.revokeObjectURL(objectUrlRef.current);
+        objectUrlRef.current = null;
+      }
+    };
+  }, []);
 
   const downloadPdf = async () => {
     if (!file.url) return;
@@ -539,10 +550,34 @@ function ReviewEditor({
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<string | null>(sub.review?.updated_at || null);
 
+  // Track the last server state we synced into the editor. The 3-minute
+  // poll replaces the `sub` object on every tick, so we must NOT reset the
+  // reviewer's local selection/feedback merely because a new object arrived.
+  // Only re-sync when the stored review genuinely changed on the server.
+  const syncedRef = useRef({
+    decision: sub.review?.decision || '',
+    feedback: sub.review?.feedback || '',
+    updatedAt: sub.review?.updated_at || null,
+  });
+
   useEffect(() => {
-    setDecision(sub.review?.decision || '');
-    setFeedback(sub.review?.feedback || '');
-    setSavedAt(sub.review?.updated_at || null);
+    const incoming = {
+      decision: sub.review?.decision || '',
+      feedback: sub.review?.feedback || '',
+      updatedAt: sub.review?.updated_at || null,
+    };
+    const synced = syncedRef.current;
+    if (
+      incoming.decision === synced.decision &&
+      incoming.feedback === synced.feedback &&
+      incoming.updatedAt === synced.updatedAt
+    ) {
+      return;
+    }
+    syncedRef.current = incoming;
+    setDecision(incoming.decision);
+    setFeedback(incoming.feedback);
+    setSavedAt(incoming.updatedAt);
   }, [sub.review]);
 
   const requiresFeedback = (d: ReviewDecision | '') => !!d && d !== 'ACCEPTED';
@@ -959,7 +994,7 @@ export default function App() {
             <p className="text-sm text-brand-text/60">Review each paper and record your decision (Accepted / With Changes / Not Accepted).</p>
           </div>
           <button
-            onClick={fetchSubmissions}
+            onClick={() => fetchSubmissions()}
             disabled={loading}
             className="w-full sm:w-auto px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow"
           >

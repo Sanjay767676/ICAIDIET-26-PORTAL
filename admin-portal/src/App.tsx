@@ -39,6 +39,7 @@ interface Submission {
   mail_status?: string;
   authors?: Author[];
   registration_type?: string | null;
+  author_type?: string | null;
   payment_proof_url?: string | null;
   utr_transaction_id?: string | null;
   payment_status?: string | null;
@@ -471,7 +472,7 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-2 sm:p-4">
+    <div className="fixed inset-0 z-[120] flex items-center justify-center p-2 sm:p-4">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
       <div className="relative w-full max-w-4xl h-[90vh] sm:h-[85vh] flex flex-col bg-brand-card rounded-2xl overflow-hidden shadow-2xl border border-brand-text/10">
         <div className="flex flex-wrap items-center justify-between gap-2 px-4 sm:px-5 py-3 bg-brand-text text-white">
@@ -614,32 +615,38 @@ function EditAuthorsModal({
   onClose: () => void;
   onSaved: (authors: Author[]) => void;
 }) {
-  if (!sub) return null;
-  const existing = sub.authors && sub.authors.length > 0 ? sub.authors : [];
-  const seedDrafts = (): AuthorDraft[] =>
-    existing.length > 0
-      ? existing.map((a) => ({
-          first_name: a.first_name || '',
-          last_name: a.last_name || '',
-          email: a.email || '',
-          phone: a.phone || '',
-          college: a.college || '',
-          is_primary: a.is_primary === 1,
-        }))
-      : [
-          {
-            first_name: (sub.author_name || '').split(' ')[0] || '',
-            last_name: (sub.author_name || '').split(' ').slice(1).join(' ') || '',
-            email: sub.author_email || '',
-            phone: '',
-            college: '',
-            is_primary: true,
-          },
-        ];
-
-  const [drafts, setDrafts] = useState<AuthorDraft[]>(seedDrafts);
+  const [drafts, setDrafts] = useState<AuthorDraft[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!sub) return;
+    const existing = sub.authors && sub.authors.length > 0 ? sub.authors : [];
+    setDrafts(
+      existing.length > 0
+        ? existing.map((a) => ({
+            first_name: a.first_name || '',
+            last_name: a.last_name || '',
+            email: a.email || '',
+            phone: a.phone || '',
+            college: a.college || '',
+            is_primary: a.is_primary === 1,
+          }))
+        : [
+            {
+              first_name: (sub.author_name || '').split(' ')[0] || '',
+              last_name: (sub.author_name || '').split(' ').slice(1).join(' ') || '',
+              email: sub.author_email || '',
+              phone: '',
+              college: '',
+              is_primary: true,
+            },
+          ]
+    );
+    setError(null);
+  }, [sub]);
+
+  if (!sub) return null;
 
   const update = (i: number, patch: Partial<AuthorDraft>) =>
     setDrafts((d) => d.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
@@ -854,16 +861,19 @@ function PaymentModal({
   onClose,
   onOpenPdf,
   onPaymentStatusChanged,
+  onUnauthorized,
 }: {
   sub: Submission | null;
   token: string;
   onClose: () => void;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => void;
   onPaymentStatusChanged: (subId: string, newStatus: string, approvedAt: string | null) => void;
+  onUnauthorized: () => void;
 }) {
-  if (!sub) return null;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  if (!sub) return null;
 
   const hasPayment = !!(sub.payment_proof_url || sub.utr_transaction_id || sub.registration_type);
   const isApproved = sub.payment_status === 'APPROVED';
@@ -877,6 +887,10 @@ function PaymentModal({
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ status: newStatus }),
       });
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Failed to update payment status.');
@@ -952,6 +966,13 @@ function PaymentModal({
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Registration Type</div>
                 <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.registration_type || '—'}</div>
               </div>
+
+              {sub.author_type && (
+                <div>
+                  <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Author Type</div>
+                  <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.author_type}</div>
+                </div>
+              )}
 
 <div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">UTR / Transaction ID</div>
@@ -2179,13 +2200,14 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         throw new Error(data?.error || 'Failed to load submissions.');
       }
       const list: Submission[] = data.submissions || [];
+      const active = list.filter((s) => s.payment_status !== 'APPROVED');
       setSubmissions(list);
       setStats({
-        total: list.length,
-        submitted: list.filter((s) => s.status === 'SUBMITTED').length,
-        underReview: list.filter((s) => s.status === 'UNDER_REVIEW').length,
-        readyForRegistration: list.filter((s) => s.status === 'READY_FOR_REGISTRATION').length,
-        readyForCameraReady: list.filter((s) => s.status === 'READY_FOR_CAMERA_READY').length,
+        total: active.length,
+        submitted: active.filter((s) => s.status === 'SUBMITTED').length,
+        underReview: active.filter((s) => s.status === 'UNDER_REVIEW').length,
+        readyForRegistration: active.filter((s) => s.status === 'READY_FOR_REGISTRATION').length,
+        readyForCameraReady: active.filter((s) => s.status === 'READY_FOR_CAMERA_READY').length,
       });
     } catch (err) {
       if (silent) {
@@ -2484,8 +2506,18 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Failed to delete submission.');
       }
-      setSubmissions((prev) => prev.filter((s) => s.id !== deleteTarget.id));
-      setStats((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+      setSubmissions((prev) => {
+        const next = prev.filter((s) => s.id !== deleteTarget.id);
+        const active = next.filter((s) => s.payment_status !== 'APPROVED');
+        setStats({
+          total: active.length,
+          submitted: active.filter((s) => s.status === 'SUBMITTED').length,
+          underReview: active.filter((s) => s.status === 'UNDER_REVIEW').length,
+          readyForRegistration: active.filter((s) => s.status === 'READY_FOR_REGISTRATION').length,
+          readyForCameraReady: active.filter((s) => s.status === 'READY_FOR_CAMERA_READY').length,
+        });
+        return next;
+      });
       setDeleteTarget(null);
       await fetchDeletedSubmissions();
     } catch (err) {
@@ -2544,11 +2576,11 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
   );
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(q || trackFilter || paperIdFilter);
-      const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED');
-    const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES');
-    const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES');
+const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && s.payment_status !== 'APPROVED');
+    const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES' && s.payment_status !== 'APPROVED');
+    const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
     const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED');
-    const acceptedSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY');
+    const acceptedSubmissionsList = submissions.filter(s => (s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY') && s.payment_status !== 'APPROVED');
 
     const applyFilters = (list: Submission[]) =>
       list.filter((s) => {
@@ -2558,7 +2590,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         return matchSearch && matchTrack && matchPaper;
       });
 
-    const masterApply = (fallbackList: Submission[]) => q ? applyFilters(submissions) : applyFilters(fallbackList);
+    const masterApply = (list: Submission[]) => applyFilters(list);
 
     const filteredSubmissions = masterApply(mainSubmissionsList);
     const filteredMinor = masterApply(minorSubmissionsList);
@@ -2987,341 +3019,357 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         )}
 
         {activeTab === 'settings' && (
-          <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-6 sm:p-8 max-w-3xl mt-6">
-            <h3 className="font-serif text-xl font-bold mb-1">Portal Settings</h3>
-            <p className="text-sm text-brand-text/60 mb-6">
-              Turn maintenance on per portal. While a portal is under maintenance, the end date/time you set is
-              shown to visitors; the user portal blocks new submissions and the reviewer portal blocks sign-in.
-              Leave the date/time blank for maintenance with no scheduled end.
-            </p>
-
-            <div className="border border-brand-text/10 rounded-xl">
-              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                <div>
-                  <h4 className="font-semibold text-brand-text">Accepting Paper Submissions</h4>
-                  <p className="text-sm text-brand-text/60 mt-1">
-                    When on, the user portal accepts new paper submissions. When off, users cannot submit new
-                    papers (file updates are also blocked).
-                  </p>
-                </div>
-                <button
-                  onClick={() => setMtUserEnabled(!mtUserEnabled)}
-                  disabled={savingSettings}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-gray-200' : 'bg-brand-accent'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  role="switch"
-                  aria-checked={!mtUserEnabled}
-                >
-                  <span className="sr-only">Toggle accepting paper submissions</span>
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-0' : 'translate-x-5'}`}
-                  />
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
-                <span
-                  className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${mtUserEnabled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
-                    }`}
-                >
-                  <span className={`w-1.5 h-1.5 rounded-full ${mtUserEnabled ? 'bg-red-600' : 'bg-green-600'}`} />
-                  {mtUserEnabled ? 'Not accepting submissions' : 'Accepting submissions'}
-                </span>
-                <span className="text-xs text-brand-text/50">
-                  Save the settings below to apply this change to the user portal.
-                </span>
-              </div>
+          <div className="bg-white rounded-2xl shadow-md border-2 border-brand-accent p-6 sm:p-8 max-w-7xl mx-auto mt-6">
+            <div className="mb-6">
+              <h3 className="font-serif text-2xl font-bold mb-1 text-black">Portal Settings</h3>
+              <p className="text-sm text-brand-text/60 max-w-3xl">
+                Turn maintenance on per portal. While a portal is under maintenance, the end date/time you set is
+                shown to visitors; the user portal blocks new submissions and the reviewer portal blocks sign-in.
+                Leave the date/time blank for maintenance with no scheduled end.
+              </p>
             </div>
 
-            
-              <div className="border border-brand-text/10 rounded-xl mt-4">
-                <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                  <div>
-                    <h4 className="font-semibold text-brand-text">Ready for Registration</h4>
-                    <p className="text-sm text-brand-text/60 mt-1">
-                      When on, authors of accepted papers will see the payment form in their portal.
-                    </p>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+              {/* LEFT COLUMN: Portal Controls & Maintenance */}
+              <div className="space-y-4">
+                {/* 1. Accepting Paper Submissions */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                    <div>
+                      <h4 className="font-semibold text-brand-text">Accepting Paper Submissions</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        When on, the user portal accepts new paper submissions. When off, users cannot submit new
+                        papers (file updates are also blocked).
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setMtUserEnabled(!mtUserEnabled)}
+                      disabled={savingSettings}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-gray-200' : 'bg-brand-accent'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      role="switch"
+                      aria-checked={!mtUserEnabled}
+                    >
+                      <span className="sr-only">Toggle accepting paper submissions</span>
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-0' : 'translate-x-5'}`}
+                      />
+                    </button>
                   </div>
-                  <button
-                    onClick={() => setRegistrationOpen(!registrationOpen)}
-                    disabled={savingSettings}
-                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${registrationOpen ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    role="switch"
-                    aria-checked={registrationOpen}
-                  >
-                    <span className="sr-only">Toggle registration</span>
+                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
                     <span
-                      aria-hidden="true"
-                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${registrationOpen ? 'translate-x-5' : 'translate-x-0'}`}
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
+                        mtUserEnabled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${mtUserEnabled ? 'bg-red-600' : 'bg-green-600'}`} />
+                      {mtUserEnabled ? 'Not accepting submissions' : 'Accepting submissions'}
+                    </span>
+                    <span className="text-xs text-brand-text/50">
+                      Save the settings below to apply.
+                    </span>
+                  </div>
+                </div>
+
+                {/* 2. Ready for Registration */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 px-5 py-4">
+                    <div>
+                      <h4 className="font-semibold text-brand-text">Ready for Registration</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        When on, authors of accepted papers will see the payment form in their portal.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setRegistrationOpen(!registrationOpen)}
+                      disabled={savingSettings}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${registrationOpen ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      role="switch"
+                      aria-checked={registrationOpen}
+                    >
+                      <span className="sr-only">Toggle registration</span>
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${registrationOpen ? 'translate-x-5' : 'translate-x-0'}`}
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                {/* 3. User Portal Maintenance */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                    <div>
+                      <h4 className="font-semibold text-brand-text">User Portal Maintenance</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        When on, users cannot create or update submissions and see a maintenance message.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setMtUserEnabled(!mtUserEnabled)}
+                      disabled={savingSettings}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      role="switch"
+                      aria-checked={mtUserEnabled}
+                    >
+                      <span className="sr-only">Toggle user portal maintenance</span>
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                      />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
+                    <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
+                    <input
+                      type="datetime-local"
+                      value={mtUserUntil}
+                      disabled={savingSettings}
+                      onChange={(e) => setMtUserUntil(e.target.value)}
+                      className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
                     />
+                    {mtUserUntil && (
+                      <span className="text-xs text-brand-text/50">
+                        Shown as "back online {new Date(mtUserUntil).toLocaleString()}"
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 4. Reviewer Portal Maintenance */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                    <div>
+                      <h4 className="font-semibold text-brand-text">Reviewer Portal Maintenance</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        When on, reviewers cannot sign in and see a maintenance message.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setMtReviewEnabled(!mtReviewEnabled)}
+                      disabled={savingSettings}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtReviewEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      role="switch"
+                      aria-checked={mtReviewEnabled}
+                    >
+                      <span className="sr-only">Toggle reviewer portal maintenance</span>
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtReviewEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                      />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
+                    <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
+                    <input
+                      type="datetime-local"
+                      value={mtReviewUntil}
+                      disabled={savingSettings}
+                      onChange={(e) => setMtReviewUntil(e.target.value)}
+                      className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    />
+                    {mtReviewUntil && (
+                      <span className="text-xs text-brand-text/50">
+                        Shown as "back online {new Date(mtReviewUntil).toLocaleString()}"
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Save Settings Button */}
+                <div className="flex items-center justify-end pt-2">
+                  <button
+                    onClick={savePortalSettings}
+                    disabled={savingSettings}
+                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-text text-white rounded-xl text-sm font-semibold hover:bg-brand-accent transition-all disabled:opacity-50 shadow-md"
+                  >
+                    {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                    {savingSettings ? 'Saving...' : 'Save Portal Settings'}
                   </button>
                 </div>
               </div>
 
-<div className="border border-brand-text/10 rounded-xl mt-4">
-              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                <div>
-                  <h4 className="font-semibold text-brand-text">User Portal Maintenance</h4>
-                  <p className="text-sm text-brand-text/60 mt-1">
-                    When on, users cannot create or update submissions and see a maintenance message.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setMtUserEnabled(!mtUserEnabled)}
-                  disabled={savingSettings}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  role="switch"
-                  aria-checked={mtUserEnabled}
-                >
-                  <span className="sr-only">Toggle user portal maintenance</span>
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                  />
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
-                <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
-                <input
-                  type="datetime-local"
-                  value={mtUserUntil}
-                  disabled={savingSettings}
-                  onChange={(e) => setMtUserUntil(e.target.value)}
-                  className="px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                />
-                {mtUserUntil && (
-                  <span className="text-xs text-brand-text/50">
-                    Shown as "back online {new Date(mtUserUntil).toLocaleString()}"
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="border border-brand-text/10 rounded-xl mt-4">
-              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                <div>
-                  <h4 className="font-semibold text-brand-text">Reviewer Portal Maintenance</h4>
-                  <p className="text-sm text-brand-text/60 mt-1">
-                    When on, reviewers cannot sign in and see a maintenance message.
-                  </p>
-                </div>
-                <button
-                  onClick={() => setMtReviewEnabled(!mtReviewEnabled)}
-                  disabled={savingSettings}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtReviewEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                  role="switch"
-                  aria-checked={mtReviewEnabled}
-                >
-                  <span className="sr-only">Toggle reviewer portal maintenance</span>
-                  <span
-                    aria-hidden="true"
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtReviewEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                  />
-                </button>
-              </div>
-              <div className="flex flex-wrap items-center gap-3 px-5 py-4">
-                <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
-                <input
-                  type="datetime-local"
-                  value={mtReviewUntil}
-                  disabled={savingSettings}
-                  onChange={(e) => setMtReviewUntil(e.target.value)}
-                  className="px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                />
-                {mtReviewUntil && (
-                  <span className="text-xs text-brand-text/50">
-                    Shown as "back online {new Date(mtReviewUntil).toLocaleString()}"
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="border border-brand-text/10 rounded-xl mt-4">
-              <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                <div>
-                  <h4 className="font-semibold text-brand-text">Mail Templates</h4>
-                  <p className="text-sm text-brand-text/60 mt-1">
-                    Templates used when sending emails to authors from the Reviewed / Needs Revisions sections. Add
-                    placeholders and the system fills them automatically per paper.
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
-                    <span className="text-brand-text/50">Available placeholders:</span>
-                    <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{name}'}</code>
-                    <span className="text-brand-text/50">→ primary author name</span>
-                    <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_title}'}</code>
-                    <span className="text-brand-text/50">→ paper title</span>
-                    <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_id}'}</code>
-                    <span className="text-brand-text/50">→ paper ID</span>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setTemplateDraft({ id: '', name: '', subject: '', body: '' })}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0"
-                >
-                  <Mail className="w-4 h-4" /> New Template
-                </button>
-              </div>
-
-              {mailTemplatesError && (
-                <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2 border-b-2 border-brand-accent/40">
-                  <AlertCircle className="w-4 h-4 shrink-0" /> {mailTemplatesError}
-                </div>
-              )}
-
-              {templateDraft && (
-                <div className="px-5 py-4 border-b-2 border-brand-accent/40 bg-brand-bg/40">
-                  <h5 className="font-semibold text-brand-text mb-3">{templateDraft.id ? 'Edit Template' : 'New Template'}</h5>
-                  <div className="grid gap-3">
+              {/* RIGHT COLUMN: Mail Templates & Backup */}
+              <div className="space-y-4">
+                {/* 1. Mail Templates */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
                     <div>
-                      <label className="block text-sm font-medium text-brand-text/80 mb-1">Template Name</label>
-                      <input
-                        value={templateDraft.name}
-                        onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })}
-                        placeholder="e.g. Accepted paper intimation"
-                        className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                      />
+                      <h4 className="font-semibold text-brand-text">Mail Templates</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        Templates used when sending emails to authors from the Reviewed / Needs Revisions sections. Add
+                        placeholders and the system fills them automatically per paper.
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
+                        <span className="text-brand-text/50">Available placeholders:</span>
+                        <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{name}'}</code>
+                        <span className="text-brand-text/50">→ primary author</span>
+                        <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_title}'}</code>
+                        <span className="text-brand-text/50">→ paper title</span>
+                        <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_id}'}</code>
+                        <span className="text-brand-text/50">→ paper ID</span>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-sm font-medium text-brand-text/80 mb-1">Subject</label>
-                      <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                        <span className="text-xs text-brand-text/40">Insert:</span>
-                        {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
+                    <button
+                      onClick={() => setTemplateDraft({ id: '', name: '', subject: '', body: '' })}
+                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0"
+                    >
+                      <Mail className="w-4 h-4" /> New Template
+                    </button>
+                  </div>
+
+                  {mailTemplatesError && (
+                    <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2 border-b-2 border-brand-accent/40">
+                      <AlertCircle className="w-4 h-4 shrink-0" /> {mailTemplatesError}
+                    </div>
+                  )}
+
+                  {templateDraft && (
+                    <div className="px-5 py-4 border-b-2 border-brand-accent/40 bg-brand-bg/40">
+                      <h5 className="font-semibold text-brand-text mb-3">{templateDraft.id ? 'Edit Template' : 'New Template'}</h5>
+                      <div className="grid gap-3">
+                        <div>
+                          <label className="block text-sm font-medium text-brand-text/80 mb-1">Template Name</label>
+                          <input
+                            value={templateDraft.name}
+                            onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })}
+                            placeholder="e.g. Accepted paper intimation"
+                            className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-brand-text/80 mb-1">Subject</label>
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                            <span className="text-xs text-brand-text/40">Insert:</span>
+                            {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => setTemplateDraft(d => d ? { ...d, subject: d.subject + p } : d)}
+                                className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
+                              >
+                                {p}
+                              </button>
+                            ))}
+                          </div>
+                          <input
+                            value={templateDraft.subject}
+                            onChange={(e) => setTemplateDraft({ ...templateDraft, subject: e.target.value })}
+                            placeholder="e.g. Regarding your paper {paper_title}"
+                            className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-sm font-medium text-brand-text/80 mb-1">Body</label>
+                          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                            <span className="text-xs text-brand-text/40">Insert:</span>
+                            {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => setTemplateDraft(d => d ? { ...d, body: d.body + p } : d)}
+                                className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
+                              >
+                                {p}
+                              </button>
+                            ))}
+                          </div>
+                          <textarea
+                            value={templateDraft.body}
+                            onChange={(e) => setTemplateDraft({ ...templateDraft, body: e.target.value })}
+                            rows={6}
+                            placeholder={'Dear {name},\n\nYour paper "{paper_title}" has been...'}
+                            className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-y font-mono"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
                           <button
-                            key={p}
-                            type="button"
-                            onClick={() => setTemplateDraft(d => d ? { ...d, subject: d.subject + p } : d)}
-                            className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
+                            onClick={() => saveMailTemplate(templateDraft)}
+                            disabled={savingTemplate}
+                            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
                           >
-                            {p}
+                            {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                            {savingTemplate ? 'Saving...' : 'Save Template'}
                           </button>
-                        ))}
-                      </div>
-                      <input
-                        value={templateDraft.subject}
-                        onChange={(e) => setTemplateDraft({ ...templateDraft, subject: e.target.value })}
-                        placeholder="e.g. Regarding your paper {paper_title}"
-                        className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-brand-text/80 mb-1">Body</label>
-                      <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                        <span className="text-xs text-brand-text/40">Insert:</span>
-                        {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
                           <button
-                            key={p}
-                            type="button"
-                            onClick={() => setTemplateDraft(d => d ? { ...d, body: d.body + p } : d)}
-                            className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
+                            onClick={() => setTemplateDraft(null)}
+                            disabled={savingTemplate}
+                            className="px-4 py-2 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors disabled:opacity-50"
                           >
-                            {p}
+                            Cancel
                           </button>
-                        ))}
+                        </div>
                       </div>
-                      <textarea
-                        value={templateDraft.body}
-                        onChange={(e) => setTemplateDraft({ ...templateDraft, body: e.target.value })}
-                        rows={6}
-                        placeholder={'Dear {name},\n\nYour paper "{paper_title}" has been...'}
-                        className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-y font-mono"
-                      />
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => saveMailTemplate(templateDraft)}
-                        disabled={savingTemplate}
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
-                      >
-                        {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-                        {savingTemplate ? 'Saving...' : 'Save Template'}
-                      </button>
-                      <button
-                        onClick={() => setTemplateDraft(null)}
-                        disabled={savingTemplate}
-                        className="px-4 py-2 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors disabled:opacity-50"
-                      >
-                        Cancel
-                      </button>
-                    </div>
+                  )}
+
+                  <div className="divide-y divide-brand-text/10 max-h-80 overflow-y-auto">
+                    {mailTemplatesLoading ? (
+                      <div className="px-5 py-4 text-sm text-brand-text/60">Loading templates...</div>
+                    ) : mailTemplates.length === 0 ? (
+                      <div className="px-5 py-4 text-sm text-brand-text/60">
+                        No mail templates yet. Create one to send emails to authors.
+                      </div>
+                    ) : (
+                      mailTemplates.map((t) => (
+                        <div key={t.id} className="px-5 py-4 flex items-start justify-between gap-4">
+                          <div className="min-w-0">
+                            <h5 className="font-semibold text-brand-text">{t.name}</h5>
+                            <p className="text-xs text-brand-text/50 font-medium mt-0.5 break-words">{t.subject}</p>
+                            <p className="text-sm text-brand-text/70 mt-1.5 whitespace-pre-wrap break-words line-clamp-3">{t.body}</p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => setTemplateDraft({ id: t.id, name: t.name, subject: t.subject, body: t.body })}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => deleteMailTemplate(t.id)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-red-600 rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))
+                    )}
                   </div>
                 </div>
-              )}
 
-              <div className="divide-y divide-brand-text/10">
-                {mailTemplatesLoading ? (
-                  <div className="px-5 py-4 text-sm text-brand-text/60">Loading templates...</div>
-                ) : mailTemplates.length === 0 ? (
-                  <div className="px-5 py-4 text-sm text-brand-text/60">
-                    No mail templates yet. Create one to send emails to authors.
-                  </div>
-                ) : (
-                  mailTemplates.map((t) => (
-                    <div key={t.id} className="px-5 py-4 flex items-start justify-between gap-4">
-                      <div className="min-w-0">
-                        <h5 className="font-semibold text-brand-text">{t.name}</h5>
-                        <p className="text-xs text-brand-text/50 font-medium mt-0.5 break-words">{t.subject}</p>
-                        <p className="text-sm text-brand-text/70 mt-1.5 whitespace-pre-wrap break-words">{t.body}</p>
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => setTemplateDraft({ id: t.id, name: t.name, subject: t.subject, body: t.body })}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => deleteMailTemplate(t.id)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-red-600 rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                {/* 2. Full Backup / Download */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-start justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                    <div>
+                      <h4 className="font-semibold text-brand-text">Full Backup / Download</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        Download a complete snapshot of all data (every table, plus the record of stored paper files) as a
+                        single JSON file saved straight to your computer. The backup is generated on demand, is never stored
+                        in the database, and is deleted from our servers the moment it leaves.
+                      </p>
                     </div>
-                  ))
-                )}
+                    <button
+                      onClick={downloadBackup}
+                      disabled={backingUp}
+                      className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0 disabled:opacity-50 shadow"
+                    >
+                      {backingUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                      {backingUp ? 'Creating backup...' : 'Download Backup'}
+                    </button>
+                  </div>
+                  {backupError && (
+                    <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2 bg-red-50">
+                      <AlertCircle className="w-4 h-4 shrink-0" /> {backupError}
+                    </div>
+                  )}
+                  {backupMessage && (
+                    <div className="px-5 py-3 text-sm text-green-700 flex items-center gap-2 bg-green-50">
+                      <CheckCircle2 className="w-4 h-4 shrink-0" /> {backupMessage}
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-
-            <div className="border border-brand-text/10 rounded-xl mt-4">
-              <div className="flex items-start justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                <div>
-                  <h4 className="font-semibold text-brand-text">Full Backup / Download</h4>
-                  <p className="text-sm text-brand-text/60 mt-1">
-                    Download a complete snapshot of all data (every table, plus the record of stored paper files) as a
-                    single JSON file saved straight to your computer. The backup is generated on demand, is never stored
-                    in the database, and is deleted from our servers the moment it leaves — keep a copy somewhere safe.
-                    Take one before any risky maintenance.
-                  </p>
-                </div>
-                <button
-                  onClick={downloadBackup}
-                  disabled={backingUp}
-                  className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0 disabled:opacity-50 shadow"
-                >
-                  {backingUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                  {backingUp ? 'Creating backup...' : 'Download Backup'}
-                </button>
-              </div>
-              {backupError && (
-                <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 shrink-0" /> {backupError}
-                </div>
-              )}
-              {backupMessage && (
-                <div className="px-5 py-3 text-sm text-green-700 flex items-center gap-2 bg-green-50">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" /> {backupMessage}
-                </div>
-              )}
-            </div>
-
-            <div className="flex items-center justify-end gap-3 mt-6">
-              <button
-                onClick={savePortalSettings}
-                disabled={savingSettings}
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50 shadow"
-              >
-                {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {savingSettings ? 'Saving...' : 'Save Portal Settings'}
-              </button>
             </div>
           </div>
         )}
@@ -3335,7 +3383,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         </div>
       </footer>
 
-      {pdfView.open && pdfView.url && <PdfViewer file={pdfView} token={token} onClose={closePdf} />}
+      
 
       <ConfirmDialog
         open={!!deleteTarget}
@@ -3372,6 +3420,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         onClose={() => setPaymentTarget(null)}
         onOpenPdf={openPdf}
         onPaymentStatusChanged={handlePaymentStatusChanged}
+        onUnauthorized={handleLogout}
       />
 
       <EditAuthorsModal
@@ -3381,6 +3430,8 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         onClose={() => setEditAuthorsTarget(null)}
         onSaved={handleAuthorsSaved}
       />
+
+      {pdfView.open && pdfView.url && <PdfViewer file={pdfView} token={token} onClose={closePdf} />}
     </div>
   );
 }
