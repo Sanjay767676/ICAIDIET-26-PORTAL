@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, CheckCircle2, FileText, Inbox, Loader2, Upload, ShieldCheck, ScanSearch, X, Pencil, XCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Inbox, Loader2, Upload, ShieldCheck, ScanSearch, X, Pencil, XCircle, CreditCard } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -651,43 +651,91 @@ export function MySubmissions({ getToken, onBack, onStart, maintenanceMode = fal
                 </div>
               </div>
 
-              {sub.abstract && (
+{sub.abstract && (
                 <p className="text-sm text-black/80 mt-4 leading-relaxed line-clamp-3">{sub.abstract}</p>
               )}
 
               {reviewBanner(sub)}
 
-              {registrationOpen && (sub.status === 'ACCEPTED' || sub.status === 'READY_FOR_REGISTRATION' || sub.review_decision === 'ACCEPTED') && (
-                 <RegistrationForm sub={sub} getToken={getToken} onSaved={loadSubmissions} />
-              )}
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="rounded-xl border border-black/10 bg-stone-50 p-4">
+                  <div className="flex items-center gap-2 text-xs text-black/60 uppercase tracking-wide font-semibold mb-3">
+                    <Upload className="w-4 h-4 text-brand-accent" /> Paper Upload
+                  </div>
+                  <div className="space-y-2 text-sm">
+                    {[
+                      { label: 'Manuscript', ok: !!sub.manuscript_file, name: sub.manuscript_file },
+                      { label: 'Plagiarism Report', ok: !!sub.plagiarism_file, name: sub.plagiarism_file },
+                      { label: 'AI Plagiarism Report', ok: !!sub.ai_plagiarism_file, name: sub.ai_plagiarism_file },
+                    ].map((f) => (
+                      <div key={f.label} className="flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-2 text-black/80">
+                          {f.ok ? (
+                            <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                          ) : (
+                            <FileText className="w-4 h-4 text-stone-400 shrink-0" />
+                          )}
+                          {f.label}
+                        </span>
+                        <span className="text-xs text-black/50 truncate max-w-[52%]">
+                          {f.ok ? f.name : 'Not uploaded'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-black/10 pt-3">
+                    <span className="text-sm text-black/80 capitalize">{sub.track?.replace(/-/g, ' ')}</span>
+                    {isEdited(sub) && (
+                      <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
+                        <Pencil className="w-3 h-3" /> Files edited
+                      </span>
+                    )}
+                    {!maintenanceMode && (
+                      <button
+                        onClick={() => setEditing(sub)}
+                        className="ml-auto inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-sm font-medium text-white bg-brand-text hover:bg-brand-accent transition-all shadow"
+                      >
+                        <Pencil className="w-4 h-4" /> Edit Files
+                      </button>
+                    )}
+                  </div>
+                  {maintenanceMode && (
+                    <div className="mt-3 text-xs text-yellow-800 bg-yellow-50 border border-yellow-300 rounded-lg p-2.5">
+                      File updates are disabled during maintenance.
+                      {maintenanceUntil
+                        ? <> Expected back online {new Date(maintenanceUntil).toLocaleString()}.</>
+                        : null}
+                    </div>
+                  )}
+                </div>
 
-      {maintenanceMode && (
-        <div className="mt-4 rounded-xl border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">
-          The submission portal is under maintenance and file updates are disabled.
-          {maintenanceUntil
-            ? <> We expect the portal to be back online {new Date(maintenanceUntil).toLocaleString()}.</>
-            : ' Please check back again later.'}
-        </div>
-      )}
-
-      <div className="mt-4 flex items-center justify-between gap-3 border-t border-black/10 pt-4">
-        <div className="flex items-center gap-3 flex-wrap min-w-0">
-          <span className="text-sm text-black/80 capitalize">{sub.track?.replace(/-/g, ' ')}</span>
-          {isEdited(sub) && (
-            <span className="inline-flex items-center gap-1 text-[11px] font-medium text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">
-              <Pencil className="w-3 h-3" /> Files edited
-            </span>
-          )}
-        </div>
-        {!maintenanceMode && (
-          <button
-            onClick={() => setEditing(sub)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium text-white bg-brand-text hover:bg-brand-accent transition-all shadow"
-          >
-            <Pencil className="w-4 h-4" /> Edit Files
-          </button>
-        )}
-      </div>
+                <div className="rounded-xl border border-black/10 bg-stone-50 p-4">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2 text-xs text-black/60 uppercase tracking-wide font-semibold">
+                      <CreditCard className="w-4 h-4 text-brand-accent" /> Payment
+                    </div>
+                    {paymentBadge(sub) || (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-stone-100 text-stone-500 border border-stone-200">
+                        Not Started
+                      </span>
+                    )}
+                  </div>
+                  {sub.status === 'ACCEPTED' || sub.status === 'READY_FOR_REGISTRATION' || sub.review_decision === 'ACCEPTED' ? (
+                    registrationOpen ? (
+                      <RegistrationForm sub={sub} getToken={getToken} onSaved={loadSubmissions} />
+                    ) : (
+                      <div className="rounded-xl bg-amber-50 border border-amber-200 p-3 text-sm text-amber-800">
+                        Registration & payment for accepted papers will open soon. Please check back here.
+                      </div>
+                    )
+                  ) : (
+                    <div className="rounded-xl bg-stone-100 border border-stone-200 p-3 text-sm text-black/70">
+                      The payment &amp; registration section unlocks once your paper status becomes{' '}
+                      <b>Accepted</b> or <b>Ready for Registration</b>.
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           ))}
         </div>
