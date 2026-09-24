@@ -913,11 +913,8 @@ export function MySubmissions({
       ) : (
         <div className="space-y-8">
           {subs.map((sub) => {
-            const acceptedDecisions = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES'];
-            const acceptedStatuses = ['ACCEPTED', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
             const isSubAccepted =
-              (sub.review_decision && acceptedDecisions.includes(sub.review_decision)) ||
-              acceptedStatuses.includes(sub.status);
+              sub.status === 'ACCEPTED' || sub.status === 'READY_FOR_REGISTRATION';
             const isPaymentOpen =
               expandedPaymentIds[sub.id] ||
               !!sub.payment_proof_url ||
