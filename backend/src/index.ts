@@ -1521,7 +1521,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1706,7 +1706,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at, s.updated_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.created_at, s.updated_at, s.registration_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2508,6 +2508,32 @@ function portalMaintenanceActive(
   return { active, until: until || null };
 }
 
+// Returns whether registration is currently open AND the submission is
+// accepted, so that only eligible authors can register / upload proof.
+async function registrationEligible(
+  env: Bindings,
+  submissionId: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const settings = await loadSettingsRecord(env);
+  if (settings['registration_open'] !== 'true') {
+    return { ok: false, error: 'Registration is currently closed.' };
+  }
+  const row = await env.DB.prepare(
+    `SELECT s.status,
+            (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision
+     FROM submissions s
+     WHERE s.id = ?`
+  ).bind(submissionId).first() as any;
+  if (!row) return { ok: false, error: 'Submission not found.' };
+  const acceptedDecisions = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES'];
+  const acceptedStatuses = ['ACCEPTED', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
+  const accepted = acceptedDecisions.includes(row.review_decision) || acceptedStatuses.includes(row.status);
+  if (!accepted) {
+    return { ok: false, error: 'This paper has not been accepted for registration yet.' };
+  }
+  return { ok: true };
+}
+
 app.get('/api/settings', async (c) => {
   const env = c.env as Bindings;
   try {
@@ -2584,6 +2610,16 @@ app.post('/api/admin/settings', async (c) => {
       );
     }
 
+    const registrationOpen = str(body.registration_open);
+    if (registrationOpen !== undefined) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('registration_open', registrationOpen)
+      );
+    }
+
     if (statements.length > 0) {
       await env.DB.batch(statements);
     }
@@ -2636,6 +2672,161 @@ async function purgeExpiredDeleted(env: Bindings) {
     console.error('Purge deleted submissions error:', error);
   }
 }
+
+// ------------------------------------------------------------------
+// User: Upload payment proof
+// ------------------------------------------------------------------
+const PAYMENT_PROOF_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+const PAYMENT_PROOF_ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
+const PAYMENT_PROOF_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.pdf']);
+
+app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) => {
+  try {
+    const clerkUserId = c.get('clerkUserId') as string;
+    const clerkEmail = (c.get('clerkEmail') || '').trim();
+    const submissionId = c.req.param('id');
+    const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+
+    const submission = await c.env.DB.prepare(
+      `SELECT id, user_id FROM submissions WHERE id = ? AND deleted_at IS NULL`
+    ).bind(submissionId).first() as any;
+    if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
+    if (submission.user_id !== userId) return c.json({ success: false, error: 'Unauthorized.' }, 403);
+
+    const eligibility = await registrationEligible(c.env, submissionId as string);
+    if (!eligibility.ok) return c.json({ success: false, error: eligibility.error }, 403);
+
+    const formData = await c.req.parseBody();
+    const file = formData['file'] as File;
+    if (!file) return c.json({ success: false, error: 'No file provided.' }, 400);
+
+    if (file.size > PAYMENT_PROOF_MAX_BYTES) {
+      return c.json({ success: false, error: 'Payment proof file must be 10MB or smaller.' }, 400);
+    }
+    const name = file.name || 'proof.png';
+    const ext = name.includes('.') ? name.substring(name.lastIndexOf('.')).toLowerCase() : '';
+    if (!PAYMENT_PROOF_EXT.has(ext) || !PAYMENT_PROOF_ALLOWED.includes(file.type)) {
+      return c.json(
+        { success: false, error: 'Payment proof must be a JPG, PNG, WebP or PDF file.' },
+        400
+      );
+    }
+    const storageKey = `payment-proofs/${submissionId}-${Date.now()}${ext}`;
+    const arrayBuffer = await file.arrayBuffer();
+
+    await c.env.BUCKET.put(storageKey, arrayBuffer, {
+      httpMetadata: { contentType: file.type || 'application/octet-stream' },
+    });
+
+    await c.env.DB.prepare(
+      `UPDATE submissions
+       SET payment_proof_url = ?, payment_status = 'PENDING', payment_approved_at = NULL, updated_at = ?
+       WHERE id = ?`
+    ).bind(storageKey, new Date().toISOString(), submissionId).run();
+
+    return c.json({ success: true, payment_proof_url: storageKey, payment_status: 'PENDING' });
+  } catch (err: any) {
+    console.error('Payment proof upload error:', err);
+    return c.json({ success: false, error: 'Failed to upload payment proof.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// User: Complete registration / submit payment info
+// ------------------------------------------------------------------
+app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
+  try {
+    const clerkUserId = c.get('clerkUserId') as string;
+    const clerkEmail = (c.get('clerkEmail') || '').trim();
+    const submissionId = c.req.param('id');
+    const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+
+    const submission = await c.env.DB.prepare(
+      `SELECT id, user_id FROM submissions WHERE id = ? AND deleted_at IS NULL`
+    ).bind(submissionId).first() as any;
+    if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
+    if (submission.user_id !== userId) return c.json({ success: false, error: 'Unauthorized.' }, 403);
+
+    const eligibility = await registrationEligible(c.env, submissionId as string);
+    if (!eligibility.ok) return c.json({ success: false, error: eligibility.error }, 403);
+
+    const body = await c.req.json().catch(() => ({}));
+    const { registration_type, utr_transaction_id } = body;
+
+    await c.env.DB.prepare(
+      `UPDATE submissions SET registration_type = ?, utr_transaction_id = ?, updated_at = ? WHERE id = ?`
+    ).bind(registration_type || null, utr_transaction_id || null, new Date().toISOString(), submissionId).run();
+
+    return c.json({ success: true });
+  } catch (err: any) {
+    console.error('Register submission error:', err);
+    return c.json({ success: false, error: 'Failed to save registration details.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Stream payment proof image/pdf
+// ------------------------------------------------------------------
+app.get('/api/admin/submissions/:id/payment-proof', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
+
+    const submissionId = c.req.param('id');
+    const sub = await c.env.DB.prepare(
+      `SELECT payment_proof_url FROM submissions WHERE id = ?`
+    ).bind(submissionId).first() as any;
+
+    if (!sub || !sub.payment_proof_url) {
+      return c.json({ success: false, error: 'No payment proof uploaded for this submission.' }, 404);
+    }
+
+    const object = await c.env.BUCKET.get(sub.payment_proof_url);
+    if (!object) {
+      return c.json({ success: false, error: 'Payment proof file not found in storage.' }, 404);
+    }
+
+    const contentType = object.httpMetadata?.contentType || 'application/octet-stream';
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': contentType,
+        'Content-Disposition': 'inline',
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  } catch (err: any) {
+    console.error('Payment proof stream error:', err);
+    return c.json({ success: false, error: 'Failed to retrieve payment proof.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Approve / Update payment status
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/:id/payment-status', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
+
+    const submissionId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const status = body.status === 'APPROVED' ? 'APPROVED' : body.status === 'REJECTED' ? 'REJECTED' : 'PENDING';
+    const approvedAt = status === 'APPROVED' ? new Date().toISOString() : null;
+
+    await c.env.DB.prepare(
+      `UPDATE submissions SET payment_status = ?, payment_approved_at = ?, updated_at = ? WHERE id = ?`
+    ).bind(status, approvedAt, new Date().toISOString(), submissionId).run();
+
+    return c.json({ success: true, payment_status: status, payment_approved_at: approvedAt });
+  } catch (err: any) {
+    console.error('Update payment status error:', err);
+    return c.json({ success: false, error: 'Failed to update payment status.' }, 500);
+  }
+});
 
 async function scheduled(_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
   await purgeExpiredDeleted(env);

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, PenSquare, Plus, UserRoundCheck } from 'lucide-react';
+import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck } from 'lucide-react';
 import DownloadPanel from './components/DownloadPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -38,6 +38,11 @@ interface Submission {
   review_resubmitted?: number;
   mail_status?: string;
   authors?: Author[];
+  registration_type?: string | null;
+  payment_proof_url?: string | null;
+  utr_transaction_id?: string | null;
+  payment_status?: string | null;
+  payment_approved_at?: string | null;
 }
 
 interface MailTemplate {
@@ -53,21 +58,8 @@ interface FileView {
   open: boolean;
   url?: string;
   filename?: string;
-  kind?: 'paper' | 'plagiarism' | 'ai_plagiarism';
+  kind?: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment';
   error?: string;
-}
-
-interface PortalUser {
-  id: string;
-  name: string;
-  email: string;
-  role: string;
-  created_at: string;
-  institution: string;
-  department: string;
-  country: string;
-  phone: string;
-  submission_count: number;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -468,7 +460,9 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
         ? 'plagiarism-report.pdf'
         : file.kind === 'ai_plagiarism'
           ? 'ai-plagiarism-report.pdf'
-          : 'manuscript.pdf');
+          : file.kind === 'payment'
+            ? 'payment-proof.pdf'
+            : 'manuscript.pdf');
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -488,7 +482,9 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
                   ? 'Plagiarism Report'
                   : file.kind === 'ai_plagiarism'
                     ? 'AI Plagiarism Report'
-                    : 'Manuscript')}
+                    : file.kind === 'payment'
+                      ? 'Payment Proof'
+                      : 'Manuscript')}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -850,13 +846,177 @@ function EditAuthorsModal({
   );
 }
 
+
+function PaymentModal({
+  sub,
+  token,
+  onClose,
+  onOpenPdf,
+  onPaymentStatusChanged,
+}: {
+  sub: Submission | null;
+  token: string;
+  onClose: () => void;
+  onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => void;
+  onPaymentStatusChanged: (subId: string, newStatus: string, approvedAt: string | null) => void;
+}) {
+  if (!sub) return null;
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const hasPayment = !!(sub.payment_proof_url || sub.utr_transaction_id || sub.registration_type);
+  const isApproved = sub.payment_status === 'APPROVED';
+
+  const handleToggleApproval = async (newStatus: 'APPROVED' | 'PENDING') => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/payment-status`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to update payment status.');
+      }
+      onPaymentStatusChanged(sub.id, newStatus, data.payment_approved_at || null);
+    } catch (err: any) {
+      setError(err.message || 'Error updating payment status.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[105] flex items-center justify-center p-2 sm:p-4">
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={saving ? undefined : onClose} />
+      <div className="relative w-full max-w-xl flex flex-col rounded-2xl bg-white shadow-2xl border-2 border-brand-accent overflow-hidden">
+        <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-4 bg-brand-text text-white">
+          <h2 className="font-serif font-bold text-lg sm:text-xl min-w-0 truncate">Registration & Payment Details</h2>
+          <span className="text-xs font-medium text-white/70 shrink-0">{sub.paper_id || sub.submission_code}</span>
+          <button onClick={onClose} disabled={saving} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors shrink-0" aria-label="Close">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-4 sm:p-6 space-y-4">
+          {error && (
+            <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+              <AlertCircle className="w-4 h-4 shrink-0" /> {error}
+            </div>
+          )}
+
+          <div>
+            <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Paper Title</div>
+            <div className="font-serif font-bold text-base mt-0.5">{sub.title}</div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 bg-brand-bg/40 border border-brand-accent/30 rounded-xl p-4">
+            <div>
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Author</div>
+              <div className="font-semibold text-sm mt-0.5">{sub.author_name || '—'}</div>
+              <div className="text-xs text-brand-text/60">{sub.author_email}</div>
+            </div>
+            <div>
+              <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Payment Verification</div>
+              <div className="mt-1">
+                {isApproved ? (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-green-700" /> Approved
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                    Pending Verification
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {!hasPayment ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-center text-amber-800 text-sm font-medium">
+              No registration or payment details submitted by the author yet.
+            </div>
+          ) : (
+            <div className="space-y-4 border border-brand-accent/40 rounded-xl p-4 bg-white">
+              <div>
+                <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Registration Type</div>
+                <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.registration_type || '—'}</div>
+              </div>
+
+              <div>
+                <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">UTR / Transaction ID</div>
+                <div className="font-mono font-semibold text-sm text-brand-accent mt-0.5 select-all">
+                  {sub.utr_transaction_id || '—'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium mb-1.5">Payment Proof File</div>
+                {sub.payment_proof_url ? (
+                  <button
+                    onClick={() => onOpenPdf(sub.id, 'payment', `Payment Proof — ${sub.paper_id || sub.submission_code}`)}
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-colors shadow-sm"
+                  >
+                    <Eye className="w-4 h-4" /> View / Verify Payment Proof
+                  </button>
+                ) : (
+                  <div className="text-xs text-brand-text/60 italic">No payment proof image uploaded</div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">
+          <div>
+            {hasPayment && (
+              isApproved ? (
+                <button
+                  type="button"
+                  onClick={() => handleToggleApproval('PENDING')}
+                  disabled={saving}
+                  className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                  Revoke Payment Approval
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleToggleApproval('APPROVED')}
+                  disabled={saving}
+                  className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-green-600 hover:bg-green-700 rounded-lg shadow transition-all disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Approve Payment & Paper
+                </button>
+              )
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            className="px-4 py-2 rounded-lg text-sm font-medium text-brand-text hover:bg-brand-text/5 transition-colors ml-auto"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MoreInfoModal({
   sub,
   onClose,
+  onViewPayment,
   onEditAuthors,
 }: {
   sub: Submission | null;
   onClose: () => void;
+  onViewPayment?: (sub: Submission) => void;
   onEditAuthors?: (sub: Submission) => void;
 }) {
   if (!sub) return null;
@@ -979,12 +1139,20 @@ function MoreInfoModal({
         </div>
 
         <div className="flex flex-wrap items-center gap-3 px-4 sm:px-6 py-4 border-t-2 border-brand-accent/40 bg-brand-bg/40">
+          {onViewPayment && (
+            <button
+              onClick={() => onViewPayment(sub)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-brand-text hover:bg-brand-accent transition-colors"
+            >
+              <CreditCard className="w-4 h-4" /> View Payment
+            </button>
+          )}
           {onEditAuthors && (
             <button
               onClick={() => onEditAuthors(sub)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-white bg-brand-text hover:bg-brand-accent transition-colors"
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium text-brand-text border border-brand-text/15 hover:bg-brand-text/5 transition-colors"
             >
-              <PenSquare className="w-4 h-4" /> Edit Authors
+              <UserRoundCheck className="w-4 h-4" /> Edit Authors
             </button>
           )}
           <button
@@ -1115,7 +1283,7 @@ function SubmissionListing({
   onStatusError,
   onOpenPdf,
   onViewInfo,
-  onEditAuthors,
+  onViewPayment,
   onDelete,
   enquiredSaving,
   onToggleEnquired,
@@ -1140,9 +1308,9 @@ function SubmissionListing({
   refresh: () => void;
   onUnauthorized: () => void;
   onStatusError: (msg: string) => void;
-  onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
+  onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
-  onEditAuthors: (sub: Submission) => void;
+  onViewPayment: (sub: Submission) => void;
   onDelete: (sub: Submission) => void;
   enquiredSaving: string | null;
   onToggleEnquired: (sub: Submission) => void;
@@ -1265,12 +1433,14 @@ function SubmissionListing({
                       >
                         <Eye className="w-4 h-4" /> View Info
                       </button>
-                      <button
-                        onClick={() => onEditAuthors(sub)}
-                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                      >
-                        <PenSquare className="w-4 h-4" /> Edit Authors
-                      </button>
+                      {!!(sub.payment_proof_url || sub.utr_transaction_id || sub.registration_type) && (
+                        <button
+                          onClick={() => onViewPayment(sub)}
+                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                        >
+                          <CreditCard className="w-4 h-4" /> View Payment
+                        </button>
+                      )}
                       <button
                         onClick={() => onDelete(sub)}
                         className="inline-flex items-center gap-1.5 text-red-600 font-medium text-xs whitespace-nowrap hover:text-red-700 hover:underline"
@@ -1426,7 +1596,7 @@ function ReviewSection({
   emptyMsg,
   onOpenPdf,
   onViewInfo,
-  onEditAuthors,
+  onViewPayment,
   onDelete,
   mailTemplates,
   selectedTemplateId,
@@ -1444,9 +1614,9 @@ function ReviewSection({
   loading: boolean;
   error: string | null;
   emptyMsg: string;
-  onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => void;
+  onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
-  onEditAuthors: (sub: Submission) => void;
+  onViewPayment: (sub: Submission) => void;
   onDelete: (sub: Submission) => void;
   mailTemplates: MailTemplate[];
   selectedTemplateId: string;
@@ -1526,8 +1696,8 @@ function ReviewSection({
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Submitted On</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Review Decision</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%]">Mail Status</th>
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%] rounded-tr-xl">Actions</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[7%] whitespace-nowrap">Mail Status</th>
+              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%] rounded-tr-xl">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-brand-accent/40">
@@ -1578,7 +1748,7 @@ function ReviewSection({
                       </p>
                     )}
                   </td>
-                  <td className="py-4 px-5 align-top">{mailStatusBadge(sub.mail_status)}</td>
+                  <td className="py-4 px-3 align-top">{mailStatusBadge(sub.mail_status)}</td>
                   <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-br-xl' : ''}`}>
                     <div className="flex flex-col items-start gap-2">
                       <button
@@ -1612,12 +1782,14 @@ function ReviewSection({
                       >
                         <Eye className="w-4 h-4" /> View Info
                       </button>
-                      <button
-                        onClick={() => onEditAuthors(sub)}
-                        className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
-                      >
-                        <PenSquare className="w-4 h-4" /> Edit Authors
-                      </button>
+                      {!!(sub.payment_proof_url || sub.utr_transaction_id || sub.registration_type) && (
+                        <button
+                          onClick={() => onViewPayment(sub)}
+                          className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                        >
+                          <CreditCard className="w-4 h-4" /> View Payment
+                        </button>
+                      )}
                       <button
                         onClick={() => onDelete(sub)}
                         className="inline-flex items-center gap-1.5 text-red-600 font-medium text-xs whitespace-nowrap hover:text-red-700 hover:underline"
@@ -1756,10 +1928,9 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
-  const [users, setUsers] = useState<PortalUser[]>([]);
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
   const [loading, setLoading] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
@@ -1767,6 +1938,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
   const [moreInfoTarget, setMoreInfoTarget] = useState<Submission | null>(null);
+  const [paymentTarget, setPaymentTarget] = useState<Submission | null>(null);
   const [editAuthorsTarget, setEditAuthorsTarget] = useState<Submission | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Submission | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -1776,6 +1948,7 @@ export default function App() {
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
   const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
+  const [registrationOpen, setRegistrationOpen] = useState<boolean>(false);
   const [mtUserUntil, setMtUserUntil] = useState<string>('');
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
   const [mtReviewUntil, setMtReviewUntil] = useState<string>('');
@@ -1807,42 +1980,27 @@ export default function App() {
     setAdminEmail('');
     setSubmissions([]);
     setDeletedSubmissions([]);
-    setUsers([]);
     setPdfView({ open: false });
     sessionStorage.removeItem('icaidiet_admin_token');
     sessionStorage.removeItem('icaidiet_admin_user');
+  };
+
+  
+  const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt: string | null) => {
+    setSubmissions((prev) =>
+      prev.map((s) => (s.id === subId ? { ...s, payment_status: newStatus, payment_approved_at: approvedAt } : s))
+    );
+    setPaymentTarget((prev) => (prev && prev.id === subId ? { ...prev, payment_status: newStatus, payment_approved_at: approvedAt } : prev));
   };
 
   const handleAuthorsSaved = (authors: Author[]) => {
     const subId = editAuthorsTarget?.id;
     setEditAuthorsTarget(null);
     if (subId) {
+      setSubmissions((prev) => prev.map((s) => (s.id === subId ? { ...s, authors } : s)));
       setMoreInfoTarget((prev) => (prev && prev.id === subId ? { ...prev, authors } : prev));
     }
     fetchSubmissions({ silent: true });
-  };
-
-  const fetchUsers = async (opts?: { silent?: boolean }) => {
-    try {
-      const res = await fetch(`${API_URL}/api/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) {
-        handleLogout();
-        return;
-      }
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        throw new Error(data?.error || 'Failed to load users.');
-      }
-      setUsers(data.users || []);
-    } catch (err) {
-      if (opts?.silent) {
-        console.error(err);
-      } else {
-        setError(err instanceof Error ? err.message : 'Failed to load users.');
-      }
-    }
   };
 
   const fetchSettings = async () => {
@@ -1852,6 +2010,7 @@ export default function App() {
       if (res.ok && data?.success) {
         const s = data.settings || {};
         setMtUserEnabled(s.maintenance_user_enabled === 'true' || s.maintenance_mode === 'true');
+          setRegistrationOpen(s.registration_open === 'true');
         setMtUserUntil(s.maintenance_user_until || '');
         setMtReviewEnabled(s.maintenance_review_enabled === 'true');
         setMtReviewUntil(s.maintenance_review_until || '');
@@ -1872,6 +2031,7 @@ export default function App() {
         },
         body: JSON.stringify({
           maintenance_user_enabled: mtUserEnabled,
+            registration_open: registrationOpen,
           maintenance_user_until: mtUserUntil,
           maintenance_review_enabled: mtReviewEnabled,
           maintenance_review_until: mtReviewUntil,
@@ -2199,7 +2359,6 @@ export default function App() {
     if (token) {
       fetchSubmissions();
       fetchDeletedSubmissions();
-      fetchUsers();
       fetchSettings();
       fetchMailTemplates({ silent: true });
     }
@@ -2209,20 +2368,22 @@ export default function App() {
   React.useEffect(() => {
     if (!token) return;
     const id = setInterval(() => {
-      if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates'].includes(activeTab)) fetchSubmissions({ silent: true });
+      if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates', 'payments'].includes(activeTab)) fetchSubmissions({ silent: true });
       else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
-      else if (activeTab === 'users') fetchUsers({ silent: true });
     }, 180000);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeTab]);
 
-  const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => {
+  const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => {
     const type =
       kind === 'plagiarism' ? 'PLAGIARISM' : kind === 'ai_plagiarism' ? 'AI_PLAGIARISM' : 'MANUSCRIPT';
     setPdfView({
       open: true,
-      url: `${API_URL}/api/admin/submissions/${id}/file?type=${type}`,
+      url:
+        kind === 'payment'
+          ? `${API_URL}/api/admin/submissions/${id}/payment-proof`
+          : `${API_URL}/api/admin/submissions/${id}/file?type=${type}`,
       filename,
       kind,
     });
@@ -2309,22 +2470,10 @@ export default function App() {
   );
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(q || trackFilter || paperIdFilter);
-  const hasReview = (s: Submission) => !!s.review_decision;
-  // Section membership is driven by the review decision / status strings so a
-  // paper is never ambiguous: any decision declaring "Accepted" (pure, or with
-  // minor/major changes) plus any accepted workflow status lands in Reviewed;
-  // anything explicitly not accepted or pending revision lands in Needs
-  // Revisions; everything else is still pending.
-  const ACCEPTED_DECISIONS = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES'];
-  const ACCEPTED_STATUSES = ['ACCEPTED', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
-  const REVISION_STATUSES = ['REVISION_REQUIRED', 'REJECTED'];
-  const isAccepted = (s: Submission) =>
-    ACCEPTED_DECISIONS.includes(s.review_decision) || ACCEPTED_STATUSES.includes(s.status);
-  const isPendingRevision = (s: Submission) => (hasReview(s) && !isAccepted(s)) || REVISION_STATUSES.includes(s.status);
-  const updatedFirst = (a: Submission, b: Submission) => Number(b.review_resubmitted === 1) - Number(a.review_resubmitted === 1);
       const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED');
     const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES');
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES');
+    const paymentsSubmissionsList = submissions.filter(s => s.payment_status || s.payment_proof_url || s.utr_transaction_id || s.registration_type);
     const acceptedSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY');
 
     const applyFilters = (list: Submission[]) =>
@@ -2340,6 +2489,7 @@ export default function App() {
     const filteredSubmissions = masterApply(mainSubmissionsList);
     const filteredMinor = masterApply(minorSubmissionsList);
     const filteredMajor = masterApply(majorSubmissionsList);
+    const filteredPayments = masterApply(paymentsSubmissionsList);
     const filteredAccepted = masterApply(acceptedSubmissionsList);
     const filteredDeleted = masterApply(deletedSubmissions);
     // Find titles that appear more than once (case insensitive)
@@ -2455,6 +2605,17 @@ export default function App() {
                   )}
                 </button>
                 <button
+                  onClick={() => changeTab('payments')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'payments' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Payments
+                  {paymentsSubmissionsList.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'payments' ? 'bg-green-500 text-white' : 'bg-green-600 text-white'}`}>
+                      {paymentsSubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
                   onClick={() => changeTab('deleted')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'deleted' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
                 >
@@ -2476,6 +2637,12 @@ export default function App() {
                     </span>
                   )}
                 </button>
+<button
+                  onClick={() => changeTab('downloads')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'downloads' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Downloads
+                </button>
                 <button
                   onClick={() => changeTab('settings')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'settings' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
@@ -2488,7 +2655,6 @@ export default function App() {
               onClick={() => {
                 fetchSubmissions();
               fetchDeletedSubmissions();
-              fetchUsers();
               fetchSettings();
             }}
             disabled={loading || deletedLoading}
@@ -2546,7 +2712,7 @@ export default function App() {
               onStatusError={setError}
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
-              onEditAuthors={setEditAuthorsTarget}
+              onViewPayment={setPaymentTarget}
               onDelete={setDeleteTarget}
               enquiredSaving={enquiredSaving}
               onToggleEnquired={handleEnquiredToggle}
@@ -2554,20 +2720,58 @@ export default function App() {
           </>
         )}
 
-                {['accepted', 'minorChanges', 'majorChanges', 'duplicates'].includes(activeTab) && (
+                {['accepted', 'minorChanges', 'majorChanges'].includes(activeTab) && (
+          <>
+            {mailSendError && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-4 border border-red-200 text-sm flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" /> {mailSendError}
+              </div>
+            )}
+            {mailSendMessage && (
+              <div className="bg-green-50 text-green-700 p-4 rounded-xl mb-4 border border-green-200 text-sm flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0" /> {mailSendMessage}
+              </div>
+            )}
+            <ReviewSection
+              title={
+                activeTab === 'accepted' ? 'Accepted Submissions' :
+                activeTab === 'minorChanges' ? 'Accepted with Minor Changes' :
+                'Accepted with Major Changes'
+              }
+              subtitle="Select papers to send email notifications using mail templates."
+              rows={
+                activeTab === 'minorChanges' ? filteredMinor :
+                activeTab === 'majorChanges' ? filteredMajor :
+                filteredAccepted
+              }
+              total={submissions.length}
+              loading={loading}
+              error={error ? `Error loading submissions: ${error}` : null}
+              emptyMsg="No papers in this section."
+              onOpenPdf={openPdf}
+              onViewInfo={setMoreInfoTarget}
+              onViewPayment={setPaymentTarget}
+              onDelete={setDeleteTarget}
+              mailTemplates={mailTemplates}
+              selectedTemplateId={selectedTemplateId}
+              onSelectedTemplateChange={setSelectedTemplateId}
+              mailSelected={mailSelected}
+              onToggleMailSelect={toggleMailSelect}
+              onToggleMailSelectAll={toggleMailSelectAll}
+              onSendMail={handleSendMail}
+              mailSending={mailSending}
+            />
+          </>
+        )}
+
+        {activeTab === 'payments' && (
           <SubmissionListing
-            rows={
-              activeTab === 'minorChanges' ? filteredMinor :
-              activeTab === 'majorChanges' ? filteredMajor :
-              activeTab === 'accepted' ? filteredAccepted :
-              activeTab === 'duplicates' ? filteredDuplicates :
-              filteredAccepted
-            }
-            total={submissions.length}
+            rows={filteredPayments}
+            total={paymentsSubmissionsList.length}
             loading={loading}
             error={error ? `Error loading submissions: ${error}` : null}
             filtersActive={filtersActive}
-            emptyMsg="No papers in this section."
+            emptyMsg="No payments submitted yet."
             emptyFilteredMsg="No submissions match your search or filters."
             searchTerm={searchTerm}
             onSearchChange={setSearchTerm}
@@ -2584,7 +2788,38 @@ export default function App() {
             onStatusError={setError}
             onOpenPdf={openPdf}
             onViewInfo={setMoreInfoTarget}
-            onEditAuthors={setEditAuthorsTarget}
+            onViewPayment={setPaymentTarget}
+            onDelete={setDeleteTarget}
+            enquiredSaving={enquiredSaving}
+            onToggleEnquired={handleEnquiredToggle}
+          />
+        )}
+
+        {activeTab === 'duplicates' && (
+          <SubmissionListing
+            rows={filteredDuplicates}
+            total={submissions.length}
+            loading={loading}
+            error={error ? `Error loading submissions: ${error}` : null}
+            filtersActive={filtersActive}
+            emptyMsg="No duplicate papers found."
+            emptyFilteredMsg="No submissions match your search or filters."
+            searchTerm={searchTerm}
+            onSearchChange={setSearchTerm}
+            trackFilter={trackFilter}
+            onTrackFilterChange={setTrackFilter}
+            paperIdFilter={paperIdFilter}
+            onPaperIdFilterChange={setPaperIdFilter}
+            tracks={tracks}
+            paperIds={paperIds}
+            onClear={clearFilters}
+            token={token}
+            refresh={fetchSubmissions}
+            onUnauthorized={handleLogout}
+            onStatusError={setError}
+            onOpenPdf={openPdf}
+            onViewInfo={setMoreInfoTarget}
+            onViewPayment={setPaymentTarget}
             onDelete={setDeleteTarget}
             enquiredSaving={enquiredSaving}
             onToggleEnquired={handleEnquiredToggle}
@@ -2723,7 +2958,32 @@ export default function App() {
               </div>
             </div>
 
-            <div className="border border-brand-text/10 rounded-xl mt-4">
+            
+              <div className="border border-brand-text/10 rounded-xl mt-4">
+                <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                  <div>
+                    <h4 className="font-semibold text-brand-text">Ready for Registration</h4>
+                    <p className="text-sm text-brand-text/60 mt-1">
+                      When on, authors of accepted papers will see the payment form in their portal.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setRegistrationOpen(!registrationOpen)}
+                    disabled={savingSettings}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${registrationOpen ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    role="switch"
+                    aria-checked={registrationOpen}
+                  >
+                    <span className="sr-only">Toggle registration</span>
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${registrationOpen ? 'translate-x-5' : 'translate-x-0'}`}
+                    />
+                  </button>
+                </div>
+              </div>
+
+<div className="border border-brand-text/10 rounded-xl mt-4">
               <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
                 <div>
                   <h4 className="font-semibold text-brand-text">User Portal Maintenance</h4>
@@ -3023,10 +3283,19 @@ export default function App() {
         }}
       />
 
-      <MoreInfoModal
+<MoreInfoModal
         sub={moreInfoTarget}
         onClose={() => setMoreInfoTarget(null)}
+        onViewPayment={setPaymentTarget}
         onEditAuthors={setEditAuthorsTarget}
+      />
+
+      <PaymentModal
+        sub={paymentTarget}
+        token={token}
+        onClose={() => setPaymentTarget(null)}
+        onOpenPdf={openPdf}
+        onPaymentStatusChanged={handlePaymentStatusChanged}
       />
 
       <EditAuthorsModal

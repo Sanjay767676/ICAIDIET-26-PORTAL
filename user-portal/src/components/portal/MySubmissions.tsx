@@ -1,8 +1,143 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { ArrowLeft, CheckCircle2, FileText, Inbox, Loader2, Upload, ShieldCheck, ScanSearch, X, Pencil } from 'lucide-react';
+import { ArrowLeft, CheckCircle2, FileText, Inbox, Loader2, Upload, ShieldCheck, ScanSearch, X, Pencil, XCircle } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+
+function RegistrationForm({ sub, getToken, onSaved }: { sub: MySubmission; getToken: () => Promise<string | null>; onSaved: () => void }) {
+  const [type, setType] = useState('Conference alone');
+  const [utr, setUtr] = useState('');
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+if (sub.payment_status === 'APPROVED') {
+    return (
+      <div className="mt-4 p-4 bg-green-50 border border-green-200 rounded-xl">
+        <div className="flex items-center gap-2 text-green-800 font-semibold">
+          <CheckCircle2 className="w-5 h-5" /> Registration Complete!
+        </div>
+        <p className="text-sm text-green-700 mt-1">Your payment has been verified and your registration is confirmed.</p>
+        <p className="text-sm text-green-700 mt-1">Type: {sub.registration_type} | UTR: {sub.utr_transaction_id}</p>
+      </div>
+    );
+  }
+
+  const awaitingVerification = !!(sub.payment_proof_url && sub.utr_transaction_id) && sub.payment_status !== 'REJECTED';
+  const isRejected = sub.payment_status === 'REJECTED';
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!file) {
+      setError('Please upload a payment proof screenshot.');
+      return;
+    }
+    if (!utr.trim()) {
+      setError('Please enter the UTR / Transaction ID.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+
+    try {
+      const token = await getToken();
+      if (!token) throw new Error('Not authenticated');
+
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const fileRes = await fetch(`${API_URL}/api/user/submissions/${sub.id}/payment-proof`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const fileData = await fileRes.json().catch(() => null);
+      if (!fileRes.ok || !fileData?.success) throw new Error(fileData?.error || 'Failed to upload proof.');
+
+      const regRes = await fetch(`${API_URL}/api/user/submissions/${sub.id}/register`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ registration_type: type, utr_transaction_id: utr }),
+      });
+      const regData = await regRes.json().catch(() => null);
+      if (!regRes.ok || !regData?.success) throw new Error(regData?.error || 'Failed to save registration details.');
+
+      onSaved();
+    } catch (err: any) {
+      setError(err.message || 'An error occurred.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+return (
+    <>
+      {isRejected && (
+        <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-xl">
+          <div className="flex items-center gap-2 text-red-800 font-semibold">
+            <XCircle className="w-5 h-5" /> Payment Proof Rejected
+          </div>
+          <p className="text-sm text-red-700 mt-1">
+            Your payment proof was rejected. Please upload a valid screenshot and resubmit the details below.
+          </p>
+        </div>
+      )}
+      {awaitingVerification && (
+        <div className="mt-4 p-4 bg-amber-50 border border-amber-200 rounded-xl">
+          <div className="flex items-center gap-2 text-amber-800 font-semibold">
+            <ShieldCheck className="w-5 h-5" /> Payment Under Verification
+          </div>
+          <p className="text-sm text-amber-700 mt-1">
+            Your payment details have been received and are awaiting admin verification. You can update them below if
+            needed.
+          </p>
+        </div>
+      )}
+    <form onSubmit={handleSubmit} className="mt-6 border border-brand-accent/30 rounded-xl p-5 bg-brand-bg/10">
+      <h4 className="text-lg font-bold font-serif text-brand-text mb-2">
+        Congratulations {sub.author_name?.split(',')[0]} your paper is accepted.. Please Complete the payment below
+      </h4>
+      <a href="https://www.icaidiet26.tech/registration-fee" target="_blank" rel="noreferrer" className="text-brand-accent hover:underline text-sm font-semibold mb-4 inline-block">
+        Fee details
+      </a>
+
+      <div className="space-y-4">
+        <div>
+          <label className="block text-sm font-medium text-black/80 mb-1">Type</label>
+          <select value={type} onChange={(e) => setType(e.target.value)} className="w-full px-3 py-2 border border-stone-300 rounded-lg outline-none focus:border-brand-accent focus:ring-1 focus:ring-brand-accent text-sm" disabled={loading}>
+            <option value="Conference alone">Conference alone</option>
+            <option value="Conference With Scopus proceedings">Conference With Scopus proceedings</option>
+          </select>
+        </div>
+
+        <div className="bg-stone-50 border border-stone-200 p-3 rounded-lg text-sm text-black/80 leading-relaxed font-mono">
+          <p>Account number : 5904946502</p>
+          <p>IFSC Code: CBIN0281361 [Crosscut Road,CBE]</p>
+          <p>Beneficiary Name: SNSCT CH4 CS</p>
+          <p>Bank Name: CENTRAL BANK OF INDIA</p>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-black/80 mb-1">Upload Payment Proof (Screenshot)</label>
+          <input type="file" accept=".jpg,.jpeg,.png,.webp,.pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-brand-text file:text-white hover:file:bg-brand-accent transition-colors" disabled={loading} />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-black/80 mb-1">UTR/RRN/Transaction ID</label>
+          <input type="text" value={utr} onChange={(e) => setUtr(e.target.value)} placeholder="Enter Transaction ID" className="w-full px-3 py-2 border border-stone-300 rounded-lg outline-none focus:border-brand-accent focus:ring-1 focus:ring-brand-accent text-sm" disabled={loading} />
+        </div>
+
+        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+
+<button type="submit" disabled={loading} className="w-full py-2.5 bg-brand-text text-white rounded-lg font-semibold hover:bg-brand-accent transition-all disabled:opacity-50">
+          {loading ? 'Submitting...' : 'Submit Payment Details'}
+        </button>
+      </div>
+    </form>
+    </>
+  );
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 interface MySubmission {
@@ -13,6 +148,7 @@ interface MySubmission {
   abstract: string;
   track: string;
   status: string;
+  author_name?: string | null;
   created_at: string;
   updated_at: string;
   author_count: number;
@@ -22,6 +158,11 @@ interface MySubmission {
   review_decision?: string | null;
   review_feedback?: string | null;
   review_updated_at?: string | null;
+registration_type?: string | null;
+  utr_transaction_id?: string | null;
+  payment_proof_url?: string | null;
+  payment_status?: string | null;
+  payment_approved_at?: string | null;
 }
 
 interface MySubmissionsProps {
@@ -30,6 +171,7 @@ interface MySubmissionsProps {
   onStart: () => void;
   maintenanceMode?: boolean;
   maintenanceUntil?: string | null;
+  registrationOpen?: boolean;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -330,7 +472,7 @@ function EditFilesModal({
   );
 }
 
-export function MySubmissions({ getToken, onBack, onStart, maintenanceMode = false, maintenanceUntil = null }: MySubmissionsProps) {
+export function MySubmissions({ getToken, onBack, onStart, maintenanceMode = false, maintenanceUntil = null, registrationOpen = false }: MySubmissionsProps) {
   const [subs, setSubs] = useState<MySubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<MySubmission | null>(null);
@@ -471,6 +613,10 @@ export function MySubmissions({ getToken, onBack, onStart, maintenanceMode = fal
               )}
 
               {reviewBanner(sub)}
+
+              {registrationOpen && (sub.status === 'ACCEPTED' || sub.status === 'READY_FOR_REGISTRATION' || sub.review_decision === 'ACCEPTED') && (
+                 <RegistrationForm sub={sub} getToken={getToken} onSaved={loadSubmissions} />
+              )}
 
       {maintenanceMode && (
         <div className="mt-4 rounded-xl border border-yellow-300 bg-yellow-50 p-3 text-sm text-yellow-800">

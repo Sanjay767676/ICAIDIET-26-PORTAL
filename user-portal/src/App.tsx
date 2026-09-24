@@ -55,6 +55,7 @@ export default function App() {
   const [currentView, setCurrentView] = useState<ViewState>('home');
   const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
   const [maintenanceUntil, setMaintenanceUntil] = useState<string | null>(null);
+  const [registrationOpen, setRegistrationOpen] = useState<boolean>(false);
   const { getToken } = useAuth();
   const { user: clerkUser } = useUser();
 
@@ -73,6 +74,7 @@ export default function App() {
             (s.maintenance_user_enabled === undefined && s.maintenance_mode === 'true')
           );
           setMaintenanceUntil(s.maintenance_user_until || null);
+          setRegistrationOpen(s.registration_open === 'true');
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -125,7 +127,7 @@ export default function App() {
               onBack={() => navigate('home')}
               onStart={() => navigate('wizard')}
               maintenanceMode={maintenanceMode}
-              maintenanceUntil={maintenanceUntil}
+              maintenanceUntil={maintenanceUntil} registrationOpen={registrationOpen}
             />
           </Show>
         )}
