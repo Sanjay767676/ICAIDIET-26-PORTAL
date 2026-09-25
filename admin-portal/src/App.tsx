@@ -2599,7 +2599,14 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     const filteredMinor = masterApply(minorSubmissionsList, submissions);
     const filteredMajor = masterApply(majorSubmissionsList, submissions);
     const filteredPayments = masterApply(paymentsSubmissionsList, submissions);
-    const filteredAccepted = masterApply(acceptedSubmissionsList, submissions);
+    const hasViewablePayment = (s: Submission) => !!(s.payment_proof_url || s.utr_transaction_id || s.registration_type);
+    const filteredAccepted = [...masterApply(acceptedSubmissionsList, submissions)].sort((a, b) => {
+      const aPay = hasViewablePayment(a);
+      const bPay = hasViewablePayment(b);
+      if (aPay !== bPay) return aPay ? -1 : 1;
+      if (aPay && bPay) return (b.payment_submitted_at || '').localeCompare(a.payment_submitted_at || '');
+      return (b.created_at || '').localeCompare(a.created_at || '');
+    });
     const filteredDeleted = masterApply(deletedSubmissions);
     // Find titles that appear more than once (case insensitive)
     const titleCounts: Record<string, number> = {};
