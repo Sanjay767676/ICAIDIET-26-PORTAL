@@ -185,7 +185,7 @@ const REGISTRATION_FEES: Record<string, Record<string, { earlyBird: string; late
     'Conference alone': { earlyBird: '$350', lateFee: '$400' },
     'Conference with Scopus proceedings': { earlyBird: '$400', lateFee: '$500' },
   },
-  'Industry Delegates': {
+  'Industry Delegate/Research Scholar': {
     'Conference alone': { earlyBird: '₹2,500', lateFee: '₹3,000' },
     'Conference with Scopus proceedings': { earlyBird: '₹12,000', lateFee: '₹13,000' },
   },
@@ -466,7 +466,7 @@ function RegistrationForm({
               <option value="">-- Select Author Type --</option>
               <option value="Indian Author">Indian Author</option>
               <option value="Foreign Author">Foreign Author</option>
-              <option value="Industry Delegates">Industry Delegates</option>
+              <option value="Industry Delegate/Research Scholar">Industry Delegate/Research Scholar</option>
             </select>
           </div>
         )}
