@@ -245,13 +245,49 @@ function getBearer(c: any): string | null {
 // ~1 email/second, matching the free-tier Resend rate limit.
 // ------------------------------------------------------------------
 
+// Placeholders available to mail templates. The admin UI renders this same
+// list as clickable chips, so keep the two in step.
+const MAIL_PLACEHOLDERS = [
+  'name',
+  'paper_title',
+  'paper_id',
+  'submission_code',
+  'track',
+  'review_decision',
+  'review_feedback',
+] as const;
+
+function mailPlaceholderValue(key: string, sub: any): string {
+  switch (key) {
+    case 'name':
+      return sub.recipient_name || sub.author_name || 'Author';
+    case 'paper_title':
+      return sub.title || '';
+    case 'paper_id':
+      return sub.paper_id || sub.submission_code || '';
+    case 'submission_code':
+      return sub.submission_code || '';
+    case 'track':
+      return sub.track || '';
+    case 'review_decision':
+      return sub.review_decision || '';
+    case 'review_feedback':
+      return sub.review_feedback || '';
+    default:
+      return '';
+  }
+}
+
 // Replace {placeholder} tokens in a template with per-submission values.
-// Supported: {name}, {paper_title}, {paper_id}
+// Uses split/join rather than String.replace so that reviewer feedback
+// containing "$&" or "$1" is inserted literally instead of being treated
+// as a replacement pattern.
 function renderMailBody(text: string, sub: any): string {
-  return (text || '')
-    .replace(/\{name\}/g, sub.recipient_name || sub.author_name || 'Author')
-    .replace(/\{paper_title\}/g, sub.title || '')
-    .replace(/\{paper_id\}/g, sub.paper_id || sub.submission_code || '');
+  let out = text || '';
+  for (const key of MAIL_PLACEHOLDERS) {
+    out = out.split(`{${key}}`).join(mailPlaceholderValue(key, sub));
+  }
+  return out;
 }
 
 // Convert a template body written with simple HTML (e.g. <b>, <br>, <p>)
@@ -420,7 +456,12 @@ app.post('/api/admin/mail/enqueue', async (c) => {
       chunks.map(async (chunk) => {
         const placeholders = chunk.map(() => '?').join(',');
         const res = await c.env.DB.prepare(
-          `SELECT id, submission_code, paper_id, title, author_name, author_email FROM submissions
+          `SELECT id, submission_code, paper_id, title, track, author_name, author_email,
+                  (SELECT decision FROM reviews r WHERE r.submission_id = submissions.id
+                   ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
+                  (SELECT feedback FROM reviews r WHERE r.submission_id = submissions.id
+                   ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback
+           FROM submissions
            WHERE deleted_at IS NULL AND id IN (${placeholders})`
         ).bind(...chunk).all();
         return (res.results as any[]) || [];
@@ -447,14 +488,20 @@ app.post('/api/admin/mail/enqueue', async (c) => {
       const subject = renderMailBody(template.subject, {
         recipient_name: recipientName,
         title: s.title,
+        track: s.track,
         paper_id: s.paper_id,
         submission_code: s.submission_code,
+        review_decision: s.review_decision,
+        review_feedback: s.review_feedback,
       });
       const text = renderMailBody(template.body, {
         recipient_name: recipientName,
         title: s.title,
+        track: s.track,
         paper_id: s.paper_id,
         submission_code: s.submission_code,
+        review_decision: s.review_decision,
+        review_feedback: s.review_feedback,
       });
 
       logStatements.push(
@@ -1587,7 +1634,8 @@ app.get('/api/admin/submissions', async (c) => {
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
               (SELECT resubmitted FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_resubmitted,
-              (SELECT status FROM mail_logs l WHERE l.submission_id = s.id ORDER BY l.created_at DESC LIMIT 1) AS mail_status
+              (SELECT status FROM mail_logs l WHERE l.submission_id = s.id ORDER BY l.created_at DESC LIMIT 1) AS mail_status,
+              (SELECT updated_at FROM mail_logs l WHERE l.submission_id = s.id ORDER BY l.created_at DESC LIMIT 1) AS mail_sent_at
        FROM submissions s
        WHERE s.deleted_at IS NULL
        ORDER BY s.created_at DESC`

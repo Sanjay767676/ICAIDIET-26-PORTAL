@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   ArrowLeft,
   CheckCircle2,
@@ -191,12 +191,18 @@ const REGISTRATION_FEES: Record<string, Record<string, { earlyBird: string; late
   },
 };
 
-function RegistrationForm({
+// The registration / payment form for one specific paper. Rendered by
+// RegistrationForm below, which is responsible for choosing WHICH paper it
+// applies to. resetKey changes whenever the author picks a different paper in
+// the picker, and resets every field so values never carry across papers.
+function RegistrationFormBody({
   sub,
+  resetKey,
   getToken,
   onSaved,
 }: {
   sub: MySubmission;
+  resetKey: string;
   getToken: () => Promise<string | null>;
   onSaved: () => void;
 }) {
@@ -207,6 +213,16 @@ function RegistrationForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingSubmitted, setEditingSubmitted] = useState(false);
+
+  useEffect(() => {
+    setType(sub.registration_type || '');
+    setAuthorType(sub.author_type || '');
+    setUtr(sub.utr_transaction_id || '');
+    setFile(null);
+    setError(null);
+    setEditingSubmitted(false);
+    setLoading(false);
+  }, [resetKey]);
 
   // 1. APPROVED STATUS
   if (sub.payment_status === 'APPROVED') {
@@ -597,6 +613,113 @@ function RegistrationForm({
   );
 }
 
+// Mirrors registrationEligible() in backend/src/index.ts: a paper is payable
+// once the admin has moved it to an accepted status. Single source of truth so
+// the picker can never offer a paper whose payment form is hidden.
+function isPayablePaper(sub: MySubmission) {
+  return (
+    sub.status === 'ACCEPTED' ||
+    sub.status === 'READY_FOR_REGISTRATION' ||
+    sub.status === 'READY_FOR_CAMERA_READY'
+  );
+}
+
+// A paper leaves the picker once its money is either approved or sitting with
+// the admin awaiting verification - paying twice for the same paper is exactly
+// the confusion this picker exists to prevent. Declined payments stay
+// selectable so the author can correct and resubmit.
+function isStillPayable(sub: MySubmission) {
+  return isPayablePaper(sub) && sub.payment_status !== 'APPROVED' && sub.payment_status !== 'PENDING';
+}
+
+// Payment form wrapper. Authors with more than one accepted paper pick which
+// one this payment settles, so the amount received always maps to one paper.
+// The inner form is keyed on the chosen id so switching papers resets the
+// registration type, UTR and uploaded file instead of carrying them across.
+function RegistrationForm({
+  sub,
+  payable,
+  totalPapers,
+  getToken,
+  onSaved,
+}: {
+  sub: MySubmission;
+  payable: MySubmission[];
+  totalPapers: number;
+  getToken: () => Promise<string | null>;
+  onSaved: () => void;
+}) {
+  const [selectedId, setSelectedId] = useState(sub.id);
+  const active = payable.find((p) => p.id === selectedId) || sub;
+
+  // The chooser only makes sense while the paper being shown is itself still
+  // payable. Once it is PENDING or APPROVED the body below renders a status
+  // panel for that specific paper, and putting a selector or a label naming a
+  // different paper above it would contradict what is on screen. Deriving this
+  // from the payable list also keeps the <select> value guaranteed-valid.
+  const activeIsPayable = payable.some((p) => p.id === active.id);
+
+  // Single accepted paper: state it plainly rather than showing a one-option
+  // dropdown. Only reachable when the author submitted more than one paper,
+  // which is the case where "which paper is this for?" is genuinely ambiguous.
+  const showStaticLabel = activeIsPayable && payable.length === 1 && totalPapers > 1;
+  const showPicker = activeIsPayable && payable.length > 1;
+
+  return (
+    <div className="space-y-4">
+      {showPicker && (
+        <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl">
+          <label
+            htmlFor="payment-paper-select"
+            className="block text-sm font-bold text-amber-900 mb-1"
+          >
+            Which paper is this payment for?
+          </label>
+          <p className="text-xs text-amber-800 mb-2.5 leading-relaxed">
+            You have {payable.length} accepted papers awaiting payment. Choose one - the
+            registration fee and payment proof you enter below apply only to the paper you
+            select, and it drops off this list once the payment is submitted.
+          </p>
+          <select
+            id="payment-paper-select"
+            value={active.id}
+            onChange={(e) => setSelectedId(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-lg border-2 border-amber-300 bg-white text-sm text-black shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+          >
+            {payable.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.title}
+              </option>
+            ))}
+          </select>
+          <p className="text-[11px] text-amber-700/80 mt-2 font-mono">
+            {active.submission_code}
+            {active.paper_id ? ` / Paper ${active.paper_id}` : ''}
+          </p>
+        </div>
+      )}
+
+      {showStaticLabel && (
+        <div className="p-4 bg-amber-50 border-2 border-amber-300 rounded-2xl">
+          <p className="text-sm font-bold text-amber-900 mb-1">Paper being paid for</p>
+          <p className="text-sm text-amber-900 leading-snug">{payable[0].title}</p>
+          <p className="text-[11px] text-amber-700/80 mt-1.5 font-mono">
+            {payable[0].submission_code}
+            {payable[0].paper_id ? ` / Paper ${payable[0].paper_id}` : ''}
+          </p>
+        </div>
+      )}
+
+      <RegistrationFormBody
+        sub={active}
+        resetKey={active.id}
+        getToken={getToken}
+        onSaved={onSaved}
+      />
+    </div>
+  );
+}
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
 // ------------------------------------------------------------------
@@ -823,6 +946,14 @@ export function MySubmissions({
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [expandedPaymentIds, setExpandedPaymentIds] = useState<Record<string, boolean>>({});
 
+  // Accepted papers this author can still pay for. Papers already approved or
+  // awaiting verification drop off, so the picker only ever offers a paper
+  // that genuinely needs money against it.
+  const payableSubs = useMemo(
+    () => (subs || []).filter(isStillPayable),
+    [subs]
+  );
+
   const loadSubmissions = useCallback(async () => {
     try {
       const token = await getToken();
@@ -913,8 +1044,7 @@ export function MySubmissions({
       ) : (
         <div className="space-y-8">
           {subs.map((sub) => {
-            const isSubAccepted =
-              sub.status === 'ACCEPTED' || sub.status === 'READY_FOR_REGISTRATION';
+            const isSubAccepted = isPayablePaper(sub);
             const isPaymentOpen =
               expandedPaymentIds[sub.id] ||
               !!sub.payment_proof_url ||
@@ -1039,7 +1169,13 @@ export function MySubmissions({
                     {isPaymentOpen && (
                       <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border-2 border-yellow-400 text-black animate-fadeIn">
                         {registrationOpen || sub.payment_status === 'APPROVED' ? (
-                          <RegistrationForm sub={sub} getToken={getToken} onSaved={loadSubmissions} />
+                          <RegistrationForm
+                            sub={sub}
+                            payable={payableSubs}
+                            totalPapers={subs.length}
+                            getToken={getToken}
+                            onSaved={loadSubmissions}
+                          />
                         ) : (
                           <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
                             Registration &amp; payment for accepted papers will open soon. Please check back here.

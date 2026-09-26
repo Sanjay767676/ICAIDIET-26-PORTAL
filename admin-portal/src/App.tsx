@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck } from 'lucide-react';
 import DownloadPanel from './components/DownloadPanel';
+import MailField from './components/MailField';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -37,6 +38,7 @@ interface Submission {
   review_updated_at?: string | null;
   review_resubmitted?: number;
   mail_status?: string;
+  mail_sent_at?: string | null;
   authors?: Author[];
   registration_type?: string | null;
   author_type?: string | null;
@@ -129,25 +131,44 @@ function UpdatedBadge({ label = 'Updated by author' }: { label?: string }) {
 //   queued / sending -> Sending (yellow)
 //   delivered        -> Delivered (green)
 //   failed           -> Not sent (red)
-function mailStatusBadge(status?: string) {
+// The timestamp underneath records when that row last changed state, so an
+// organiser can tell a recent send from one that went out weeks ago.
+function mailStatusBadge(status?: string, sentAt?: string | null) {
   if (!status) return <span className="text-xs text-brand-text/40">—</span>;
+
+  const stamp = (label: string) =>
+    sentAt ? (
+      <span className="block text-[10px] font-normal text-brand-text/50 mt-0.5 whitespace-nowrap">
+        {label} {formatDateTime(sentAt)}
+      </span>
+    ) : null;
+
   if (status === 'delivered') {
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 whitespace-nowrap">
-        <CheckCircle2 className="w-3.5 h-3.5" /> Delivered
+      <span className="inline-flex flex-col items-start">
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700 whitespace-nowrap">
+          <CheckCircle2 className="w-3.5 h-3.5" /> Delivered
+        </span>
+        {stamp('Sent')}
       </span>
     );
   }
   if (status === 'failed') {
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 whitespace-nowrap">
-        <XCircle className="w-3.5 h-3.5" /> Not sent
+      <span className="inline-flex flex-col items-start">
+        <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700 whitespace-nowrap">
+          <XCircle className="w-3.5 h-3.5" /> Not sent
+        </span>
+        {stamp('Failed')}
       </span>
     );
   }
   return (
-    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 whitespace-nowrap">
-      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending
+    <span className="inline-flex flex-col items-start">
+      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-700 whitespace-nowrap">
+        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Sending
+      </span>
+      {stamp('Queued')}
     </span>
   );
 }
@@ -1818,7 +1839,7 @@ function ReviewSection({
                       </p>
                     )}
                   </td>
-                  <td className="py-4 px-3 align-top">{mailStatusBadge(sub.mail_status)}</td>
+                  <td className="py-4 px-3 align-top">{mailStatusBadge(sub.mail_status, sub.mail_sent_at)}</td>
                   <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-br-xl' : ''}`}>
                     <div className="flex flex-col items-start gap-2">
                       <button
@@ -1942,7 +1963,7 @@ function ReviewSection({
 
               <div className="mt-3">
                 <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">Mail Status</div>
-                {mailStatusBadge(sub.mail_status)}
+                {mailStatusBadge(sub.mail_status, sub.mail_sent_at)}
               </div>
 
               <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
@@ -3247,51 +3268,20 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                             className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
                           />
                         </div>
-                        <div>
-                          <label className="block text-sm font-medium text-brand-text/80 mb-1">Subject</label>
-                          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                            <span className="text-xs text-brand-text/40">Insert:</span>
-                            {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
-                              <button
-                                key={p}
-                                type="button"
-                                onClick={() => setTemplateDraft(d => d ? { ...d, subject: d.subject + p } : d)}
-                                className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
-                              >
-                                {p}
-                              </button>
-                            ))}
-                          </div>
-                          <input
-                            value={templateDraft.subject}
-                            onChange={(e) => setTemplateDraft({ ...templateDraft, subject: e.target.value })}
-                            placeholder="e.g. Regarding your paper {paper_title}"
-                            className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-sm font-medium text-brand-text/80 mb-1">Body</label>
-                          <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
-                            <span className="text-xs text-brand-text/40">Insert:</span>
-                            {['{name}', '{paper_title}', '{paper_id}'].map((p) => (
-                              <button
-                                key={p}
-                                type="button"
-                                onClick={() => setTemplateDraft(d => d ? { ...d, body: d.body + p } : d)}
-                                className="text-xs px-1.5 py-0.5 rounded bg-white border border-brand-text/15 text-brand-text/70 hover:border-brand-accent hover:text-brand-accent transition-colors"
-                              >
-                                {p}
-                              </button>
-                            ))}
-                          </div>
-                          <textarea
-                            value={templateDraft.body}
-                            onChange={(e) => setTemplateDraft({ ...templateDraft, body: e.target.value })}
-                            rows={6}
-                            placeholder={'Dear {name},\n\nYour paper "{paper_title}" has been...'}
-                            className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all resize-y font-mono"
-                          />
-                        </div>
+                        <MailField
+                          label="Subject"
+                          value={templateDraft.subject}
+                          onChange={(v) => setTemplateDraft(d => (d ? { ...d, subject: v } : d))}
+                          placeholder="e.g. Regarding your paper {paper_title}"
+                        />
+                        <MailField
+                          label="Body"
+                          rows={8}
+                          value={templateDraft.body}
+                          onChange={(v) => setTemplateDraft(d => (d ? { ...d, body: v } : d))}
+                          placeholder={'Dear {name},\n\nYour paper "{paper_title}" has been...'}
+                          help="Formatting buttons and Ctrl+B / Ctrl+I / Ctrl+U insert HTML tags, so emails arrive bold and underlined without typing any markup."
+                        />
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => saveMailTemplate(templateDraft)}
