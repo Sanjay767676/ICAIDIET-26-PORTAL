@@ -3,7 +3,9 @@
 Working notes for this repo. Read this first, then the source. Deployment rules live in `AGENTS.md`
 (they are not repeated here).
 
-Last reviewed: commit `7590e6b` ("Update Industry Delegates author type to include Research Scholar").
+Last reviewed: commit `5195f55` ("mail delivery timestamps, richer templates, multi-paper payment picker"),
+plus the uncommitted admin-editable registration fees / cutoff / bank details work and the
+admin file-edit switch.
 
 ---
 
@@ -58,7 +60,7 @@ as top-level functions/constants. There is no `routes/`, `lib/`, `services/` or 
 | Method | Path | Line | Purpose |
 |---|---|---|---|
 | GET | `/api/health` | 809 | unauthenticated liveness |
-| GET | `/api/settings` | 2601 | **public** — whole settings map (maintenance + `registration_open`) |
+| GET | `/api/settings` | 2601 | **public** — whole settings map (maintenance + `registration_open`) + parsed `registration` config |
 | POST | `/api/admin/login` | 820 | 12h HMAC token; accepts bare `admin` → `admin@snsct.org` |
 | POST | `/api/reviewer/login` | 867 | 12h token, `sub = reviewer:<id>`; 503 if reviewer maintenance |
 | POST | `/api/users/sync` | 1187 | Clerk-authed (inline check); ensures `users` row exists |
@@ -99,7 +101,7 @@ Response convention everywhere: `{ success: boolean, ..., error?: string }`.
 
 ## 3. Data model (D1, `icaidiet_text_records`)
 
-22 migrations in `backend/migrations/`, `0001` → `0022`. All multi-step table rebuilds use
+24 migrations in `backend/migrations/`, `0001` → `0024`. All multi-step table rebuilds use
 `PRAGMA defer_foreign_keys=on` + drop children before parents (see `0010`, `0014`, `0018`).
 
 | Table | Key columns |
@@ -219,6 +221,20 @@ the reviewer frontend also **force-logs-out** on load, `reviewer-portal/src/App.
 `maintenance_{portal}_until` auto-expires if the timestamp has passed (`:2566`).
 The legacy single `maintenance_mode` boolean is remapped onto `maintenance_user_enabled` (`:2628`).
 
+**W7b File-edit switch** — `file_edits_enabled` (`0024`, helper `fileEditsAllowed`) closes file
+replacement for existing submissions **without** touching maintenance: an admin can stop revisions
+after a deadline while still accepting new submissions, which the two maintenance switches cannot do.
+- **Fails open on purpose:** only the exact string `'false'` blocks. An absent, empty or oddly-cased
+  value allows edits, so a missing setting can never silently lock an author out mid-revision. Seeded
+  to `'true'` so production does not lean on that fallback. (Contrast `registration_open`, where
+  absent means *closed* — that asymmetry caused the seeding gotcha in §8.)
+- Returns **403**, not 503: the portal is up, one action is closed. Checked after the maintenance gate
+  but *inside* the handler, so `requireClerkAuth` still rejects anonymous callers first and the
+  setting's state is not leaked to them.
+- Frontend hides the "Edit Files" button and shows a distinct notice ("File updates are closed for
+  now"), kept separate from the maintenance notice. The modal is guarded too, but the endpoint is the
+  real gate — `MySubmissions` does not poll, so a prop flip alone is not a guarantee.
+
 **W8 Mail** — **client-paced queue**, not cron. `POST /mail/enqueue` renders per submission (recipient =
 primary author, fallback `submissions.author_email`) and inserts `queued` rows in chunks of 50.
 `POST /mail/process` claims exactly one row with a single
@@ -247,6 +263,41 @@ wrap the selection. `applyTag()` in `MailField.tsx` also *unwraps* a selection t
 *no user-controlled SQL*. Filters validated against two allow-list Sets (`:2335`). `.xlsx` is generated
 by a hand-rolled ZIP + OOXML writer (`:659-804`: `crc32`, `buildZip` with STORED entries, `generateXlsx`
 with `inlineStr` cells) to avoid bundling a spreadsheet library.
+
+**W10 Registration fees, cutoff and bank details — admin-editable.** These were hardcoded in the user
+portal (`REGISTRATION_FEES` + `isEarlyBird()` + a literal bank block) and are now edited in the admin
+portal's Settings tab.
+
+- **Storage:** one JSON document in the `registration_config` key of `settings`. A single key means a
+  single atomic upsert — no half-applied fee table — and `GET /api/settings` already returns the whole
+  map, so the user portal needed no new endpoint and no auth.
+- **Shape:** `{ early_bird_until, fees: { <authorType>: { <regType>: { early, standard } } }, bank: {...} }`.
+- **`early_bird_until` is INCLUSIVE** (the last day early bird still applies), so the user portal renders
+  "Early Bird till X" and "Standard Fee (From X+1)". It is compared as a `YYYY-MM-DD` **string**, not a
+  `Date` — the old code built `new Date(year, 9, 24)` in the browser, which flipped an hour early
+  anywhere east of UTC. Empty cutoff ⇒ standard fee always.
+- **Fee amounts are free-text display strings** (`'₹2,000'`), so an admin enters exactly what authors
+  see. Nothing sums or converts them; there is no numeric amount or currency field, so an invoice total
+  would need a new model.
+- **The fee matrix is the source of truth for the dropdowns.** The user portal derives its registration
+  type and author type `<option>`s from the keys, so adding a row in the admin portal adds an option
+  with no code change. `author_type`/`registration_type` are plain `TEXT` with **no CHECK constraint**,
+  so this needed no migration or table rebuild.
+- `/api/user/submissions/:id/register` now validates the pair against the matrix (it previously accepted
+  any string). **Escape hatch:** the values already on that submission are always allowed, so renaming
+  or deleting a fee row can never strand an author mid-payment.
+- **Read path is lenient, write path is strict.** `parseRegistrationConfig` degrades field by field onto
+  `DEFAULT_REGISTRATION_CONFIG` (and falls back entirely on corrupt JSON or a missing key), so a bad
+  document can never blank the fee card a paying author is looking at. `validateRegistrationConfig`
+  instead rejects and reports to the admin, and a rejected save leaves the previous config intact.
+- **Duplicated default — must change together:** `DEFAULT_REGISTRATION_CONFIG` in
+  `backend/src/index.ts`, its seed in `0023_registration_config.sql`, and `FALLBACK_REGISTRATION` in
+  `MySubmissions.tsx`. The frontend copy is only reachable if `GET /api/settings` itself fails, so a
+  transient network error does not hide the amount from someone about to transfer money.
+- Admin editor: `admin-portal/src/components/RegistrationConfigPanel.tsx`. It edits the nested object as
+  a **flat table of one row per author-type/registration-type pair**; rows sharing an author type are one
+  group. Rows are held locally because they are the render source — publishing drops rows whose label is
+  blank, and a row mid-retype must stay on screen while that happens.
 
 ---
 
@@ -289,8 +340,9 @@ Centralized 401 → `handleLogout()` in `fetchSubmissions` (`:756`).
 `MySubmissions.tsx` holds the whole author feature set: status/decision/payment badges, review feedback
 banner, `RegistrationForm` (`:194-599`), `EditFilesModal` (`:605-806`). **No polling** — My Submissions
 loads on mount and on `getToken` change only, so status changes require a manual reload.
-`REGISTRATION_FEES` (`:179-192`) and the early-bird cutoff `Oct 24` (`:171-177`) are **hardcoded in the
-UI**, not served by the backend. Track select has a single hardcoded option (`:478`).
+Fees, the early-bird cutoff and the bank details are **not** hardcoded any more: they arrive as
+`registration` from `GET /api/settings`, threaded through `App.tsx` into the `MySubmissions` prop and
+resolved by `useRegistrationConfig` (see W10).
 
 ### Duplicated across all three (no shared package exists)
 `API_URL` fallback (6 copies), `STATUS_META`/`statusBadge` (3 divergent copies), review-decision maps
@@ -401,6 +453,8 @@ Rotate if this tree is ever shared.
   introduce a dependency casually (the Resend and XLSX code exists specifically to avoid deps).
 - Frontend: `success`/`error` from the API is the only feedback channel, surfaced through
   `user-portal/src/components/Popup.tsx` (user) or `data.error` (admin/reviewer).
+- Config that the admin edits: change `DEFAULT_REGISTRATION_CONFIG` in `backend/src/index.ts`, the seed
+  in `0023_registration_config.sql` **and** `FALLBACK_REGISTRATION` in `MySubmissions.tsx` together (W10).
 - New statuses: update the DB CHECK **and** `ALLOWED_SUBMISSION_STATUSES` (`:43`) **and** all three
   frontend `STATUS_META` copies.
 - New decisions: update the `reviews` CHECK **and** all three `REVIEW_DECISION_META`/`DECISION_META` copies.

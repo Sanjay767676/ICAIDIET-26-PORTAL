@@ -47,6 +47,12 @@ interface MySubmission {
   payment_submitted_at?: string | null;
 }
 
+export interface RegistrationConfig {
+  early_bird_until: string;
+  fees: Record<string, Record<string, { early: string; standard: string }>>;
+  bank: Record<string, string>;
+}
+
 interface MySubmissionsProps {
   getToken: () => Promise<string | null>;
   onBack: () => void;
@@ -54,6 +60,8 @@ interface MySubmissionsProps {
   maintenanceMode?: boolean;
   maintenanceUntil?: string | null;
   registrationOpen?: boolean;
+  registration?: RegistrationConfig | null;
+  fileEditsEnabled?: boolean;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -166,30 +174,86 @@ function reviewBanner(sub: MySubmission) {
 }
 
 // ------------------------------------------------------------------
-// Payment Form Component
+// Registration configuration
+//
+// Fees, the early-bird cutoff and the bank details all come from the backend
+// (GET /api/settings -> `registration`), which the admin edits in the dashboard.
+// The keys of `fees` double as the options in the registration and author type
+// selects, so adding a fee row in the admin portal adds a choice here with no
+// code change.
+//
+// FALLBACK below is only reached if the settings request itself failed. The
+// backend always returns a parsed, default-merged `registration` object, so a
+// successful response never uses it. It exists so a network blip does not hide
+// the amount from an author who is about to transfer money, and it mirrors
+// DEFAULT_REGISTRATION_CONFIG in backend/src/index.ts -- change one, change the
+// other.
 // ------------------------------------------------------------------
-function isEarlyBird(): boolean {
-  const now = new Date();
-  const year = now.getFullYear();
-  // Cutoff is Oct 24, 00:00:00 (month 9 is October in JavaScript Date)
-  const lateCutoff = new Date(year, 9, 24, 0, 0, 0);
-  return now < lateCutoff;
-}
-
-const REGISTRATION_FEES: Record<string, Record<string, { earlyBird: string; lateFee: string }>> = {
-  'Indian Author': {
-    'Conference alone': { earlyBird: '₹2,000', lateFee: '₹2,500' },
-    'Conference with Scopus proceedings': { earlyBird: '₹10,000', lateFee: '₹11,000' },
+const FALLBACK_REGISTRATION: RegistrationConfig = {
+  early_bird_until: '2026-10-23',
+  fees: {
+    'Indian Author': {
+      'Conference alone': { early: '₹2,000', standard: '₹2,500' },
+      'Conference with Scopus proceedings': { early: '₹10,000', standard: '₹11,000' },
+    },
+    'Foreign Author': {
+      'Conference alone': { early: '$350', standard: '$400' },
+      'Conference with Scopus proceedings': { early: '$400', standard: '$500' },
+    },
+    'Industry Delegate/Research Scholar': {
+      'Conference alone': { early: '₹2,500', standard: '₹3,000' },
+      'Conference with Scopus proceedings': { early: '₹12,000', standard: '₹13,000' },
+    },
   },
-  'Foreign Author': {
-    'Conference alone': { earlyBird: '$350', lateFee: '$400' },
-    'Conference with Scopus proceedings': { earlyBird: '$400', lateFee: '$500' },
-  },
-  'Industry Delegate/Research Scholar': {
-    'Conference alone': { earlyBird: '₹2,500', lateFee: '₹3,000' },
-    'Conference with Scopus proceedings': { earlyBird: '₹12,000', lateFee: '₹13,000' },
+  bank: {
+    account_number: '5904946502',
+    ifsc: 'CBIN0281361',
+    branch: 'Crosscut Road, CBE',
+    beneficiary: 'SNSCT CH4 CS',
+    bank_name: 'CENTRAL BANK OF INDIA',
   },
 };
+
+function useRegistrationConfig(registration?: RegistrationConfig | null): RegistrationConfig {
+  return useMemo(() => {
+    if (!registration || !registration.fees || Object.keys(registration.fees).length === 0) {
+      return FALLBACK_REGISTRATION;
+    }
+    return {
+      early_bird_until: registration.early_bird_until || '',
+      fees: registration.fees,
+      bank: registration.bank || {},
+    };
+  }, [registration]);
+}
+
+// Today's date as YYYY-MM-DD in the author's own timezone. Compared as a string
+// against the admin's cutoff, which keeps the comparison free of timezone and
+// clock-time drift -- the old version compared against a local-midnight Date and
+// so flipped an hour early for anyone east of UTC.
+function todayCalendarDate(): string {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+// The cutoff is an INCLUSIVE date on which early bird still applies, so
+// standard pricing begins the following day. An unset cutoff means the admin
+// has not configured early bird pricing at all, so the standard fee applies.
+function isEarlyBird(config: RegistrationConfig): boolean {
+  const until = (config.early_bird_until || '').trim();
+  if (!until) return false;
+  return todayCalendarDate() <= until;
+}
+
+function formatCutoffDate(value: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
+  const parsed = new Date(`${value}T00:00:00`);
+  return isNaN(parsed.getTime())
+    ? ''
+    : parsed.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+}
 
 // The registration / payment form for one specific paper. Rendered by
 // RegistrationForm below, which is responsible for choosing WHICH paper it
@@ -200,11 +264,13 @@ function RegistrationFormBody({
   resetKey,
   getToken,
   onSaved,
+  config,
 }: {
   sub: MySubmission;
   resetKey: string;
   getToken: () => Promise<string | null>;
   onSaved: () => void;
+  config: RegistrationConfig;
 }) {
   const [type, setType] = useState(sub.registration_type || '');
   const [authorType, setAuthorType] = useState(sub.author_type || '');
@@ -223,6 +289,35 @@ function RegistrationFormBody({
     setEditingSubmitted(false);
     setLoading(false);
   }, [resetKey]);
+
+  // The options are the keys of the admin-editable fee matrix, so the choices
+  // an author can make are exactly the ones the admin priced. Registration
+  // types are the union across author types, since the author picks the
+  // registration type first.
+  const authorTypeOptions = useMemo(() => Object.keys(config.fees), [config.fees]);
+  const registrationTypeOptions = useMemo(() => {
+    const all = new Set<string>();
+    for (const tiers of Object.values(config.fees)) {
+      for (const regType of Object.keys(tiers || {})) all.add(regType);
+    }
+    return Array.from(all);
+  }, [config.fees]);
+
+  const selectedFee = config.fees[authorType]?.[type] || null;
+  const early = isEarlyBird(config);
+  const cutoffLabel = formatCutoffDate(config.early_bird_until);
+  // The day after the inclusive cutoff is when standard pricing starts.
+  const standardFromLabel = (() => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(config.early_bird_until || '')) return '';
+    const next = new Date(`${config.early_bird_until}T00:00:00`);
+    if (isNaN(next.getTime())) return '';
+    next.setDate(next.getDate() + 1);
+    return next.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+  })();
+
+  // Hide the block entirely rather than print a heading over nothing, which is
+  // what clearing every bank field in the admin portal should do.
+  const hasBankDetails = Object.values(config.bank || {}).some((value) => (value || '').trim().length > 0);
 
   // 1. APPROVED STATUS
   if (sub.payment_status === 'APPROVED') {
@@ -460,8 +555,9 @@ function RegistrationFormBody({
             disabled={loading}
           >
             <option value="">-- Select Registration Type --</option>
-            <option value="Conference alone">Conference alone</option>
-            <option value="Conference with Scopus proceedings">Conference with Scopus proceedings</option>
+            {registrationTypeOptions.map((opt) => (
+              <option key={opt} value={opt}>{opt}</option>
+            ))}
           </select>
         </div>
 
@@ -480,9 +576,9 @@ function RegistrationFormBody({
               disabled={loading}
             >
               <option value="">-- Select Author Type --</option>
-              <option value="Indian Author">Indian Author</option>
-              <option value="Foreign Author">Foreign Author</option>
-              <option value="Industry Delegate/Research Scholar">Industry Delegate/Research Scholar</option>
+              {authorTypeOptions.map((opt) => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
             </select>
           </div>
         )}
@@ -491,10 +587,8 @@ function RegistrationFormBody({
         {type && authorType && (
           <div className="space-y-6 animate-fadeIn pt-2 border-t border-stone-200">
             {/* Dynamic Fee details card */}
-            {REGISTRATION_FEES[authorType]?.[type] && (() => {
-              const early = isEarlyBird();
-              const fee = REGISTRATION_FEES[authorType][type];
-              const activeAmount = early ? fee.earlyBird : fee.lateFee;
+            {selectedFee && (() => {
+              const activeAmount = early ? selectedFee.early : selectedFee.standard;
               const activeLabel = early ? 'Early registration' : 'Standard / late fee';
 
               return (
@@ -518,22 +612,26 @@ function RegistrationFormBody({
 
                   <div className="bg-white rounded-xl p-4 border border-amber-200 shadow-sm flex items-center justify-between flex-wrap gap-3">
                     <div>
-                      <div className="text-base font-bold text-black flex items-center gap-2">
+                      <div className="text-base font-bold text-black flex items-center gap-2 flex-wrap">
                         <span>{activeLabel}</span>
-                        {early ? (
-                          <span className="text-[11px] bg-green-100 text-green-800 border border-green-300 px-2 py-0.5 rounded-full font-semibold">
-                            Early Bird till Oct 23
-                          </span>
-                        ) : (
-                          <span className="text-[11px] bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-semibold">
-                            Standard Fee (From Oct 24)
-                          </span>
-                        )}
+                        {cutoffLabel ? (
+                          early ? (
+                            <span className="text-[11px] bg-green-100 text-green-800 border border-green-300 px-2 py-0.5 rounded-full font-semibold">
+                              Early Bird till {cutoffLabel}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-semibold">
+                              Standard Fee{standardFromLabel ? ` (From ${standardFromLabel})` : ''}
+                            </span>
+                          )
+                        ) : null}
                       </div>
                       <div className="text-xs text-black/60 mt-0.5">
-                        {early
-                          ? `Standard / late fee after Oct 23: ${fee.lateFee}`
-                          : `Early registration ended on Oct 23`}
+                        {cutoffLabel
+                          ? early
+                            ? `Standard / late fee after ${cutoffLabel}: ${selectedFee.standard}`
+                            : `Early registration ended on ${cutoffLabel}`
+                          : 'Contact the conference team for the applicable fee.'}
                       </div>
                     </div>
                     <div className="text-3xl font-bold font-mono text-brand-text">
@@ -545,15 +643,28 @@ function RegistrationFormBody({
             })()}
 
             {/* Bank details */}
-            <div className="bg-stone-50 border border-stone-300 p-4 rounded-xl text-sm text-black/90 font-mono leading-relaxed shadow-inner">
-              <div className="font-bold text-xs uppercase tracking-wider text-black/60 mb-2 font-sans">
-                Bank Transfer Details
+            {hasBankDetails && (
+              <div className="bg-stone-50 border border-stone-300 p-4 rounded-xl text-sm text-black/90 font-mono leading-relaxed shadow-inner">
+                <div className="font-bold text-xs uppercase tracking-wider text-black/60 mb-2 font-sans">
+                  Bank Transfer Details
+                </div>
+                {config.bank.account_number && (
+                  <p><span className="font-semibold text-black">Account number:</span> {config.bank.account_number}</p>
+                )}
+                {config.bank.ifsc && (
+                  <p>
+                    <span className="font-semibold text-black">IFSC Code:</span> {config.bank.ifsc}
+                    {config.bank.branch ? ` [${config.bank.branch}]` : ''}
+                  </p>
+                )}
+                {config.bank.beneficiary && (
+                  <p><span className="font-semibold text-black">Beneficiary Name:</span> {config.bank.beneficiary}</p>
+                )}
+                {config.bank.bank_name && (
+                  <p><span className="font-semibold text-black">Bank Name:</span> {config.bank.bank_name}</p>
+                )}
               </div>
-              <p><span className="font-semibold text-black">Account number:</span> 5904946502</p>
-              <p><span className="font-semibold text-black">IFSC Code:</span> CBIN0281361 [Crosscut Road,CBE]</p>
-              <p><span className="font-semibold text-black">Beneficiary Name:</span> SNSCT CH4 CS</p>
-              <p><span className="font-semibold text-black">Bank Name:</span> CENTRAL BANK OF INDIA</p>
-            </div>
+            )}
 
             {/* Payment Proof Upload */}
             <div>
@@ -642,12 +753,14 @@ function RegistrationForm({
   totalPapers,
   getToken,
   onSaved,
+  config,
 }: {
   sub: MySubmission;
   payable: MySubmission[];
   totalPapers: number;
   getToken: () => Promise<string | null>;
   onSaved: () => void;
+  config: RegistrationConfig;
 }) {
   const [selectedId, setSelectedId] = useState(sub.id);
   const active = payable.find((p) => p.id === selectedId) || sub;
@@ -715,6 +828,7 @@ function RegistrationForm({
         resetKey={active.id}
         getToken={getToken}
         onSaved={onSaved}
+        config={config}
       />
     </div>
   );
@@ -939,12 +1053,18 @@ export function MySubmissions({
   maintenanceMode = false,
   maintenanceUntil = null,
   registrationOpen = false,
+  registration = null,
+  fileEditsEnabled = true,
 }: MySubmissionsProps) {
   const [subs, setSubs] = useState<MySubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<MySubmission | null>(null);
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [expandedPaymentIds, setExpandedPaymentIds] = useState<Record<string, boolean>>({});
+
+  // Admin-editable fees, cutoff and bank details, fetched once by App from
+  // GET /api/settings.
+  const config = useRegistrationConfig(registration);
 
   // Accepted papers this author can still pay for. Papers already approved or
   // awaiting verification drop off, so the picker only ever offers a paper
@@ -1123,7 +1243,7 @@ export function MySubmissions({
                       )}
                     </div>
                     <div className="shrink-0">
-                      {!maintenanceMode && (
+                      {!maintenanceMode && fileEditsEnabled && (
                         <button
                           onClick={() => setEditing(sub)}
                           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-brand-text hover:bg-brand-accent transition-all shadow-sm hover:shadow"
@@ -1140,6 +1260,13 @@ export function MySubmissions({
                       {maintenanceUntil
                         ? <> Expected back online {new Date(maintenanceUntil).toLocaleString()}.</>
                         : null}
+                    </div>
+                  )}
+
+                  {!maintenanceMode && !fileEditsEnabled && (
+                    <div className="mt-3 text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg p-2.5">
+                      File updates are closed for now. If you need to correct your paper, please contact the
+                      conference team.
                     </div>
                   )}
                 </div>
@@ -1175,6 +1302,7 @@ export function MySubmissions({
                             totalPapers={subs.length}
                             getToken={getToken}
                             onSaved={loadSubmissions}
+                            config={config}
                           />
                         ) : (
                           <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
@@ -1191,7 +1319,9 @@ export function MySubmissions({
         </div>
       )}
 
-      {editing && (
+      {/* Guarded as well as the button: the endpoint is the real gate (it
+          returns 403), this just avoids opening a form that cannot submit. */}
+      {editing && fileEditsEnabled && (
         <EditFilesModal
           sub={editing}
           getToken={getToken}

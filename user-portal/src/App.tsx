@@ -4,7 +4,7 @@ import { Analytics } from '@vercel/analytics/react';
 import { MainLayout } from './components/layout/MainLayout';
 import { HeroSection } from './components/portal/HeroSection';
 import { SubmissionWizard } from './components/portal/SubmissionWizard';
-import { MySubmissions } from './components/portal/MySubmissions';
+import { MySubmissions, RegistrationConfig } from './components/portal/MySubmissions';
 
 type ViewState = 'home' | 'wizard' | 'submissions';
 
@@ -56,6 +56,10 @@ export default function App() {
   const [maintenanceMode, setMaintenanceMode] = useState<boolean>(false);
   const [maintenanceUntil, setMaintenanceUntil] = useState<string | null>(null);
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(false);
+  const [registration, setRegistration] = useState<RegistrationConfig | null>(null);
+  // Admins can close file replacement independently of maintenance. Absent key
+  // means allowed, matching fileEditsAllowed in backend/src/index.ts.
+  const [fileEditsEnabled, setFileEditsEnabled] = useState<boolean>(true);
   const { getToken } = useAuth();
   const { user: clerkUser } = useUser();
 
@@ -75,6 +79,11 @@ export default function App() {
           );
           setMaintenanceUntil(s.maintenance_user_until || null);
           setRegistrationOpen(s.registration_open === 'true');
+          // Fees, early-bird cutoff and bank details. The backend returns this
+          // parsed and merged onto its defaults, so it is only null when the
+          // request itself failed.
+          if (data.registration) setRegistration(data.registration);
+          setFileEditsEnabled(s.file_edits_enabled !== 'false');
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -127,7 +136,9 @@ export default function App() {
               onBack={() => navigate('home')}
               onStart={() => navigate('wizard')}
               maintenanceMode={maintenanceMode}
-              maintenanceUntil={maintenanceUntil} registrationOpen={registrationOpen}
+              maintenanceUntil={maintenanceUntil}               registrationOpen={registrationOpen}
+              registration={registration}
+              fileEditsEnabled={fileEditsEnabled}
             />
           </Show>
         )}

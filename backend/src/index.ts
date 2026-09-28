@@ -47,6 +47,53 @@ const ALLOWED_SUBMISSION_STATUSES = new Set([
   'READY_FOR_CAMERA_READY',
 ]);
 
+// ------------------------------------------------------------------
+// Registration configuration (admin-editable)
+//
+// Fees, the early-bird cutoff and the bank details block are stored as one
+// JSON document under the `registration_config` settings key so the admin and
+// user portals read one source of truth and a save is a single atomic upsert.
+//
+// The values below are the fallback used when that key is absent (fresh or
+// local D1) or cannot be parsed, which is why they duplicate migration
+// 0023_registration_config.sql. Change one, change the other.
+//
+// Fee amounts are free-text display strings ('₹2,000') so an admin can enter
+// exactly what authors should see; nothing here is ever summed or converted.
+// `early_bird_until` is an INCLUSIVE calendar date (YYYY-MM-DD) on which early
+// bird pricing still applies -- standard fees begin the day after.
+const DEFAULT_REGISTRATION_CONFIG = {
+  early_bird_until: '2026-10-23',
+  fees: {
+    'Indian Author': {
+      'Conference alone': { early: '₹2,000', standard: '₹2,500' },
+      'Conference with Scopus proceedings': { early: '₹10,000', standard: '₹11,000' },
+    },
+    'Foreign Author': {
+      'Conference alone': { early: '$350', standard: '$400' },
+      'Conference with Scopus proceedings': { early: '$400', standard: '$500' },
+    },
+    'Industry Delegate/Research Scholar': {
+      'Conference alone': { early: '₹2,500', standard: '₹3,000' },
+      'Conference with Scopus proceedings': { early: '₹12,000', standard: '₹13,000' },
+    },
+  },
+  bank: {
+    account_number: '5904946502',
+    ifsc: 'CBIN0281361',
+    branch: 'Crosscut Road, CBE',
+    beneficiary: 'SNSCT CH4 CS',
+    bank_name: 'CENTRAL BANK OF INDIA',
+  },
+} as const;
+
+type RegistrationFeeRow = { early: string; standard: string };
+type RegistrationConfig = {
+  early_bird_until: string;
+  fees: Record<string, Record<string, RegistrationFeeRow>>;
+  bank: Record<string, string>;
+};
+
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
 
 function getEnvOrigin(c: any): string {
@@ -1849,7 +1896,8 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'Too many edit attempts. Please try again later.' }, 429);
     }
 
-    const maintenance = portalMaintenanceActive(await loadSettingsRecord(c.env as Bindings), 'user');
+    const settings = await loadSettingsRecord(c.env as Bindings);
+    const maintenance = portalMaintenanceActive(settings, 'user');
     if (maintenance.active) {
       return c.json(
         {
@@ -1858,6 +1906,20 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
           maintenance_until: maintenance.until,
         },
         503
+      );
+    }
+
+    // Checked separately from maintenance so an admin can stop file replacement
+    // while still accepting new submissions. 403 rather than 503: the portal is
+    // up, this one action is closed.
+    if (!fileEditsAllowed(settings)) {
+      return c.json(
+        {
+          success: false,
+          error: 'File updates have been closed by the conference team. Please contact us if you need to make a correction.',
+          file_edits_enabled: false,
+        },
+        403
       );
     }
 
@@ -2601,6 +2663,170 @@ async function loadSettingsRecord(env: Bindings): Promise<Record<string, string>
   return settings;
 }
 
+// ------------------------------------------------------------------
+// Registration configuration helpers
+//
+// Reads are lenient: a malformed or partial document degrades field by field
+// onto DEFAULT_REGISTRATION_CONFIG so a bad edit can never blank out the fee
+// card a paying author is looking at. Writes (see POST /api/admin/settings)
+// are strict instead, so a bad save is reported to the admin rather than
+// silently coerced.
+// ------------------------------------------------------------------
+
+// Free-text display values: trim, collapse runs of whitespace, strip control
+// characters and cap the length so one row cannot bloat the settings row.
+function cleanDisplayText(value: unknown, maxLength = 80): string {
+  if (typeof value !== 'string') return '';
+  return value
+    // eslint-disable-next-line no-control-regex
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function isCalendarDate(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+// Coerce whatever is stored into a usable RegistrationConfig, falling back to
+// the defaults per field. Never throws.
+function parseRegistrationConfig(raw: unknown): RegistrationConfig {
+  const fallback = JSON.parse(JSON.stringify(DEFAULT_REGISTRATION_CONFIG)) as RegistrationConfig;
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback;
+  const src = raw as Record<string, any>;
+
+  const config: RegistrationConfig = { ...fallback, fees: {}, bank: { ...fallback.bank } };
+
+  if (typeof src.early_bird_until === 'string' && isCalendarDate(src.early_bird_until)) {
+    config.early_bird_until = src.early_bird_until;
+  }
+
+  if (src.fees && typeof src.fees === 'object' && !Array.isArray(src.fees)) {
+    for (const [rawAuthorType, tiers] of Object.entries(src.fees as Record<string, unknown>)) {
+      const authorType = cleanDisplayText(rawAuthorType);
+      if (!authorType || !tiers || typeof tiers !== 'object' || Array.isArray(tiers)) continue;
+      const rows: Record<string, RegistrationFeeRow> = {};
+      for (const [rawRegType, amounts] of Object.entries(tiers as Record<string, unknown>)) {
+        const regType = cleanDisplayText(rawRegType);
+        if (!regType || !amounts || typeof amounts !== 'object' || Array.isArray(amounts)) continue;
+        const early = cleanDisplayText((amounts as any).early, 40);
+        const standard = cleanDisplayText((amounts as any).standard, 40);
+        if (!early && !standard) continue;
+        rows[regType] = { early: early || '\u2014', standard: standard || '\u2014' };
+      }
+      if (Object.keys(rows).length > 0) config.fees[authorType] = rows;
+    }
+  }
+  // A document with no usable rows would render an empty fee card, so keep the
+  // defaults instead.
+  if (Object.keys(config.fees).length === 0) config.fees = fallback.fees;
+
+  if (src.bank && typeof src.bank === 'object' && !Array.isArray(src.bank)) {
+    for (const field of ['account_number', 'ifsc', 'branch', 'beneficiary', 'bank_name']) {
+      const value = cleanDisplayText((src.bank as Record<string, unknown>)[field], 160);
+      if (value) config.bank[field] = value;
+    }
+  }
+
+  return config;
+}
+
+// Strict validation for the admin save path. Rejects rather than repairs, so a
+// half-typed fee table never reaches D1.
+const MAX_AUTHOR_TYPES = 20;
+const MAX_REG_TYPES_PER_AUTHOR = 20;
+
+function validateRegistrationConfig(
+  input: unknown
+): { ok: true; value: RegistrationConfig } | { ok: false; error: string } {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    return { ok: false, error: 'Invalid registration configuration.' };
+  }
+  const src = input as Record<string, any>;
+
+  const rawUntil = src.early_bird_until;
+  if (rawUntil !== undefined && rawUntil !== null && typeof rawUntil !== 'string') {
+    return { ok: false, error: 'The early-bird deadline must be a date.' };
+  }
+  const earlyBirdUntil = cleanDisplayText(rawUntil, 10);
+  if (earlyBirdUntil && !isCalendarDate(earlyBirdUntil)) {
+    return { ok: false, error: 'The early-bird deadline must be a valid date.' };
+  }
+
+  if (!src.fees || typeof src.fees !== 'object' || Array.isArray(src.fees)) {
+    return { ok: false, error: 'At least one author type is required.' };
+  }
+  const feeEntries = Object.entries(src.fees as Record<string, unknown>);
+  if (feeEntries.length === 0) return { ok: false, error: 'At least one author type is required.' };
+  if (feeEntries.length > MAX_AUTHOR_TYPES) {
+    return { ok: false, error: `Too many author types (maximum ${MAX_AUTHOR_TYPES}).` };
+  }
+
+  const fees: Record<string, Record<string, RegistrationFeeRow>> = {};
+  for (const [rawAuthorType, tiers] of feeEntries) {
+    const authorType = cleanDisplayText(rawAuthorType);
+    if (!authorType) return { ok: false, error: 'Author type names cannot be empty.' };
+    if (!tiers || typeof tiers !== 'object' || Array.isArray(tiers)) {
+      return { ok: false, error: `Fees for "${authorType}" are missing.` };
+    }
+    const tierEntries = Object.entries(tiers as Record<string, unknown>);
+    if (tierEntries.length === 0) {
+      return { ok: false, error: `Add at least one registration type for "${authorType}".` };
+    }
+    if (tierEntries.length > MAX_REG_TYPES_PER_AUTHOR) {
+      return { ok: false, error: `Too many registration types for "${authorType}".` };
+    }
+    const rows: Record<string, RegistrationFeeRow> = {};
+    for (const [rawRegType, amounts] of tierEntries) {
+      const regType = cleanDisplayText(rawRegType);
+      if (!regType) return { ok: false, error: `Registration type names cannot be empty for "${authorType}".` };
+      if (!amounts || typeof amounts !== 'object' || Array.isArray(amounts)) {
+        return { ok: false, error: `Fees for "${authorType} / ${regType}" are missing.` };
+      }
+      const early = cleanDisplayText((amounts as any).early, 40);
+      const standard = cleanDisplayText((amounts as any).standard, 40);
+      if (!early || !standard) {
+        return { ok: false, error: `Enter both an early-bird and a standard fee for "${authorType} / ${regType}".` };
+      }
+      rows[regType] = { early, standard };
+    }
+    fees[authorType] = rows;
+  }
+
+  const bank: Record<string, string> = {};
+  const bankSource = src.bank && typeof src.bank === 'object' && !Array.isArray(src.bank) ? src.bank : {};
+  for (const field of ['account_number', 'ifsc', 'branch', 'beneficiary', 'bank_name']) {
+    bank[field] = cleanDisplayText(bankSource[field], 160);
+  }
+  if (!bank.account_number || !bank.ifsc) {
+    return { ok: false, error: 'Enter the bank account number and IFSC code.' };
+  }
+
+  return {
+    ok: true,
+    value: {
+      early_bird_until: earlyBirdUntil,
+      fees,
+      bank,
+    },
+  };
+}
+
+async function loadRegistrationConfig(env: Bindings): Promise<RegistrationConfig> {
+  const settings = await loadSettingsRecord(env);
+  const raw = settings['registration_config'];
+  if (!raw) return parseRegistrationConfig(null);
+  try {
+    return parseRegistrationConfig(JSON.parse(raw));
+  } catch {
+    // Corrupt JSON must not take the fee card down; fall back to defaults.
+    return parseRegistrationConfig(null);
+  }
+}
+
 // Returns whether a portal is currently in maintenance and, when set, the
 // end date/time the admin configured ("" otherwise). If the admin set an
 // "until" time and it has already passed, maintenance is treated as off.
@@ -2618,6 +2844,15 @@ function portalMaintenanceActive(
     }
   }
   return { active, until: until || null };
+}
+
+// Admin can close file replacement for existing submissions independently of
+// maintenance mode -- e.g. after revision deadlines, or while an admin
+// reconciles author lists. An absent key means ALLOWED, so a missing setting can
+// never silently block an author mid-revision; migration 0024_file_edits.sql
+// seeds it explicitly. Anything other than 'false' is treated as open.
+function fileEditsAllowed(settings: Record<string, string>): boolean {
+  return settings['file_edits_enabled'] !== 'false';
 }
 
 // Returns whether registration is currently open AND the submission is
@@ -2650,7 +2885,11 @@ app.get('/api/settings', async (c) => {
   const env = c.env as Bindings;
   try {
     const settings = await loadSettingsRecord(env);
-    return c.json({ success: true, settings });
+    // `registration` is the parsed, default-merged configuration. The user
+    // portal reads this to render fees, the early-bird cutoff and bank
+    // details, so nothing there has to be hardcoded any more.
+    const registration = await loadRegistrationConfig(env);
+    return c.json({ success: true, settings, registration });
   } catch (error) {
     console.error('Fetch settings error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
@@ -2729,6 +2968,33 @@ app.post('/api/admin/settings', async (c) => {
           `INSERT INTO settings (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
         ).bind('registration_open', registrationOpen)
+      );
+    }
+
+    // Whether authors may replace the files on a submission they have already
+    // made. Independent of maintenance, and defaults to allowed when absent.
+    if (typeof body.file_edits_enabled === 'boolean') {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('file_edits_enabled', body.file_edits_enabled.toString())
+      );
+    }
+
+    // Fees, early-bird cutoff and bank details. Validated as a whole before
+    // anything is written, so a rejected save leaves the previous config in
+    // place rather than half-applying it.
+    if (body.registration_config !== undefined) {
+      const validated = validateRegistrationConfig(body.registration_config);
+      if (!validated.ok) {
+        return c.json({ success: false, error: validated.error }, 400);
+      }
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('registration_config', JSON.stringify(validated.value))
       );
     }
 
@@ -2887,7 +3153,7 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const submission = await c.env.DB.prepare(
-      `SELECT id, user_id, author_email, payment_proof_url FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, user_id, author_email, payment_proof_url, registration_type, author_type FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
     const ownsSubmission =
@@ -2910,6 +3176,25 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
     if (!registrationType || !authorType || !utr) {
       return c.json(
         { success: false, error: 'Registration type, author type, and transaction ID are required.' },
+        400
+      );
+    }
+
+    // The admin-editable fee matrix is the source of truth for which
+    // registration/author type pairs exist, so a hand-rolled request cannot
+    // invent a combination the admin never configured.
+    //
+    // Escape hatch: if the admin renamed or removed a type after this paper was
+    // already registered, the author may resubmit the exact values already on
+    // file, so a fee-table edit can never strand somebody mid-payment.
+    const config = await loadRegistrationConfig(c.env);
+    const knownPair = !!config.fees[authorType]?.[registrationType];
+    const unchangedOnFile =
+      registrationType === (submission.registration_type || '').trim() &&
+      authorType === (submission.author_type || '').trim();
+    if (!knownPair && !unchangedOnFile) {
+      return c.json(
+        { success: false, error: 'That registration type and author type combination is not available. Please pick from the listed options.' },
         400
       );
     }

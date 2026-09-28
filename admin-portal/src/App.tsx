@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck } from 'lucide-react';
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
+import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -2043,6 +2044,12 @@ export default function App() {
   const [mtUserUntil, setMtUserUntil] = useState<string>('');
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
   const [mtReviewUntil, setMtReviewUntil] = useState<string>('');
+  const [fileEditsEnabled, setFileEditsEnabled] = useState<boolean>(true);
+  const [registrationConfig, setRegistrationConfig] = useState<RegistrationConfig>({
+    early_bird_until: '',
+    fees: {},
+    bank: {},
+  });
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
   const [backingUp, setBackingUp] = useState(false);
   const [backupMessage, setBackupMessage] = useState<string | null>(null);
@@ -2130,6 +2137,11 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setMtUserUntil(s.maintenance_user_until || '');
         setMtReviewEnabled(s.maintenance_review_enabled === 'true');
         setMtReviewUntil(s.maintenance_review_until || '');
+        // Absent key means allowed; see fileEditsAllowed in backend/src/index.ts.
+        setFileEditsEnabled(s.file_edits_enabled !== 'false');
+        // Parsed and default-merged by the backend, so the editors always open
+        // on the values that are actually live for authors.
+        if (data.registration) setRegistrationConfig(data.registration);
       }
     } catch (err) {
       console.error('Failed to load settings:', err);
@@ -2151,11 +2163,16 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
           maintenance_user_until: mtUserUntil,
           maintenance_review_enabled: mtReviewEnabled,
           maintenance_review_until: mtReviewUntil,
+          file_edits_enabled: fileEditsEnabled,
+          registration_config: registrationConfig,
         })
       });
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) {
         setError(null);
+        // Re-read so the editors show the server's canonical version, e.g. after
+        // whitespace was trimmed out of a label.
+        fetchSettings();
       } else {
         throw new Error(data?.error || 'Failed to update settings');
       }
@@ -3050,6 +3067,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
         )}
 
         {activeTab === 'settings' && (
+          <>
           <div className="bg-white rounded-2xl shadow-md border-2 border-brand-accent p-6 sm:p-8 max-w-7xl mx-auto mt-6">
             <div className="mb-6">
               <h3 className="font-serif text-2xl font-bold mb-1 text-black">Portal Settings</h3>
@@ -3127,7 +3145,49 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   </div>
                 </div>
 
-                {/* 3. User Portal Maintenance */}
+                {/* 3. Allow File Edits */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 px-5 py-4">
+                    <div>
+                      <h4 className="font-semibold text-brand-text">Allow File Edits</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        When on, authors can replace the files on a paper they have already submitted. Turn this off
+                        to close revisions without taking the portal into maintenance &mdash; new submissions are
+                        still accepted.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setFileEditsEnabled(!fileEditsEnabled)}
+                      disabled={savingSettings}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${fileEditsEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      role="switch"
+                      aria-checked={fileEditsEnabled}
+                    >
+                      <span className="sr-only">Toggle author file edits</span>
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fileEditsEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                      />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
+                    <span
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
+                        fileEditsEnabled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${fileEditsEnabled ? 'bg-green-600' : 'bg-red-600'}`} />
+                      {fileEditsEnabled ? 'Authors can edit files' : 'File edits closed'}
+                    </span>
+                    <span className="text-xs text-brand-text/50">
+                      {fileEditsEnabled
+                        ? 'The "Edit Files" button is showing in the user portal.'
+                        : 'The "Edit Files" button is hidden and the upload endpoint refuses replacements.'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 4. User Portal Maintenance */}
                 <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
                     <div>
@@ -3167,7 +3227,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   </div>
                 </div>
 
-                {/* 4. Reviewer Portal Maintenance */}
+                {/* 5. Reviewer Portal Maintenance */}
                 <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
                     <div>
@@ -3372,6 +3432,40 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
               </div>
             </div>
           </div>
+
+          {/* Registration fees, early-bird deadline and bank details.
+              Full width below the two-column grid because the fee table needs
+              the room. Saved by the same "Save Portal Settings" button. */}
+          <div className="mt-6 pt-6 border-t border-brand-text/10">
+            <div className="mb-4">
+              <h3 className="font-serif text-2xl font-bold mb-1 text-black">Registration Fees &amp; Bank Details</h3>
+              <p className="text-sm text-brand-text/60 max-w-3xl">
+                These values are shown to authors in their payment form. Each fee row is also an option authors can
+                choose, so adding a row adds a choice to the user portal. Changes take effect for authors as soon as
+                you save.
+              </p>
+            </div>
+            <RegistrationConfigPanel
+              config={registrationConfig}
+              onChange={setRegistrationConfig}
+            />
+            {error && (
+              <div className="mt-4 flex items-center gap-2 p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-sm font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" /> {error}
+              </div>
+            )}
+            <div className="flex items-center justify-end mt-5">
+              <button
+                onClick={savePortalSettings}
+                disabled={savingSettings}
+                className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-text text-white rounded-xl text-sm font-semibold hover:bg-brand-accent transition-all disabled:opacity-50 shadow-md"
+              >
+                {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                {savingSettings ? 'Saving...' : 'Save Fees & Bank Details'}
+              </button>
+            </div>
+          </div>
+          </>
         )}
       </main>
 
