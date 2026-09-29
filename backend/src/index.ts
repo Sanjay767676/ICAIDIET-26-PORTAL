@@ -3024,14 +3024,9 @@ app.get('/api/settings', async (c) => {
 // Requires a signed-in author so this cannot be used to enumerate the fee
 // matrix anonymously. Reads are trivial (one settings row), and it fires once
 // per selection rather than on a timer.
-app.get('/api/registration/fee', async (c) => {
+app.get('/api/registration/fee', requireClerkAuth, async (c) => {
   const env = c.env as Bindings;
   try {
-    const token = getBearer(c);
-    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
-    const verified = await verifyToken(c, token);
-    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
-
     const url = new URL(c.req.url);
     const authorType = cleanDisplayText(url.searchParams.get('authorType'), 80);
     const registrationType = cleanDisplayText(url.searchParams.get('registrationType'), 80);
@@ -3050,11 +3045,16 @@ app.get('/api/registration/fee', async (c) => {
       );
     }
 
+    // The counterfactual bracket is returned too, so the card can state when the
+    // late fee kicks in using the admin's own figure and date rather than
+    // anything the client worked out for itself.
+    const row = config.fees[authorType]?.[registrationType];
     return c.json({
       success: true,
       fee_amount: snapshot.amount,
       fee_tier: snapshot.tier,
       early_bird_until: config.early_bird_until,
+      other_amount: snapshot.tier === 'EARLY' ? row?.standard || '' : row?.early || '',
     });
   } catch (error) {
     console.error('Fetch registration fee error:', error);

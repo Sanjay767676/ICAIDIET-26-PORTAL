@@ -247,14 +247,10 @@ function todayCalendarDate(): string {
 }
 
 // The cutoff is an INCLUSIVE date on which early bird still applies, so
-// standard pricing begins the following day. An unset cutoff means the admin
-// has not configured early bird pricing at all, so the standard fee applies.
-function isEarlyBird(config: RegistrationConfig): boolean {
-  const until = (config.early_bird_until || '').trim();
-  if (!until) return false;
-  return todayCalendarDate() <= until;
-}
-
+// standard pricing begins the following day. Whether an author is inside the
+// window is decided server-side (the Worker owns the fee matrix) and arrives as
+// fee_tier; nothing here re-derives it from a date, because that is what let
+// the card and the recorded amount disagree.
 function formatCutoffDate(value: string): string {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return '';
   const parsed = new Date(`${value}T00:00:00`);
@@ -292,7 +288,12 @@ function RegistrationFormBody({
   // seeded from `config`: the config was fetched once when the app mounted, so
   // it can be arbitrarily stale, and a stale number is exactly the
   // miscommunication this replaces.
-  const [liveFee, setLiveFee] = useState<{ amount: string; tier: 'EARLY' | 'STANDARD' } | null>(null);
+  const [liveFee, setLiveFee] = useState<{
+    amount: string;
+    tier: 'EARLY' | 'STANDARD';
+    otherAmount: string;
+    cutoff: string;
+  } | null>(null);
   const [feeError, setFeeError] = useState<string | null>(null);
   // The author must tick this before submitting, so the amount on the record is
   // something they affirmatively agreed to rather than something inferred.
@@ -323,10 +324,6 @@ function RegistrationFormBody({
     }
     return Array.from(all);
   }, [config.fees]);
-
-  const selectedFee = config.fees[authorType]?.[type] || null;
-  const early = isEarlyBird(config);
-  const cutoffLabel = formatCutoffDate(config.early_bird_until);
 
   // Ask the server what this exact pair costs, every time the selection
   // changes. The config object on the props was fetched once when the app
@@ -359,7 +356,12 @@ function RegistrationFormBody({
           setFeeError(data?.error || 'Could not load the current fee for this registration type.');
           return;
         }
-        setLiveFee({ amount: data.fee_amount, tier: data.fee_tier });
+        setLiveFee({
+          amount: data.fee_amount,
+          tier: data.fee_tier,
+          otherAmount: data.other_amount || '',
+          cutoff: data.early_bird_until || '',
+        });
       } catch {
         if (!cancelled) setFeeError('Could not load the current fee. Please check your connection and try again.');
       }
@@ -369,14 +371,6 @@ function RegistrationFormBody({
       cancelled = true;
     };
   }, [type, authorType, getToken]);
-  // The day after the inclusive cutoff is when standard pricing starts.
-  const standardFromLabel = (() => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(config.early_bird_until || '')) return '';
-    const next = new Date(`${config.early_bird_until}T00:00:00`);
-    if (isNaN(next.getTime())) return '';
-    next.setDate(next.getDate() + 1);
-    return next.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
-  })();
 
   // Hide the block entirely rather than print a heading over nothing, which is
   // what clearing every bank field in the admin portal should do.
@@ -684,15 +678,16 @@ function RegistrationFormBody({
         {/* Step 3: Fee Details & Bank Info & Upload (Shown after completing author type) */}
         {type && authorType && (
           <div className="space-y-6 animate-fadeIn pt-2 border-t border-stone-200">
-            {/* Fee details, priced from the live server response rather than the
-                mount-time config so the figure the author reads here is the one
-                that will be recorded. */}
-            {selectedFee && (() => {
-              const liveTier = liveFee?.tier;
-              const activeAmount = liveFee?.amount ?? (early ? selectedFee.early : selectedFee.standard);
-              const activeLabel = liveTier
-                ? liveTier === 'EARLY' ? 'Early registration' : 'Standard / late fee'
-                : early ? 'Early registration' : 'Standard / late fee';
+            {/* Fee details. Every figure and the deadline date come from the live
+                server response for the selected pair -- never from the mount-time
+                config -- so what the author reads is what gets recorded. Nothing
+                is rendered until that arrives, which is why there is no
+                placeholder amount to briefly contradict it. */}
+            {liveFee && (() => {
+              const isEarlyTier = liveFee.tier === 'EARLY';
+              // Both the deadline and the fee that replaces it are the admin's
+              // own values, returned by the same call as the amount.
+              const liveCutoff = formatCutoffDate(liveFee.cutoff);
 
               return (
                 <div className="bg-amber-50/90 border-2 border-amber-300/80 rounded-2xl p-5 shadow-sm space-y-4">
@@ -708,31 +703,36 @@ function RegistrationFormBody({
                   <div className="bg-white rounded-xl p-4 border border-amber-200 shadow-sm flex items-center justify-between flex-wrap gap-3">
                     <div>
                       <div className="text-base font-bold text-black flex items-center gap-2 flex-wrap">
-                        <span>{activeLabel}</span>
-                        {liveTier ? (
-                          liveTier === 'EARLY' ? (
-                            <span className="text-[11px] bg-green-100 text-green-800 border border-green-300 px-2 py-0.5 rounded-full font-semibold">
-                              Early Bird till {cutoffLabel}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full font-semibold">
-                              Standard Fee{standardFromLabel ? ` (From ${standardFromLabel})` : ''}
-                            </span>
-                          )
-                        ) : null}
+                        <span>{isEarlyTier ? 'Early registration' : 'Standard / late fee'}</span>
+                        <span
+                          className={`text-[11px] px-2 py-0.5 rounded-full font-semibold border ${
+                            isEarlyTier
+                              ? 'bg-green-100 text-green-800 border-green-300'
+                              : 'bg-amber-100 text-amber-800 border-amber-300'
+                          }`}
+                        >
+                          {isEarlyTier ? 'Early Bird' : 'Standard Fee'}
+                        </span>
                       </div>
-                      <div className="text-xs text-black/60 mt-0.5">
-                        {!liveFee
-                          ? 'Checking the current fee…'
-                          : cutoffLabel
-                            ? liveTier === 'EARLY'
-                              ? `Standard / late fee after ${cutoffLabel}: ${selectedFee.standard}`
-                              : `Early registration ended on ${cutoffLabel}`
-                            : 'Contact the conference team for the applicable fee.'}
+                      <div className="text-xs text-black/70 mt-1 leading-relaxed">
+                        {isEarlyTier ? (
+                          <>
+                            Late fee of{' '}
+                            <span className="font-bold text-black">{liveFee.otherAmount}</span> will be
+                            applicable after{' '}
+                            <span className="font-bold text-black">{liveCutoff}</span>.
+                          </>
+                        ) : (
+                          <>
+                            Early bird fee of{' '}
+                            <span className="font-bold text-black">{liveFee.otherAmount}</span> ended on{' '}
+                            <span className="font-bold text-black">{liveCutoff}</span>.
+                          </>
+                        )}
                       </div>
                     </div>
                     <div className="text-3xl font-bold font-mono text-brand-text">
-                      {activeAmount}
+                      {liveFee.amount}
                     </div>
                   </div>
                 </div>
