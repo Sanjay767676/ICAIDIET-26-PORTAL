@@ -2887,18 +2887,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                 </button>
               </div>
             </div>
-            <button
-              onClick={() => {
-                fetchSubmissions();
-              fetchDeletedSubmissions();
-              fetchSettings();
-            }}
-            disabled={loading || deletedLoading}
-            className="w-full sm:w-auto px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50 flex items-center justify-center gap-2 shadow"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading || deletedLoading ? 'animate-spin' : ''}`} /> Refresh
-          </button>
-        </div>
+          </div>
 
         {activeTab === 'submissions' && (
           <>
