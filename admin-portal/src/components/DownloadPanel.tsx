@@ -33,6 +33,15 @@ const FILTER_GROUPS: { group: string; filters: ExportFilter[] }[] = [
       { id: 'NOT_ACCEPTED', label: 'Not Accepted' },
     ],
   },
+  {
+    group: 'Payment',
+    filters: [
+      { id: 'PAYMENT_APPROVED', label: 'Payment Made (Approved)' },
+      { id: 'PAYMENT_PENDING', label: 'Payment Pending Review' },
+      { id: 'PAYMENT_REJECTED', label: 'Payment Rejected' },
+      { id: 'PAYMENT_NONE', label: 'No Payment Submitted' },
+    ],
+  },
 ];
 
 export default function DownloadPanel({ token, onUnauthorized }: { token: string; onUnauthorized: () => void }) {
@@ -179,7 +188,7 @@ export default function DownloadPanel({ token, onUnauthorized }: { token: string
                 <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
               </h4>
               <p className="text-sm text-brand-text/60 mt-1.5">
-                Export submissions as an Excel (.xlsx) file. Pick a filter (status / review decision), then choose the columns to include.
+                Export submissions as an Excel (.xlsx) file. Pick a filter (status / review decision / payment), then choose the columns to include.
               </p>
             </button>
 
@@ -240,7 +249,7 @@ export default function DownloadPanel({ token, onUnauthorized }: { token: string
 
           {step === 1 && (
             <div className="p-5 sm:p-6">
-              <div className="grid sm:grid-cols-2 gap-4">
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {FILTER_GROUPS.map((g) => (
                   <div key={g.group}>
                     <div className="text-xs font-bold uppercase tracking-wide text-brand-text/50 mb-2">{g.group}</div>

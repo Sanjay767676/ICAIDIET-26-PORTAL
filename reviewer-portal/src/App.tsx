@@ -3,6 +3,11 @@ import { AlertCircle, AlertTriangle, CheckCircle2, Download, Eye, Loader2, LogOu
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
+// How often the reviewer list re-reads while the tab is visible. D1 bills
+// rows_read and GET /api/reviewer/submissions reads every live submission, so
+// an always-on 3-minute poll was a large share of the daily free-tier budget.
+const POLL_INTERVAL_MS = 900000;
+
 interface Author {
   id: string;
   submission_id: string;
@@ -721,6 +726,10 @@ export default function App() {
   const [stats, setStats] = useState({ total: 0, pending: 0, accepted: 0, notAccepted: 0 });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // When the list on screen was last read. A ref, not state, because the
+  // visibilitychange handler is registered once and would otherwise close over
+  // the value from its first render.
+  const lastFetchedRef = useRef<number | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
   const [reviewMaintenance, setReviewMaintenance] = useState<{ active: boolean; until: string | null }>({ active: false, until: null });
   const [settingsChecked, setSettingsChecked] = useState<boolean>(false);
@@ -762,6 +771,7 @@ export default function App() {
         throw new Error(data?.error || 'Failed to load submissions.');
       }
       const list: Submission[] = data.submissions || [];
+      lastFetchedRef.current = Date.now();
       setSubmissions(list);
       setStats({
         total: list.length,
@@ -789,10 +799,32 @@ export default function App() {
 
   useEffect(() => {
     if (!token) return;
-    const id = setInterval(() => {
+
+    // D1 bills rows_read and this call reads every live submission, so a review
+    // tab left open behind other windows all day was a large share of the daily
+    // free-tier budget. A hidden tab suspends polling; returning to it refetches
+    // only if the data has aged past one interval, so the reviewer never sees
+    // anything staler than the poll period.
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
       fetchSubmissions({ silent: true });
-    }, 180000);
-    return () => clearInterval(id);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      const last = lastFetchedRef.current;
+      if (last === null || Date.now() - last >= POLL_INTERVAL_MS) {
+        fetchSubmissions({ silent: true });
+      }
+    };
+
+    const id = setInterval(tick, POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 

@@ -6,6 +6,15 @@ import RegistrationConfigPanel, { RegistrationConfig } from './components/Regist
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
+// How often the dashboard re-reads the submission list while the tab is visible.
+//
+// D1 bills rows_read, and GET /api/admin/submissions reads every live submission
+// (with correlated lookups for files, reviews and mail), so an always-on 3-minute
+// poll cost ~6.1k rows per tick and exhausted the 5M/day free-tier budget within a
+// day. 15 minutes, combined with the visibility gate and the manual Refresh
+// button, is the difference between ~2.9M rows/day and a rounding error.
+const POLL_INTERVAL_MS = 900000;
+
 interface Author {
   id: string;
   submission_id: string;
@@ -2026,6 +2035,13 @@ export default function App() {
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
   const [loading, setLoading] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
+  // When the list currently on screen was last read from the API, so the admin
+  // can see how stale it is instead of assuming it is live.
+  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  // Mirror of lastUpdated for the visibilitychange handler, which is registered
+  // once and would otherwise close over the value from its first render.
+  const lastUpdatedRef = useRef<number | null>(null);
   const [recovering, setRecovering] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pdfView, setPdfView] = useState<FileView>({ open: false });
@@ -2489,23 +2505,76 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
     }
   };
 
+  // Re-reads whichever list the current tab is showing, then stamps the time so
+  // the admin can judge how stale the screen is. Not memoised on purpose: the
+  // poll effect below re-creates it whenever activeTab changes, and this
+  // component already opts out of exhaustive-deps for these fetches.
+  const refreshActiveTab = async (opts?: { silent?: boolean }) => {
+    if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates', 'payments'].includes(activeTab)) {
+      await fetchSubmissions(opts);
+    } else if (activeTab === 'deleted') {
+      await fetchDeletedSubmissions(opts);
+    }
+    const now = Date.now();
+    lastUpdatedRef.current = now;
+    setLastUpdated(now);
+  };
+
+  const handleManualRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await refreshActiveTab();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const lastUpdatedLabel =
+    lastUpdated === null
+      ? 'Not loaded yet'
+      : `Updated ${new Date(lastUpdated).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`;
+
   React.useEffect(() => {
     if (token) {
       fetchSubmissions();
       fetchDeletedSubmissions();
       fetchSettings();
       fetchMailTemplates({ silent: true });
+      const now = Date.now();
+      lastUpdatedRef.current = now;
+      setLastUpdated(now);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   React.useEffect(() => {
     if (!token) return;
-    const id = setInterval(() => {
-      if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates', 'payments'].includes(activeTab)) fetchSubmissions({ silent: true });
-      else if (activeTab === 'deleted') fetchDeletedSubmissions({ silent: true });
-    }, 180000);
-    return () => clearInterval(id);
+
+    // D1 bills rows_read, and this one call reads every live submission, so a
+    // tab left open in the background all day is what exhausted the daily free
+    // tier. A hidden tab therefore suspends polling entirely. When the tab comes
+    // back the staleness check refetches if the data has aged past one interval,
+    // so returning never shows data older than the poll period.
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      refreshActiveTab({ silent: true });
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return;
+      const last = lastUpdatedRef.current;
+      if (last === null || Date.now() - last >= POLL_INTERVAL_MS) {
+        refreshActiveTab({ silent: true });
+      }
+    };
+
+    const id = setInterval(tick, POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeTab]);
 
@@ -2712,7 +2781,20 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
       <main className="container mx-auto px-4 sm:px-6 py-6 sm:py-8">
         <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-6">
           <div className="min-w-0">
-            <h2 className="text-2xl sm:text-3xl font-bold font-serif mb-3 md:mb-2">Admin Dashboard</h2>
+            <div className="flex items-center justify-between gap-3 mb-3 md:mb-2">
+              <h2 className="text-2xl sm:text-3xl font-bold font-serif">Admin Dashboard</h2>
+              <div className="flex items-center gap-2.5 shrink-0">
+                <span className="text-[11px] text-brand-text/50 hidden sm:inline whitespace-nowrap">{lastUpdatedLabel}</span>
+                <button
+                  onClick={handleManualRefresh}
+                  disabled={refreshing}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-text/10 text-brand-text hover:bg-brand-text/20 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+                  Refresh
+                </button>
+              </div>
+            </div>
             <div className="flex items-center gap-2 overflow-x-auto pb-1 -mx-1 px-1">
                 <button
                   onClick={() => changeTab('submissions')}

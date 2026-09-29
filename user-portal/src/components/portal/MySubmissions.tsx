@@ -12,7 +12,6 @@ import {
   Pencil,
   XCircle,
   CreditCard,
-  ExternalLink,
   ChevronRight,
   AlertCircle
 } from 'lucide-react';
@@ -45,6 +44,10 @@ interface MySubmission {
   payment_status?: string | null;
   payment_approved_at?: string | null;
   payment_submitted_at?: string | null;
+  // Snapshotted by the backend at registration time, so the amount the author
+  // was charged stays on record even after an admin edits the fee matrix.
+  fee_amount?: string | null;
+  fee_tier?: string | null;
 }
 
 export interface RegistrationConfig {
@@ -188,9 +191,14 @@ function reviewBanner(sub: MySubmission) {
 // the amount from an author who is about to transfer money, and it mirrors
 // DEFAULT_REGISTRATION_CONFIG in backend/src/index.ts -- change one, change the
 // other.
+//
+// It is a last-resort display fallback ONLY. The amount an author actually
+// agrees to and that gets recorded comes from GET /api/registration/fee at the
+// moment they pick a registration type, so a stale fallback can never become
+// the price on a payment record.
 // ------------------------------------------------------------------
 const FALLBACK_REGISTRATION: RegistrationConfig = {
-  early_bird_until: '2026-10-23',
+  early_bird_until: '2026-10-10',
   fees: {
     'Indian Author': {
       'Conference alone': { early: '₹2,000', standard: '₹2,500' },
@@ -279,6 +287,16 @@ function RegistrationFormBody({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editingSubmitted, setEditingSubmitted] = useState(false);
+  // The price the server quoted for the currently selected pair, fetched fresh
+  // on every selection change. Null until it arrives, and deliberately NOT
+  // seeded from `config`: the config was fetched once when the app mounted, so
+  // it can be arbitrarily stale, and a stale number is exactly the
+  // miscommunication this replaces.
+  const [liveFee, setLiveFee] = useState<{ amount: string; tier: 'EARLY' | 'STANDARD' } | null>(null);
+  const [feeError, setFeeError] = useState<string | null>(null);
+  // The author must tick this before submitting, so the amount on the record is
+  // something they affirmatively agreed to rather than something inferred.
+  const [confirmedPaid, setConfirmedPaid] = useState(false);
 
   useEffect(() => {
     setType(sub.registration_type || '');
@@ -286,6 +304,9 @@ function RegistrationFormBody({
     setUtr(sub.utr_transaction_id || '');
     setFile(null);
     setError(null);
+    setLiveFee(null);
+    setFeeError(null);
+    setConfirmedPaid(false);
     setEditingSubmitted(false);
     setLoading(false);
   }, [resetKey]);
@@ -306,6 +327,48 @@ function RegistrationFormBody({
   const selectedFee = config.fees[authorType]?.[type] || null;
   const early = isEarlyBird(config);
   const cutoffLabel = formatCutoffDate(config.early_bird_until);
+
+  // Ask the server what this exact pair costs, every time the selection
+  // changes. The config object on the props was fetched once when the app
+  // mounted, so reading a price out of it is what produced the "page says
+  // ₹10,000, admin had already moved it" confusion. One request per selection,
+  // no polling, and the number shown next to the bank details is the same one
+  // the submit path will record.
+  useEffect(() => {
+    let cancelled = false;
+    if (!type || !authorType) {
+      setLiveFee(null);
+      setFeeError(null);
+      return;
+    }
+    setLiveFee(null);
+    setFeeError(null);
+    setConfirmedPaid(false);
+
+    (async () => {
+      try {
+        const token = await getToken();
+        if (!token) throw new Error('Not authenticated');
+        const res = await fetch(
+          `${API_URL}/api/registration/fee?authorType=${encodeURIComponent(authorType)}&registrationType=${encodeURIComponent(type)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const data = await res.json().catch(() => null);
+        if (cancelled) return;
+        if (!res.ok || !data?.success) {
+          setFeeError(data?.error || 'Could not load the current fee for this registration type.');
+          return;
+        }
+        setLiveFee({ amount: data.fee_amount, tier: data.fee_tier });
+      } catch {
+        if (!cancelled) setFeeError('Could not load the current fee. Please check your connection and try again.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [type, authorType, getToken]);
   // The day after the inclusive cutoff is when standard pricing starts.
   const standardFromLabel = (() => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(config.early_bird_until || '')) return '';
@@ -370,8 +433,7 @@ function RegistrationFormBody({
   const hasSubmitted = !!(sub.payment_proof_url && sub.utr_transaction_id);
   const isRejected = sub.payment_status === 'REJECTED';
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const submitRegistration = async () => {
     if (!type) {
       setError('Please select a registration type.');
       return;
@@ -380,12 +442,22 @@ function RegistrationFormBody({
       setError('Please select an author type.');
       return;
     }
+    // No price could be fetched, or the one on offer vanished. Either way the
+    // author must not be asked to confirm an amount we cannot state.
+    if (!liveFee) {
+      setError(feeError || 'Please wait for the fee to load, or pick another registration type.');
+      return;
+    }
+    if (!confirmedPaid) {
+      setError('Please confirm you have paid the amount shown above.');
+      return;
+    }
     if (file && file.size > MAX_FILE_SIZE) {
       setError('The proof file must be 10MB or smaller.');
       return;
     }
     if (isRejected) {
-      if (!file) {
+      if (!file && !sub.payment_proof_url) {
         setError('Please upload a new, corrected payment proof after your payment was declined.');
         return;
       }
@@ -415,8 +487,16 @@ function RegistrationFormBody({
         });
         const fileData = await fileRes.json().catch(() => null);
         if (!fileRes.ok || !fileData?.success) throw new Error(fileData?.error || 'Failed to upload proof.');
+        // The proof is stored now. Clearing it stops a re-confirm from uploading
+        // the same image a second time and orphaning the first R2 object.
+        setFile(null);
       }
 
+      // fee_amount/fee_tier is the server-quoted price from the selection-time
+      // fetch above, which the author explicitly confirmed. The backend still
+      // re-checks it against the admin fee matrix and falls back to its own
+      // resolution if it no longer matches, so a hand-rolled request still
+      // cannot claim a cheaper early-bird price.
       const regRes = await fetch(`${API_URL}/api/user/submissions/${sub.id}/register`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -424,9 +504,22 @@ function RegistrationFormBody({
           registration_type: type,
           author_type: authorType,
           utr_transaction_id: utr.trim(),
+          fee_amount: liveFee.amount,
+          fee_tier: liveFee.tier,
         }),
       });
       const regData = await regRes.json().catch(() => null);
+
+      // Last-resort guard for the narrow window where the admin repriced between
+      // the selection-time fetch and this submit. Nothing is written on this
+      // path; re-fetch the live price and let the author confirm the new one.
+      if (regRes.status === 409 && regData?.code === 'FEE_CHANGED') {
+        setError('The fee changed a moment ago. The form has been refreshed with the current amount — please review it and confirm again.');
+        setLiveFee({ amount: regData.current_amount, tier: regData.current_tier });
+        setConfirmedPaid(false);
+        return;
+      }
+
       if (!regRes.ok || !regData?.success) throw new Error(regData?.error || 'Failed to save registration details.');
 
       setEditingSubmitted(false);
@@ -436,6 +529,11 @@ function RegistrationFormBody({
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await submitRegistration();
   };
 
   // 2. SUBMITTED AND PENDING VERIFICATION (unless user clicks edit)
@@ -586,10 +684,15 @@ function RegistrationFormBody({
         {/* Step 3: Fee Details & Bank Info & Upload (Shown after completing author type) */}
         {type && authorType && (
           <div className="space-y-6 animate-fadeIn pt-2 border-t border-stone-200">
-            {/* Dynamic Fee details card */}
+            {/* Fee details, priced from the live server response rather than the
+                mount-time config so the figure the author reads here is the one
+                that will be recorded. */}
             {selectedFee && (() => {
-              const activeAmount = early ? selectedFee.early : selectedFee.standard;
-              const activeLabel = early ? 'Early registration' : 'Standard / late fee';
+              const liveTier = liveFee?.tier;
+              const activeAmount = liveFee?.amount ?? (early ? selectedFee.early : selectedFee.standard);
+              const activeLabel = liveTier
+                ? liveTier === 'EARLY' ? 'Early registration' : 'Standard / late fee'
+                : early ? 'Early registration' : 'Standard / late fee';
 
               return (
                 <div className="bg-amber-50/90 border-2 border-amber-300/80 rounded-2xl p-5 shadow-sm space-y-4">
@@ -599,12 +702,15 @@ function RegistrationFormBody({
                         Applicable Fee
                       </span>
                       <span className="text-sm font-bold text-black">{authorType} • {type}</span>
+                    </div>
+                  </div>
+
                   <div className="bg-white rounded-xl p-4 border border-amber-200 shadow-sm flex items-center justify-between flex-wrap gap-3">
                     <div>
                       <div className="text-base font-bold text-black flex items-center gap-2 flex-wrap">
                         <span>{activeLabel}</span>
-                        {cutoffLabel ? (
-                          early ? (
+                        {liveTier ? (
+                          liveTier === 'EARLY' ? (
                             <span className="text-[11px] bg-green-100 text-green-800 border border-green-300 px-2 py-0.5 rounded-full font-semibold">
                               Early Bird till {cutoffLabel}
                             </span>
@@ -616,11 +722,13 @@ function RegistrationFormBody({
                         ) : null}
                       </div>
                       <div className="text-xs text-black/60 mt-0.5">
-                        {cutoffLabel
-                          ? early
-                            ? `Standard / late fee after ${cutoffLabel}: ${selectedFee.standard}`
-                            : `Early registration ended on ${cutoffLabel}`
-                          : 'Contact the conference team for the applicable fee.'}
+                        {!liveFee
+                          ? 'Checking the current fee…'
+                          : cutoffLabel
+                            ? liveTier === 'EARLY'
+                              ? `Standard / late fee after ${cutoffLabel}: ${selectedFee.standard}`
+                              : `Early registration ended on ${cutoffLabel}`
+                            : 'Contact the conference team for the applicable fee.'}
                       </div>
                     </div>
                     <div className="text-3xl font-bold font-mono text-brand-text">
@@ -687,6 +795,45 @@ function RegistrationFormBody({
               />
             </div>
 
+            {/* The amount the author is affirming, fetched from the server when
+                they picked this registration type. Sits directly under the UTR
+                field so the last thing they read before submitting is the number
+                they are agreeing to have recorded. */}
+            {feeError && (
+              <div className="flex items-center gap-2 p-3 bg-amber-50 text-amber-800 border border-amber-300 rounded-xl text-sm font-medium">
+                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" /> {feeError}
+              </div>
+            )}
+
+            {liveFee && (
+              <label
+                className={`flex items-start gap-3 p-4 rounded-xl border-2 transition-colors ${
+                  confirmedPaid
+                    ? 'bg-green-50 border-green-400'
+                    : 'bg-yellow-50 border-yellow-400 cursor-pointer hover:bg-yellow-100'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={confirmedPaid}
+                  onChange={(e) => setConfirmedPaid(e.target.checked)}
+                  disabled={loading}
+                  className="mt-0.5 w-5 h-5 shrink-0 accent-green-600 cursor-pointer"
+                />
+                <span className="text-sm leading-relaxed">
+                  <span className="font-bold text-black">
+                    I confirm I have paid {liveFee.amount}
+                  </span>
+                  <span className="text-black/80">
+                    {' '}
+                    for this registration
+                    {liveFee.tier === 'EARLY' ? ' (early-bird rate)' : ' (standard rate)'} and that the
+                    details above are correct.
+                  </span>
+                </span>
+              </label>
+            )}
+
             {error && (
               <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-sm font-medium">
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-600" /> {error}
@@ -695,7 +842,7 @@ function RegistrationFormBody({
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || !liveFee || !confirmedPaid}
               className="w-full py-3 bg-brand-text text-white rounded-xl font-bold text-base hover:bg-brand-accent transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {loading ? (
@@ -1052,7 +1199,9 @@ export function MySubmissions({
   const [expandedPaymentIds, setExpandedPaymentIds] = useState<Record<string, boolean>>({});
 
   // Admin-editable fees, cutoff and bank details, fetched once by App from
-  // GET /api/settings.
+  // GET /api/settings. Drives the dropdown options and the bank block; the
+  // price itself comes from the per-selection fetch in RegistrationFormBody, so
+  // nothing displayed to an author about to pay money is read from this.
   const config = useRegistrationConfig(registration);
 
   // Accepted papers this author can still pay for. Papers already approved or

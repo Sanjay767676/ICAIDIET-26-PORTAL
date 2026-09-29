@@ -63,7 +63,15 @@ const ALLOWED_SUBMISSION_STATUSES = new Set([
 // `early_bird_until` is an INCLUSIVE calendar date (YYYY-MM-DD) on which early
 // bird pricing still applies -- standard fees begin the day after.
 const DEFAULT_REGISTRATION_CONFIG = {
-  early_bird_until: '2026-10-23',
+  // Seed only. The live value is the `registration_config` settings row the
+  // admin edits in the dashboard, and that always wins. This must be kept equal
+  // to what the admin last saved, otherwise a transient settings-row problem
+  // would silently revert pricing to a deadline the admin had already moved --
+  // the exact failure this comment exists to prevent.
+  //
+  // Set by the admin in Registration & Fees. Do not hardcode a different date
+  // here without also updating the settings row.
+  early_bird_until: '2026-10-10',
   fees: {
     'Indian Author': {
       'Conference alone': { early: '₹2,000', standard: '₹2,500' },
@@ -1670,7 +1678,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1859,7 +1867,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2444,6 +2452,10 @@ app.get('/api/admin/backup', async (c) => {
 
 const EXPORT_STATUS_FILTERS = new Set(['SUBMITTED', 'UNDER_REVIEW', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY']);
 const EXPORT_REVIEW_FILTERS = new Set(['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES', 'NOT_ACCEPTED']);
+// These are export filter ids, not payment_status values, so the ids stay
+// readable in the .xlsx filename and the two namespaces cannot collide with the
+// status/review filters above. PAYMENT_NONE maps to a NULL payment_status.
+const EXPORT_PAYMENT_FILTERS = new Set(['PAYMENT_APPROVED', 'PAYMENT_PENDING', 'PAYMENT_REJECTED', 'PAYMENT_NONE']);
 
 const EXPORT_FILTER_LABELS: Record<string, string> = {
   ALL: 'ALL_ENTRIES',
@@ -2455,6 +2467,16 @@ const EXPORT_FILTER_LABELS: Record<string, string> = {
   ACCEPTED_WITH_MINOR_CHANGES: 'ACCEPTED_WITH_MINOR_CHANGES',
   ACCEPTED_WITH_MAJOR_CHANGES: 'ACCEPTED_WITH_MAJOR_CHANGES',
   NOT_ACCEPTED: 'NOT_ACCEPTED',
+  PAYMENT_APPROVED: 'PAYMENT_MADE',
+  PAYMENT_PENDING: 'PAYMENT_PENDING_REVIEW',
+  PAYMENT_REJECTED: 'PAYMENT_REJECTED',
+  PAYMENT_NONE: 'NO_PAYMENT_SUBMITTED',
+};
+
+const PAYMENT_STATUS_LABELS: Record<string, string> = {
+  PENDING: 'Pending Review',
+  APPROVED: 'Payment Made',
+  REJECTED: 'Rejected',
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -2503,6 +2525,21 @@ const EXPORT_COLUMNS: { id: string; label: string; pick: (s: any) => string }[] 
   { id: 'manuscript_file', label: 'Manuscript Filename', pick: (s) => s.manuscript_file || '' },
   { id: 'plagiarism_file', label: 'Plagiarism Filename', pick: (s) => s.plagiarism_file || '' },
   { id: 'ai_plagiarism_file', label: 'AI Plagiarism Filename', pick: (s) => s.ai_plagiarism_file || '' },
+  // What the author selected at payment, and what it cost. fee_amount /
+  // fee_tier are snapshots written at registration time, so these report the
+  // price actually collected rather than today's fee matrix.
+  { id: 'payment_status', label: 'Payment Status', pick: (s) => (s.payment_status ? PAYMENT_STATUS_LABELS[s.payment_status] || s.payment_status : '') },
+  { id: 'author_type', label: 'Author Type', pick: (s) => s.author_type || '' },
+  { id: 'registration_type', label: 'Registration Type', pick: (s) => s.registration_type || '' },
+  { id: 'fee_amount', label: 'Amount Paid', pick: (s) => s.fee_amount || '' },
+  { id: 'fee_tier', label: 'Fee Tier', pick: (s) => (s.fee_tier === 'EARLY' ? 'Early Bird' : s.fee_tier === 'STANDARD' ? 'Standard / Late' : '') },
+  { id: 'utr_transaction_id', label: 'UTR / Transaction ID', pick: (s) => s.utr_transaction_id || '' },
+  // A Yes/No rather than a filename: payment proofs are stored under a
+  // generated R2 key (proof/<id>-<timestamp>.<ext>) and the author's original
+  // filename is not kept, so there is no honest name to show.
+  { id: 'payment_proof_uploaded', label: 'Payment Proof Uploaded', pick: (s) => (s.payment_proof_url ? 'Yes' : 'No') },
+  { id: 'payment_submitted_at', label: 'Payment Submitted At', pick: (s) => fmtExportDate(s.payment_submitted_at) },
+  { id: 'payment_approved_at', label: 'Payment Approved At', pick: (s) => fmtExportDate(s.payment_approved_at) },
   { id: 'mail_status', label: 'Mail Status', pick: (s) => s.mail_status || '' },
 ];
 
@@ -2535,8 +2572,8 @@ app.post('/api/admin/export', async (c) => {
     const filter = String(body?.filter || 'ALL').trim().toUpperCase();
     const requested = Array.isArray(body?.columns) ? body.columns.map(String) : [];
 
-    if (filter !== 'ALL' && !EXPORT_STATUS_FILTERS.has(filter) && !EXPORT_REVIEW_FILTERS.has(filter)) {
-      return c.json({ success: false, error: 'Invalid filter. Please choose a status or review filter.' }, 400);
+    if (filter !== 'ALL' && !EXPORT_STATUS_FILTERS.has(filter) && !EXPORT_REVIEW_FILTERS.has(filter) && !EXPORT_PAYMENT_FILTERS.has(filter)) {
+      return c.json({ success: false, error: 'Invalid filter. Please choose a status, review or payment filter.' }, 400);
     }
     const selected = EXPORT_COLUMNS.filter((col) => requested.includes(col.id));
     if (selected.length === 0) {
@@ -2551,6 +2588,15 @@ app.post('/api/admin/export', async (c) => {
     } else if (EXPORT_STATUS_FILTERS.has(filter)) {
       conds.push('s.status = ?');
       params.push(filter);
+    } else if (EXPORT_PAYMENT_FILTERS.has(filter)) {
+      // A paper that never registered has no payment_status at all, so
+      // "no payment submitted" is an explicit IS NULL rather than a sentinel.
+      if (filter === 'PAYMENT_NONE') {
+        conds.push('s.payment_status IS NULL');
+      } else {
+        conds.push('s.payment_status = ?');
+        params.push(filter.replace('PAYMENT_', ''));
+      }
     } else {
       conds.push(
         '(SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = ?'
@@ -2561,6 +2607,8 @@ app.post('/api/admin/export', async (c) => {
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.keywords, s.track, s.status,
               s.author_name, s.author_email, s.created_at AS submitted_at, s.updated_at, s.enquired, s.no_corrections,
+              s.registration_type, s.author_type, s.fee_amount, s.fee_tier,
+              s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.payment_proof_url,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2827,6 +2875,75 @@ async function loadRegistrationConfig(env: Bindings): Promise<RegistrationConfig
   }
 }
 
+// The fee an author was actually shown, snapshotted at registration time so that
+// later edits to the admin fee matrix cannot rewrite what historical payment
+// records say was collected.
+//
+// `claimedAmount`/`claimedTier` are what the browser displayed. The cutoff is an
+// INCLUSIVE calendar date and the author's clock and the Worker's can disagree by
+// a day, so the cutoff alone would occasionally snapshot the opposite bracket
+// from the one on screen. The claimed value is therefore accepted ONLY if it
+// exactly matches one of the two amounts the admin configured for that pair --
+// which makes it impossible to claim a cheaper early-bird price. Anything else
+// is resolved here instead.
+//
+// Returns null when the pair is not in the matrix at all, which happens on the
+// re-register escape hatch in POST /api/user/submissions/:id/register after an
+// admin renames or removes a type.
+function resolveFeeSnapshot(
+  config: RegistrationConfig,
+  authorType: string,
+  registrationType: string,
+  claimedAmount?: unknown,
+  claimedTier?: unknown
+): { amount: string; tier: 'EARLY' | 'STANDARD' } | null {
+  const row = config.fees[authorType]?.[registrationType];
+  if (!row) return null;
+
+  const claimAmount = cleanDisplayText(claimedAmount, 40);
+  const claimTier = (cleanDisplayText(claimedTier, 20) || '').toUpperCase();
+  if (claimAmount && (claimTier === 'EARLY' || claimTier === 'STANDARD')) {
+    const expected = claimTier === 'EARLY' ? row.early : row.standard;
+    if (claimAmount === expected) return { amount: claimAmount, tier: claimTier };
+  }
+
+  const until = (config.early_bird_until || '').trim();
+  const today = new Date().toISOString().slice(0, 10);
+  const early = isCalendarDate(until) && today <= until;
+  return { amount: early ? row.early : row.standard, tier: early ? 'EARLY' : 'STANDARD' };
+}
+
+// Detects the admin repricing an option while an author has the form open, and
+// returns the 409 payload when it must be surfaced.
+//
+// The rule is deliberately narrow. Refusing only when the displayed amount is
+// no longer a live price for that pair keeps two things true at once:
+//   - a price the author agreed to is never overwritten with one they never saw
+//   - moving the early-bird DATE alone (prices untouched) still honours what the
+//     author was shown, so a long-lived tab is not penalised
+//
+// Returns null when the submit may proceed, which includes the honest case of an
+// author who claimed no amount at all: with nothing on the record there is no
+// agreement to honour, so the resolved price is simply what they pay.
+function staleAmountRefusal(
+  config: RegistrationConfig,
+  authorType: string,
+  registrationType: string,
+  snapshot: { amount: string; tier: 'EARLY' | 'STANDARD' } | null,
+  claimedAmount: unknown
+):
+  | { code: 'FEE_CHANGED'; displayed_amount: string; current_amount: string; current_tier: string }
+  | null {
+  const displayed = cleanDisplayText(claimedAmount, 40);
+  if (!snapshot || !displayed || displayed === snapshot.amount) return null;
+  return {
+    code: 'FEE_CHANGED',
+    displayed_amount: displayed,
+    current_amount: snapshot.amount,
+    current_tier: snapshot.tier,
+  };
+}
+
 // Returns whether a portal is currently in maintenance and, when set, the
 // end date/time the admin configured ("" otherwise). If the admin set an
 // "until" time and it has already passed, maintenance is treated as off.
@@ -2892,6 +3009,55 @@ app.get('/api/settings', async (c) => {
     return c.json({ success: true, settings, registration });
   } catch (error) {
     console.error('Fetch settings error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// Resolve the live price for one author/registration pair.
+//
+// The portal needs this the moment an author picks a registration type, because
+// the config it rendered on page load can be stale: the admin may have repriced
+// while the author was deciding. Authoritative server-side resolution is what
+// removes the miscommunication, since the amount shown next to the payment
+// instruction and the amount recorded on submit come from the same code path.
+//
+// Requires a signed-in author so this cannot be used to enumerate the fee
+// matrix anonymously. Reads are trivial (one settings row), and it fires once
+// per selection rather than on a timer.
+app.get('/api/registration/fee', async (c) => {
+  const env = c.env as Bindings;
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
+
+    const url = new URL(c.req.url);
+    const authorType = cleanDisplayText(url.searchParams.get('authorType'), 80);
+    const registrationType = cleanDisplayText(url.searchParams.get('registrationType'), 80);
+    if (!authorType || !registrationType) {
+      return c.json({ success: false, error: 'authorType and registrationType are required.' }, 400);
+    }
+
+    const config = await loadRegistrationConfig(env);
+    const snapshot = resolveFeeSnapshot(config, authorType, registrationType);
+    if (!snapshot) {
+      // Author renamed or removed this pair while the form was open. Say so
+      // rather than quoting a price that is not actually on offer.
+      return c.json(
+        { success: false, error: 'This registration type is no longer available. Please choose another.' },
+        404
+      );
+    }
+
+    return c.json({
+      success: true,
+      fee_amount: snapshot.amount,
+      fee_tier: snapshot.tier,
+      early_bird_until: config.early_bird_until,
+    });
+  } catch (error) {
+    console.error('Fetch registration fee error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -3153,7 +3319,7 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const submission = await c.env.DB.prepare(
-      `SELECT id, user_id, author_email, payment_proof_url, registration_type, author_type FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, user_id, author_email, payment_proof_url, registration_type, author_type, fee_amount, fee_tier FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
     const ownsSubmission =
@@ -3166,7 +3332,7 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
     if (!eligibility.ok) return c.json({ success: false, error: eligibility.error }, 403);
 
     const body = await c.req.json().catch(() => ({}));
-    const { registration_type, author_type, utr_transaction_id } = body;
+    const { registration_type, author_type, utr_transaction_id, fee_amount, fee_tier } = body;
     const now = new Date().toISOString();
 
     const registrationType = (registration_type || '').trim();
@@ -3204,13 +3370,44 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'Please upload your payment proof before registering.' }, 400);
     }
 
+    // Snapshot what this author was charged, so the admin export can report the
+    // amount collected instead of re-deriving it from a fee matrix that may since
+    // have been edited. On the re-register escape hatch above the pair is no
+    // longer in the matrix, so the amount already on file is preserved rather than
+    // blanked -- an admin rename must never erase a payment record.
+    const snapshot = resolveFeeSnapshot(config, authorType, registrationType, fee_amount, fee_tier);
+
+    // The admin can reprice while an author has this form open. Recording the new
+    // figure against a payment the author agreed to at the old one would be a
+    // silent price change, so refuse and let them re-confirm. Nothing is written
+    // on this path, and the already-uploaded proof is untouched.
+    const refusal = staleAmountRefusal(config, authorType, registrationType, snapshot, fee_amount);
+    if (refusal) {
+      return c.json(
+        {
+          success: false,
+          error: 'The registration fee changed while you were filling this in.',
+          ...refusal,
+        },
+        409
+      );
+    }
+
+    const feeAmount = snapshot ? snapshot.amount : (submission.fee_amount || null);
+    const feeTier = snapshot ? snapshot.tier : (submission.fee_tier || null);
+
     // Reset the workflow flags when re-registering after a decline so the
     // admin sees the submission as pending again (not silently re-approved).
     await c.env.DB.prepare(
-      `UPDATE submissions SET registration_type = ?, author_type = ?, utr_transaction_id = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ? WHERE id = ?`
-    ).bind(registrationType, authorType, utr, now, now, submissionId).run();
+      `UPDATE submissions SET registration_type = ?, author_type = ?, utr_transaction_id = ?, fee_amount = ?, fee_tier = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ? WHERE id = ?`
+    ).bind(registrationType, authorType, utr, feeAmount, feeTier, now, now, submissionId).run();
 
-    return c.json({ success: true, payment_status: 'PENDING' });
+    return c.json({
+      success: true,
+      payment_status: 'PENDING',
+      fee_amount: feeAmount,
+      fee_tier: feeTier,
+    });
   } catch (err: any) {
     console.error('Register submission error:', err);
     return c.json({ success: false, error: 'Failed to save registration details.' }, 500);
