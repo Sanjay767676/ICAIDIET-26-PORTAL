@@ -599,17 +599,6 @@ function RegistrationFormBody({
                         Applicable Fee
                       </span>
                       <span className="text-sm font-bold text-black">{authorType} • {type}</span>
-                    </div>
-                    <a
-                      href="https://www.icaidiet26.tech/registration-fee"
-                      target="_blank"
-                      rel="noreferrer"
-                      className="inline-flex items-center gap-1 text-xs font-bold text-brand-accent hover:underline"
-                    >
-                      Fee Schedule <ExternalLink className="w-3 h-3" />
-                    </a>
-                  </div>
-
                   <div className="bg-white rounded-xl p-4 border border-amber-200 shadow-sm flex items-center justify-between flex-wrap gap-3">
                     <div>
                       <div className="text-base font-bold text-black flex items-center gap-2 flex-wrap">
