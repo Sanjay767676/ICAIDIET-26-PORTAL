@@ -759,6 +759,25 @@ function sanitizeFilename(name: string): string {
 }
 
 // ------------------------------------------------------------------
+// Phone number validation
+// A phone number is digits only, 5-15 digits long. Formatting characters
+// (+, -, spaces, brackets) are stripped on the way in so legacy values
+// like "87548 28766" normalise to "8754828766" instead of being rejected.
+// ------------------------------------------------------------------
+const PHONE_MIN_DIGITS = 5;
+const PHONE_MAX_DIGITS = 15;
+const PHONE_RULE = `${PHONE_MIN_DIGITS}-${PHONE_MAX_DIGITS} digits (numbers only, no +, - or spaces)`;
+
+function normalizePhone(value: unknown): string {
+  return String(value ?? '').replace(/\D/g, '').slice(0, PHONE_MAX_DIGITS);
+}
+
+function isValidPhone(value: unknown): boolean {
+  const digits = normalizePhone(value);
+  return digits.length >= PHONE_MIN_DIGITS && digits.length <= PHONE_MAX_DIGITS;
+}
+
+// ------------------------------------------------------------------
 // Excel (.xlsx) generation — dependency-free OOXML + ZIP (stored).
 // Lets the admin export submissions as a real .xlsx without shipping
 // a heavy spreadsheet library to the Worker bundle.
@@ -1366,10 +1385,13 @@ app.post('/api/users/profile', requireClerkAuth, async (c) => {
     const institution = (body?.institution || '').trim();
     const department = (body?.department || '').trim();
     const country = (body?.country || '').trim();
-    const phone = (body?.phone || '').trim();
+    const phone = normalizePhone(body?.phone);
 
     if (!institution || !department || !country || !phone) {
       return c.json({ success: false, error: 'All profile fields are required.' }, 400);
+    }
+    if (!isValidPhone(phone)) {
+      return c.json({ success: false, error: `Phone number must be ${PHONE_RULE}.` }, 400);
     }
 
     const name = (body?.name || '').trim() || 'User';
@@ -1460,7 +1482,7 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
           authors = parsed.map((a: any) => ({
             first_name: String(a?.first_name || '').trim(),
             last_name: String(a?.last_name || '').trim(),
-            phone: String(a?.phone || '').trim(),
+            phone: normalizePhone(a?.phone),
             email: String(a?.email || '').trim(),
             college: String(a?.college || '').trim(),
           }));
@@ -1478,7 +1500,9 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
     }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const hasAuthors = authors.length > 0;
+    if (authors.length === 0) {
+      return c.json({ success: false, error: 'At least one author with a valid phone number is required.' }, 400);
+    }
     for (let i = 0; i < authors.length; i++) {
       const a = authors[i];
       if (!a.first_name || !a.last_name) {
@@ -1486,6 +1510,9 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
       }
       if (!a.phone) {
         return c.json({ success: false, error: `Author ${i + 1}: a phone number is required.` }, 400);
+      }
+      if (!isValidPhone(a.phone)) {
+        return c.json({ success: false, error: `Author ${i + 1}: phone number must be ${PHONE_RULE}.` }, 400);
       }
       if (!emailRegex.test(a.email)) {
         return c.json({ success: false, error: `Author ${i + 1}: a valid email address is required.` }, 400);
@@ -1610,17 +1637,7 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
         ),
       ];
 
-      const authorRows = hasAuthors
-        ? authors
-        : [{
-          first_name: authorName.split(' ').slice(0, -1).join(' ') || authorName.split(' ')[0] || '',
-          last_name: authorName.split(' ').slice(-1)[0] || '',
-          phone: '',
-          email: authorEmail,
-          college: '',
-        }];
-
-      authorRows.forEach((a, idx) => {
+      authors.forEach((a, idx) => {
         batchStatements.push(
           c.env.DB.prepare(
             `INSERT INTO authors
@@ -2330,13 +2347,20 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
       first_name: typeof a.first_name === 'string' ? a.first_name.trim() : '',
       last_name: typeof a.last_name === 'string' ? a.last_name.trim() : '',
       email: typeof a.email === 'string' ? a.email.trim() : '',
-      phone: typeof a.phone === 'string' ? a.phone.trim() : '',
+      phone: normalizePhone(a.phone),
       college: typeof a.college === 'string' ? a.college.trim() : '',
       is_primary: a.is_primary === true || a.is_primary === 1 || a.is_primary === '1' ? 1 : 0,
     }));
 
     if (authors.some((a) => !a.first_name || !a.last_name)) {
       return c.json({ success: false, error: 'Every author needs a first and last name.' }, 400);
+    }
+    const badPhoneIndex = authors.findIndex((a) => !isValidPhone(a.phone));
+    if (badPhoneIndex !== -1) {
+      return c.json({
+        success: false,
+        error: `Author ${badPhoneIndex + 1}: phone number must be ${PHONE_RULE}.`
+      }, 400);
     }
     if (authors.filter((a) => a.is_primary === 1).length !== 1) {
       return c.json({ success: false, error: 'Exactly one author must be marked as the primary (corresponding) author.' }, 400);

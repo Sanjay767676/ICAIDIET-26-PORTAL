@@ -23,6 +23,10 @@ interface SubmissionWizardProps {
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
 
+const PHONE_MIN_DIGITS = 5;
+const PHONE_MAX_DIGITS = 15;
+const onlyDigits = (value: string) => value.replace(/\D/g, '').slice(0, PHONE_MAX_DIGITS);
+
 export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: SubmissionWizardProps) {
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -165,7 +169,7 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
           authors.map((a) => ({
             first_name: a.first_name.trim(),
             last_name: a.last_name.trim(),
-            phone: a.phone.trim(),
+            phone: onlyDigits(a.phone),
             email: a.email.trim(),
             college: a.college.trim(),
           }))
@@ -354,8 +358,15 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
       if (!a.first_name.trim() || !a.last_name.trim()) {
         return { ok: false, msg: `Author ${i + 1}: please provide both a first and last name.` };
       }
-      if (!a.phone.trim()) {
+      const phoneDigits = a.phone.replace(/\D/g, '');
+      if (!phoneDigits) {
         return { ok: false, msg: `Author ${i + 1}: please provide a phone number.` };
+      }
+      if (phoneDigits.length < PHONE_MIN_DIGITS || phoneDigits.length > PHONE_MAX_DIGITS) {
+        return {
+          ok: false,
+          msg: `Author ${i + 1}: phone number must be ${PHONE_MIN_DIGITS}-${PHONE_MAX_DIGITS} digits (numbers only).`,
+        };
       }
       if (!emailRegex.test(a.email.trim())) {
         return { ok: false, msg: `Author ${i + 1}: please provide a valid email address.` };
@@ -549,13 +560,39 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
                         onChange={(e) => updateAuthor(idx, 'last_name', e.target.value)}
                         className="px-4 py-2 rounded-lg bg-white outline-none border border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
                       />
-                      <input
-                        type="tel"
-                        placeholder="Phone Number"
-                        value={author.phone}
-                        onChange={(e) => updateAuthor(idx, 'phone', e.target.value.replace(/[^0-9+\-\s()]/g, ''))}
-                        className="px-4 py-2 rounded-lg bg-white outline-none border border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20"
-                      />
+                      {(() => {
+                        const digits = onlyDigits(author.phone);
+                        const phoneError =
+                          digits.length > 0 &&
+                          (digits.length < PHONE_MIN_DIGITS || digits.length > PHONE_MAX_DIGITS);
+                        return (
+                          <div className="flex flex-col gap-1">
+                            <input
+                              type="tel"
+                              inputMode="numeric"
+                              autoComplete="tel"
+                              required
+                              maxLength={PHONE_MAX_DIGITS}
+                              name={isPrimary ? 'phone' : `coauthor_phone_${idx}`}
+                              aria-label="Phone number"
+                              aria-invalid={phoneError}
+                              placeholder={`Phone Number (${PHONE_MIN_DIGITS}-${PHONE_MAX_DIGITS} digits)`}
+                              value={author.phone}
+                              onChange={(e) => updateAuthor(idx, 'phone', onlyDigits(e.target.value))}
+                              className={`px-4 py-2 rounded-lg bg-white outline-none border shadow-sm focus:ring-2 ${
+                                phoneError
+                                  ? 'border-red-400 focus:border-red-500 focus:ring-red-500/20'
+                                  : 'border-stone-200 focus:border-brand-accent focus:ring-brand-accent/20'
+                              }`}
+                            />
+                            {phoneError && (
+                              <p className="text-xs text-red-500">
+                                Only numbers allowed — {PHONE_MIN_DIGITS}-{PHONE_MAX_DIGITS} digits.
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                       <input
                         type="email"
                         placeholder="Email ID"

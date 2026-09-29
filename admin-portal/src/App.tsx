@@ -6,6 +6,10 @@ import RegistrationConfigPanel, { RegistrationConfig } from './components/Regist
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
+const PHONE_MIN_DIGITS = 5;
+const PHONE_MAX_DIGITS = 15;
+const onlyDigits = (value: string) => String(value ?? '').replace(/\D/g, '').slice(0, PHONE_MAX_DIGITS);
+
 // How often the dashboard re-reads the submission list while the tab is visible.
 //
 // D1 bills rows_read, and GET /api/admin/submissions reads every live submission
@@ -315,11 +319,15 @@ function primaryAuthorLines(sub: Submission) {
           {[primary.first_name, primary.last_name].filter(Boolean).join(' ') || '—'}
         </div>
         <div className="flex items-center gap-1.5 text-xs text-brand-text/60 font-normal mt-0.5 break-words">
-          {primary.phone && (
-            <span className="inline-flex items-center gap-1">
-              <Phone className="w-3 h-3 shrink-0" /> {primary.phone}
-            </span>
-          )}
+          <span className="inline-flex items-center gap-1">
+            <Phone className="w-3 h-3 shrink-0" />
+            {(() => {
+              const digits = onlyDigits(primary.phone || '');
+              return digits.length >= PHONE_MIN_DIGITS && digits.length <= PHONE_MAX_DIGITS
+                ? digits
+                : '—';
+            })()}
+          </span>
         </div>
         <div className="text-xs text-brand-text/60 font-normal break-words">{primary.email || ''}</div>
       </>
@@ -659,7 +667,7 @@ function EditAuthorsModal({
             first_name: a.first_name || '',
             last_name: a.last_name || '',
             email: a.email || '',
-            phone: a.phone || '',
+            phone: onlyDigits(a.phone || ''),
             college: a.college || '',
             is_primary: a.is_primary === 1,
           }))
@@ -701,6 +709,16 @@ function EditAuthorsModal({
       setError('Every author needs a first and last name.');
       return;
     }
+    const phoneIssues = drafts
+      .map((a, i) => ({ i, digits: onlyDigits(a.phone), name: `${a.first_name} ${a.last_name}`.trim() }))
+      .filter((p) => p.digits.length < PHONE_MIN_DIGITS || p.digits.length > PHONE_MAX_DIGITS);
+    if (phoneIssues.length > 0) {
+      const first = phoneIssues[0];
+      setError(
+        `${first.name || `Author ${first.i + 1}`}: phone number must be ${PHONE_MIN_DIGITS}-${PHONE_MAX_DIGITS} digits (numbers only, no +, - or spaces).`
+      );
+      return;
+    }
     if (drafts.filter((a) => a.is_primary).length !== 1) {
       setError('Exactly one author must be marked as the primary author.');
       return;
@@ -721,7 +739,7 @@ function EditAuthorsModal({
             first_name: a.first_name.trim(),
             last_name: a.last_name.trim(),
             email: a.email.trim(),
-            phone: a.phone.trim(),
+            phone: onlyDigits(a.phone),
             college: a.college.trim(),
             is_primary: a.is_primary ? 1 : 0,
           })),
@@ -830,14 +848,38 @@ function EditAuthorsModal({
                     />
                   </div>
                   <div>
-                    <label className="block text-xs font-medium text-brand-text/70 mb-1">Phone</label>
-                    <input
-                      type="tel"
-                      value={a.phone}
-                      onChange={(e) => update(i, { phone: e.target.value })}
-                      placeholder="+91 00000 00000"
-                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                    />
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">
+                      Phone <span className="text-red-400">*</span>
+                    </label>
+                    {(() => {
+                      const digits = onlyDigits(a.phone);
+                      const invalid = digits.length < PHONE_MIN_DIGITS || digits.length > PHONE_MAX_DIGITS;
+                      return (
+                        <>
+                          <input
+                            type="tel"
+                            inputMode="numeric"
+                            maxLength={PHONE_MAX_DIGITS}
+                            value={a.phone}
+                            aria-label={`Phone for ${a.first_name} ${a.last_name}`.trim() || 'author'}
+                            aria-invalid={invalid}
+                            onChange={(e) => update(i, { phone: onlyDigits(e.target.value) })}
+                            placeholder="Digits only"
+                            className={`w-full px-3 py-2 rounded-lg border bg-white text-sm shadow-sm outline-none transition-all focus:ring-2 ${
+                              invalid
+                                ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20'
+                                : 'border-stone-300 focus:border-brand-accent focus:ring-brand-accent/20'
+                            }`}
+                          />
+                          {invalid && (
+                            <p className="text-xs text-red-500 mt-1">
+                              {digits.length === 0 ? 'Phone number is required. ' : ''}
+                              Only {PHONE_MIN_DIGITS}-{PHONE_MAX_DIGITS} digits allowed.
+                            </p>
+                          )}
+                        </>
+                      );
+                    })()}
                   </div>
                   <div className="col-span-2">
                     <label className="block text-xs font-medium text-brand-text/70 mb-1">College / Institution</label>
@@ -1183,11 +1225,22 @@ function MoreInfoModal({
                           <span className="shrink-0">✉</span> {a.email}
                         </div>
                       )}
-                      {a.phone && (
-                        <div className="flex items-center gap-1.5">
-                          <Phone className="w-3.5 h-3.5 shrink-0" /> {a.phone}
-                        </div>
-                      )}
+                      {(() => {
+                        const digits = onlyDigits(a.phone || '');
+                        if (digits.length >= PHONE_MIN_DIGITS && digits.length <= PHONE_MAX_DIGITS) {
+                          return (
+                            <div className="flex items-center gap-1.5">
+                              <Phone className="w-3.5 h-3.5 shrink-0" /> {digits}
+                            </div>
+                        );
+                        }
+                        return (
+                          <div className="flex items-center gap-1.5 text-amber-600">
+                            <Phone className="w-3.5 h-3.5 shrink-0" />
+                            <span>No phone number provided</span>
+                          </div>
+                        );
+                      })()}
                       {a.college && <div className="break-words">{a.college}</div>}
                     </div>
                   </div>
