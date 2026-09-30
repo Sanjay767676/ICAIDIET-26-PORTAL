@@ -1,0 +1,22 @@
+-- Admin-managed exemption list for the "Accepting Paper Submissions" switch.
+--
+-- While paper acceptance is off, the user portal blocks every author. These two
+-- keys let the chair keep a named set of email addresses able to submit and to
+-- replace files during that window, instead of having to turn the whole portal
+-- back on and let the entire conference submit at once.
+--
+-- `approved_mail_ids_enabled` gates whether the list is consulted at all, so an
+-- admin can pre-fill addresses before the list takes effect. `approved_mail_ids`
+-- holds one canonical (lowercased, deduplicated) address per line; commas and
+-- semicolons are also accepted as separators on write.
+--
+-- Seeded off and empty, so applying this migration can never change who is
+-- allowed to submit. Read by `userPortalGate` in src/index.ts; written by
+-- POST /api/admin/settings.
+--
+-- INSERT OR IGNORE (not ON CONFLICT DO UPDATE) so that re-applying this
+-- migration can never overwrite an allowlist an admin has already saved. This
+-- matches 0009 and 0013, and deliberately avoids the destructive upsert that
+-- 0023 and 0024 use.
+INSERT OR IGNORE INTO settings (key, value) VALUES ('approved_mail_ids_enabled', 'false');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('approved_mail_ids', '');

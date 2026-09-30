@@ -299,6 +299,44 @@ portal's Settings tab.
   group. Rows are held locally because they are the render source — publishing drops rows whose label is
   blank, and a row mid-retype must stay on screen while that happens.
 
+**W11 Approved email list (added 2026-09-30, migration `0027`).** An admin-managed
+exemption list for the "Accepting Paper Submissions" switch. While acceptance is OFF the
+portal blocks everyone; this lets a named set of email addresses still submit **and**
+replace files, instead of reopening the portal for the whole conference.
+
+- **Settings keys:** `approved_mail_ids_enabled` and `approved_mail_ids` (one canonical
+  address per line). Written by `POST /api/admin/settings`; **it has its own Save button
+  and its own request** — it is deliberately not folded into `savePortalSettings`, so
+  editing the list can never roll the maintenance toggles back to whatever that browser
+  last fetched, and a list validation error cannot take the toggles down with it.
+- **One gate, one place:** `userPortalGate(settings, email, action)` in `index.ts`. Both
+  `POST /api/submissions` and `POST /api/submissions/:id/files` call it, so an approved
+  address can start a paper and finish one in the same closed window. Returns
+  `null` = proceed, else the refusal. Do not re-add an inline `portalMaintenanceActive`
+  check in those handlers.
+- **Two properties that are deliberate — do not "simplify" them away:**
+  1. **The list is inert while acceptance is ON.** It only ever *relaxes* the OFF state;
+     it never adds a restriction of its own. A stale entry therefore cannot lock out an
+     author who could previously have submitted.
+  2. **Enabled with zero addresses blocks everyone** — same as off. The admin card
+     surfaces the count and shows a red warning so an empty-but-enabled list is visibly a
+     mistake rather than a silent door slam.
+- **Identity** comes from `c.get('clerkEmail')` — the address Clerk verified for the
+  session — never from a client-supplied field. Comparison lowercases both sides and
+  splits on `[\s,;]+` (an email cannot contain whitespace, so that is unambiguous).
+- **Two distinct refusals so the portal can explain itself:** `503` = portal-wide
+  maintenance, nobody can submit; `403` + `code: 'NOT_APPROVED'` = the window is open to
+  a named list and this author is not on it. Both carry a human `error` string, and the
+  user portal already prefers `data.error` at both call sites, so no frontend change was
+  needed to surface it.
+- **The list is private.** Public `GET /api/settings` redacts `approved_mail_ids` to `''`
+  (it is unauthenticated, and the addresses are nobody else's business). Admins read the
+  real list from the new token-guarded **`GET /api/admin/settings`**, which is what
+  `fetchSettings` in the admin portal now calls.
+- `normalizeApprovedMailIds` lowercases, dedupes, validates each address by name and caps
+  the list at 200, so a mistyped address fails at save time rather than silently never
+  matching a real Google sign-in.
+
 ---
 
 ## 6. Frontend notes

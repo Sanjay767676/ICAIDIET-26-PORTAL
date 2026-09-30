@@ -2114,6 +2114,13 @@ export default function App() {
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
   const [mtReviewUntil, setMtReviewUntil] = useState<string>('');
   const [fileEditsEnabled, setFileEditsEnabled] = useState<boolean>(true);
+  // Addresses allowed to submit/edit while paper acceptance is OFF. Only
+  // meaningful in that state -- see userPortalGate in backend/src/index.ts.
+  const [approvedMailEnabled, setApprovedMailEnabled] = useState<boolean>(false);
+  const [approvedMailIds, setApprovedMailIds] = useState<string>('');
+  const [savingApprovedMail, setSavingApprovedMail] = useState<boolean>(false);
+  const [approvedMailMessage, setApprovedMailMessage] = useState<string | null>(null);
+  const [approvedMailError, setApprovedMailError] = useState<string | null>(null);
   const [registrationConfig, setRegistrationConfig] = useState<RegistrationConfig>({
     early_bird_until: '',
     fees: {},
@@ -2197,7 +2204,16 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
 
   const fetchSettings = async () => {
     try {
-      const res = await fetch(`${API_URL}/api/settings`);
+      // The admin variant, not the public GET /api/settings: the public endpoint
+      // redacts approved_mail_ids so the list stays private, and the Settings tab
+      // has to read it back in order to edit it.
+      const res = await fetch(`${API_URL}/api/admin/settings`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
       const data = await res.json().catch(() => null);
       if (res.ok && data?.success) {
         const s = data.settings || {};
@@ -2208,6 +2224,8 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setMtReviewUntil(s.maintenance_review_until || '');
         // Absent key means allowed; see fileEditsAllowed in backend/src/index.ts.
         setFileEditsEnabled(s.file_edits_enabled !== 'false');
+        setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
+        setApprovedMailIds(s.approved_mail_ids || '');
         // Parsed and default-merged by the backend, so the editors always open
         // on the values that are actually live for authors.
         if (data.registration) setRegistrationConfig(data.registration);
@@ -2249,6 +2267,45 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
       setError(err instanceof Error ? err.message : 'Failed to update settings.');
     } finally {
       setSavingSettings(false);
+    }
+  };
+
+  // Writes only the approved-email keys. Deliberately a separate save from
+  // savePortalSettings so editing the list can never roll the portal toggles
+  // back to whatever this browser last fetched, and so the list's own validation
+  // error cannot take the maintenance switches down with it.
+  const saveApprovedMailIds = async () => {
+    setSavingApprovedMail(true);
+    setApprovedMailError(null);
+    setApprovedMailMessage(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          approved_mail_ids_enabled: approvedMailEnabled,
+          approved_mail_ids: approvedMailIds,
+        })
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to save the approved email list.');
+      }
+      // Re-read so the textarea shows the server's canonical form (lowercased,
+      // deduplicated, one per line) rather than what was typed.
+      await fetchSettings();
+      setApprovedMailMessage('Approved email list saved.');
+    } catch (err) {
+      setApprovedMailError(err instanceof Error ? err.message : 'Failed to save the approved email list.');
+    } finally {
+      setSavingApprovedMail(false);
     }
   };
 
@@ -3218,14 +3275,14 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                     <button
                       onClick={() => setMtUserEnabled(!mtUserEnabled)}
                       disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-gray-200' : 'bg-brand-accent'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
                       role="switch"
-                      aria-checked={!mtUserEnabled}
+                      aria-checked={mtUserEnabled}
                     >
                       <span className="sr-only">Toggle accepting paper submissions</span>
                       <span
                         aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-0' : 'translate-x-5'}`}
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-5' : 'translate-x-0'}`}
                       />
                     </button>
                   </div>
@@ -3243,6 +3300,99 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                     </span>
                   </div>
                 </div>
+
+                {/* 1b. Approved Email IDs -- only meaningful while paper acceptance is off */}
+                {!mtUserEnabled && (
+                  <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                    <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
+                      <div>
+                        <h4 className="font-semibold text-brand-text">Approved Email IDs</h4>
+                        <p className="text-sm text-brand-text/60 mt-1">
+                          Paper acceptance is currently <strong>off</strong>, so the submission portal is closed to
+                          everyone. Turn this on and list the email addresses that should still be able to submit
+                          papers and update their files. Everyone else stays blocked.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => setApprovedMailEnabled(!approvedMailEnabled)}
+                        disabled={savingApprovedMail}
+                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${approvedMailEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingApprovedMail ? 'opacity-50 cursor-not-allowed' : ''}`}
+                        role="switch"
+                        aria-checked={approvedMailEnabled}
+                      >
+                        <span className="sr-only">Toggle approved email list</span>
+                        <span
+                          aria-hidden="true"
+                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${approvedMailEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                        />
+                      </button>
+                    </div>
+
+                    <div className="px-5 py-4 space-y-3">
+                      <div>
+                        <label htmlFor="approved-mail-ids" className="block text-sm font-medium text-brand-text mb-1">
+                          Email addresses
+                        </label>
+                        <textarea
+                          id="approved-mail-ids"
+                          value={approvedMailIds}
+                          onChange={(e) => {
+                            setApprovedMailIds(e.target.value);
+                            setApprovedMailMessage(null);
+                            setApprovedMailError(null);
+                          }}
+                          disabled={!approvedMailEnabled || savingApprovedMail}
+                          rows={5}
+                          spellCheck={false}
+                          placeholder={'author@gmail.com\nanother.author@gmail.com'}
+                          className="w-full rounded-lg border border-brand-text/20 px-3 py-2 text-sm font-mono bg-white text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent disabled:bg-stone-100 disabled:text-brand-text/40 disabled:cursor-not-allowed"
+                        />
+                        <p className="text-xs text-brand-text/50 mt-1.5">
+                          One address per line. Commas and semicolons also work. Matching ignores case and surrounding
+                          spaces, and uses the email address of the signed-in Google account.
+                        </p>
+                      </div>
+
+                      {approvedMailEnabled && approvedMailIds.trim() === '' && (
+                        <p className="text-sm font-medium text-red-600">
+                          This is on with no addresses listed, so the submission portal is closed to everyone. Add at
+                          least one address or turn it off.
+                        </p>
+                      )}
+
+                      {approvedMailError && (
+                        <p className="text-sm font-medium text-red-600">{approvedMailError}</p>
+                      )}
+                      {approvedMailMessage && (
+                        <p className="text-sm font-medium text-green-700">{approvedMailMessage}</p>
+                      )}
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <button
+                          onClick={saveApprovedMailIds}
+                          disabled={savingApprovedMail}
+                          className="px-4 py-2 rounded-lg bg-brand-accent text-brand-text font-semibold text-sm hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {savingApprovedMail ? 'Saving...' : 'Save Approved Emails'}
+                        </button>
+                        <span
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
+                            !mtUserEnabled && approvedMailEnabled ? 'bg-green-100 text-green-700' : 'bg-stone-200 text-stone-600'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              !mtUserEnabled && approvedMailEnabled ? 'bg-green-600' : 'bg-stone-400'
+                            }`}
+                          />
+                          {!mtUserEnabled && approvedMailEnabled
+                            ? `${approvedMailIds.split(/[\s,;]+/).filter(Boolean).length} address(es) allowed`
+                            : 'Inactive while accepting submissions'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* 2. Ready for Registration */}
                 <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">

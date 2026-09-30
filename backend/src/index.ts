@@ -1442,17 +1442,16 @@ app.post('/api/submissions', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'Too many submission attempts. Please try again later.' }, 429);
     }
 
-    const maintenance = portalMaintenanceActive(await loadSettingsRecord(c.env as Bindings), 'user');
-    if (maintenance.active) {
-      return c.json(
-        {
-          success: false,
-          error: 'The submission portal is under maintenance and new submissions are disabled. Please try again later.',
-          maintenance_until: maintenance.until,
-        },
-        503
-      );
-    }
+    // Paper acceptance off shuts the portal to everyone except the addresses on
+    // the admin's approved list. The Clerk email is available on the context
+    // because requireClerkAuth already verified it, so no client-supplied
+    // address is ever trusted here.
+    const submitGate = userPortalGate(
+      await loadSettingsRecord(c.env as Bindings),
+      c.get('clerkEmail') || '',
+      'submit'
+    );
+    if (submitGate) return c.json(submitGate.body, submitGate.status);
 
     const clerkUserId = c.get('clerkUserId') as string;
     const clerkEmail = (c.get('clerkEmail') || '').trim();
@@ -1922,17 +1921,10 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
     }
 
     const settings = await loadSettingsRecord(c.env as Bindings);
-    const maintenance = portalMaintenanceActive(settings, 'user');
-    if (maintenance.active) {
-      return c.json(
-        {
-          success: false,
-          error: 'The submission portal is under maintenance and file updates are disabled. Please try again later.',
-          maintenance_until: maintenance.until,
-        },
-        503
-      );
-    }
+    // Same gate as POST /api/submissions, so an approved address can both start
+    // a paper and finish one during the same closed window.
+    const editGate = userPortalGate(settings, c.get('clerkEmail') || '', 'edit');
+    if (editGate) return c.json(editGate.body, editGate.status);
 
     // Checked separately from maintenance so an admin can stop file replacement
     // while still accepting new submissions. 403 rather than 503: the portal is
@@ -2996,6 +2988,119 @@ function fileEditsAllowed(settings: Record<string, string>): boolean {
   return settings['file_edits_enabled'] !== 'false';
 }
 
+// ------------------------------------------------------------------
+// Approved email list ("accepting paper submissions" is OFF)
+//
+// Turning paper acceptance off blocks every author. This list carves out
+// specific addresses so a few people can still submit and replace files while
+// the portal is shut to everyone else: a late paper the chair has agreed to
+// take, a co-author whose Google account uses a different address, and so on.
+//
+// Two properties are deliberate and should not be "simplified" away:
+//
+//  1. The list is INERT while paper acceptance is ON. An enabled list never adds
+//     a restriction on its own, only ever relaxes the OFF state. A stale entry
+//     can therefore never lock out an author who could previously have
+//     submitted -- the failure mode of a whitelist that also filters the normal
+//     open period is far worse than the one it would prevent.
+//  2. Enabling the list with zero addresses blocks everyone, which is the same
+//     as leaving it off. That is intentional: the admin portal surfaces the
+//     count so an empty-but-enabled list is visibly a mistake rather than a
+//     silent door slam.
+//
+// Addresses are lowercased and deduplicated on write and on compare, so a stray
+// capital, trailing space or duplicate line cannot cause a silent miss. Split on
+// whitespace as well as commas and semicolons: an email address cannot contain
+// whitespace, so that is an unambiguous separator.
+function approvedMailIdList(settings: Record<string, string>): string[] {
+  const seen = new Set<string>();
+  for (const part of (settings['approved_mail_ids'] || '').split(/[\s,;]+/)) {
+    const email = part.trim().toLowerCase();
+    if (email) seen.add(email);
+  }
+  return [...seen];
+}
+
+function approvedMailAllowed(settings: Record<string, string>, email: string): boolean {
+  if (settings['approved_mail_ids_enabled'] !== 'true') return false;
+  const candidate = (email || '').trim().toLowerCase();
+  if (!candidate) return false;
+  return approvedMailIdList(settings).includes(candidate);
+}
+
+// Normalizes what the admin portal submitted into the canonical stored form:
+// lowercased, deduplicated, one address per line. Rejects obvious typos by name
+// so a mistyped address surfaces at save time rather than silently never matching
+// a real Google sign-in, which is the whole point of the list.
+const APPROVED_MAIL_ID_MAX = 200;
+const APPROVED_MAIL_ID_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function normalizeApprovedMailIds(
+  raw: unknown
+): { ok: true; value: string; count: number } | { ok: false; error: string } {
+  const seen = new Set<string>();
+  for (const part of String(raw ?? '').split(/[\s,;]+/)) {
+    const email = part.trim().toLowerCase();
+    if (!email) continue;
+    if (!APPROVED_MAIL_ID_PATTERN.test(email)) {
+      return { ok: false, error: `"${email}" is not a valid email address.` };
+    }
+    seen.add(email);
+  }
+  const list = [...seen];
+  if (list.length > APPROVED_MAIL_ID_MAX) {
+    return { ok: false, error: `Please list at most ${APPROVED_MAIL_ID_MAX} email addresses.` };
+  }
+  // Store one per line so the admin portal can render it straight back into the
+  // textarea without reformatting.
+  return { ok: true, value: list.join('\n'), count: list.length };
+}
+
+// The single gate for "may this author create a submission or replace files".
+// Returns null when the request may proceed, or the refusal to send.
+//
+// Both refusals are kept distinguishable so the portal can explain itself:
+//   503 -> a portal-wide maintenance window, nobody can submit
+//   403 -> the window is open to a named list and this author is not on it
+// 403 rather than 404, and the list itself is never included in the response.
+function userPortalGate(
+  settings: Record<string, string>,
+  email: string,
+  action: 'submit' | 'edit'
+): { status: 403 | 503; body: Record<string, unknown> } | null {
+  const maintenance = portalMaintenanceActive(settings, 'user');
+  if (!maintenance.active) return null;
+
+  if (approvedMailAllowed(settings, email)) return null;
+
+  if (settings['approved_mail_ids_enabled'] === 'true') {
+    return {
+      status: 403,
+      body: {
+        success: false,
+        code: 'NOT_APPROVED',
+        error:
+          action === 'submit'
+            ? 'New submissions are currently limited to specific email addresses. Please contact the conference team if you need to be added to the list.'
+            : 'File updates are currently limited to specific email addresses. Please contact the conference team if you need to be added to the list.',
+        maintenance_until: maintenance.until,
+      },
+    };
+  }
+
+  return {
+    status: 503,
+    body: {
+      success: false,
+      error:
+        action === 'submit'
+          ? 'The submission portal is under maintenance and new submissions are disabled. Please try again later.'
+          : 'The submission portal is under maintenance and file updates are disabled. Please try again later.',
+      maintenance_until: maintenance.until,
+    },
+  };
+}
+
 // Returns whether registration is currently open AND the submission is
 // accepted, so that only eligible authors can register / upload proof.
 async function registrationEligible(
@@ -3030,9 +3135,33 @@ app.get('/api/settings', async (c) => {
     // portal reads this to render fees, the early-bird cutoff and bank
     // details, so nothing there has to be hardcoded any more.
     const registration = await loadRegistrationConfig(env);
-    return c.json({ success: true, settings, registration });
+    // This endpoint is unauthenticated, so the approved email list is redacted
+    // out of it: the addresses themselves are the admin's business and must not
+    // be readable by anyone. The enabled flag is kept, because the user portal
+    // benefits from being able to explain the refusal it will get. Admins read
+    // the real list from GET /api/admin/settings, which is token-guarded.
+    return c.json({
+      success: true,
+      settings: { ...settings, approved_mail_ids: '' },
+      registration,
+    });
   } catch (error) {
     console.error('Fetch settings error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// Authenticated read of the same settings document, WITHOUT the redaction. The
+// admin portal needs the real approved-email list in order to edit it. Guarded by
+// the /api/admin/* middleware above, so a reviewer token is rejected with 403.
+app.get('/api/admin/settings', async (c) => {
+  const env = c.env as Bindings;
+  try {
+    const settings = await loadSettingsRecord(env);
+    const registration = await loadRegistrationConfig(env);
+    return c.json({ success: true, settings, registration });
+  } catch (error) {
+    console.error('Fetch admin settings error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -3169,6 +3298,32 @@ app.post('/api/admin/settings', async (c) => {
           `INSERT INTO settings (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
         ).bind('file_edits_enabled', body.file_edits_enabled.toString())
+      );
+    }
+
+    // The approved email list, consulted only while paper acceptance is off.
+    // Validated and normalized before anything is written, so a rejected save
+    // leaves the previous list intact rather than half-applying it.
+    let normalizedApprovedMailIds: string | null = null;
+    if (body.approved_mail_ids !== undefined) {
+      const normalized = normalizeApprovedMailIds(body.approved_mail_ids);
+      if (!normalized.ok) {
+        return c.json({ success: false, error: normalized.error }, 400);
+      }
+      normalizedApprovedMailIds = normalized.value;
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('approved_mail_ids', normalizedApprovedMailIds)
+      );
+    }
+    if (typeof body.approved_mail_ids_enabled === 'boolean') {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('approved_mail_ids_enabled', body.approved_mail_ids_enabled.toString())
       );
     }
 
