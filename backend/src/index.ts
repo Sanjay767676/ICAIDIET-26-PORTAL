@@ -2989,17 +2989,18 @@ function fileEditsAllowed(settings: Record<string, string>): boolean {
 }
 
 // ------------------------------------------------------------------
-// Approved email list ("accepting paper submissions" is OFF)
+// Approved email list (an EXEMPTION from a closed submission window)
 //
-// Turning paper acceptance off blocks every author. This list carves out
-// specific addresses so a few people can still submit and replace files while
-// the portal is shut to everyone else: a late paper the chair has agreed to
-// take, a co-author whose Google account uses a different address, and so on.
+// Closing submissions -- either via paper_acceptance_enabled or via user
+// portal maintenance -- blocks every author. This list carves out specific
+// addresses so a few people can still submit and replace files while the
+// window is shut to everyone else: a late paper the chair has agreed to take,
+// a co-author whose Google account uses a different address, and so on.
 //
 // Two properties are deliberate and should not be "simplified" away:
 //
-//  1. The list is INERT while paper acceptance is ON. An enabled list never adds
-//     a restriction on its own, only ever relaxes the OFF state. A stale entry
+//  1. The list is INERT while the window is open. An enabled list never adds a
+//     restriction on its own, only ever relaxes a closed state. A stale entry
 //     can therefore never lock out an author who could previously have
 //     submitted -- the failure mode of a whitelist that also filters the normal
 //     open period is far worse than the one it would prevent.
@@ -3026,6 +3027,23 @@ function approvedMailAllowed(settings: Record<string, string>, email: string): b
   const candidate = (email || '').trim().toLowerCase();
   if (!candidate) return false;
   return approvedMailIdList(settings).includes(candidate);
+}
+
+// Whether authors may CREATE new submissions. Independent of
+// maintenance_user_enabled, which is a portal-wide outage switch: closing the
+// submission window no longer forces you to also announce a maintenance
+// message to every visitor. An absent key means OPEN, so a missing setting can
+// never silently close submissions; migration 0028 seeds it explicitly.
+// Anything other than 'false' is treated as open.
+function paperAcceptanceOpen(settings: Record<string, string>): boolean {
+  return settings['paper_acceptance_enabled'] !== 'false';
+}
+
+// Whether the approved-email list is consulted at all. Kept separate from
+// approvedMailAllowed so the refusal can distinguish "the list is off, so
+// nobody is exempt" from "the list is on and you are not on it".
+function approvedMailListEnabled(settings: Record<string, string>): boolean {
+  return settings['approved_mail_ids_enabled'] === 'true';
 }
 
 // Normalizes what the admin portal submitted into the canonical stored form:
@@ -3059,9 +3077,26 @@ function normalizeApprovedMailIds(
 // The single gate for "may this author create a submission or replace files".
 // Returns null when the request may proceed, or the refusal to send.
 //
-// Both refusals are kept distinguishable so the portal can explain itself:
-//   503 -> a portal-wide maintenance window, nobody can submit
-//   403 -> the window is open to a named list and this author is not on it
+// It takes two INDEPENDENT inputs and the optional approved list:
+//
+//   paperAcceptanceOpen()  false -> new submissions are closed
+//   user portal maintenance  true -> the whole portal is in an outage window
+//
+// Either one alone blocks submissions, which is what makes the switches
+// independent: you can close the submission window without announcing a
+// maintenance outage, and you can run maintenance without implying the call
+// for papers is over. When both are clear, everyone may submit and the
+// approved list is not even read.
+//
+// The approved list is an EXEMPTION, never a restriction. It is consulted only
+// once something is already blocking, so switching it on can never lock out an
+// author who could previously have submitted, and switching it off can never
+// re-block somebody the admin deliberately let in.
+//
+// Two refusals are kept distinguishable so the portal can explain itself:
+//   503 -> closed to everyone, the list is off
+//   403 + code NOT_APPROVED -> the window is open to a named list and this
+//         author is not on it
 // 403 rather than 404, and the list itself is never included in the response.
 function userPortalGate(
   settings: Record<string, string>,
@@ -3069,11 +3104,20 @@ function userPortalGate(
   action: 'submit' | 'edit'
 ): { status: 403 | 503; body: Record<string, unknown> } | null {
   const maintenance = portalMaintenanceActive(settings, 'user');
-  if (!maintenance.active) return null;
+  const acceptanceOpen = paperAcceptanceOpen(settings);
 
+  // Nothing is blocking: open submissions, no maintenance window. The approved
+  // list is deliberately not read here -- it is an exemption, not a filter.
+  if (acceptanceOpen && !maintenance.active) return null;
+
+  // Something is blocking and this address is exempt, so let them through. The
+  // identity is the address Clerk verified for the session, never a
+  // client-supplied field.
   if (approvedMailAllowed(settings, email)) return null;
 
-  if (settings['approved_mail_ids_enabled'] === 'true') {
+  const until = maintenance.active ? maintenance.until : '';
+
+  if (approvedMailListEnabled(settings)) {
     return {
       status: 403,
       body: {
@@ -3083,7 +3127,7 @@ function userPortalGate(
           action === 'submit'
             ? 'New submissions are currently limited to specific email addresses. Please contact the conference team if you need to be added to the list.'
             : 'File updates are currently limited to specific email addresses. Please contact the conference team if you need to be added to the list.',
-        maintenance_until: maintenance.until,
+        maintenance_until: until,
       },
     };
   }
@@ -3094,9 +3138,13 @@ function userPortalGate(
       success: false,
       error:
         action === 'submit'
-          ? 'The submission portal is under maintenance and new submissions are disabled. Please try again later.'
-          : 'The submission portal is under maintenance and file updates are disabled. Please try again later.',
-      maintenance_until: maintenance.until,
+          ? maintenance.active
+            ? 'The submission portal is under maintenance and new submissions are disabled. Please try again later.'
+            : 'New submissions are currently closed. Please try again later.'
+          : maintenance.active
+            ? 'The submission portal is under maintenance and file updates are disabled. Please try again later.'
+            : 'File updates are currently closed. Please try again later.',
+      maintenance_until: until,
     },
   };
 }
@@ -3250,6 +3298,17 @@ app.post('/api/admin/settings', async (c) => {
           `INSERT INTO settings (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
         ).bind('maintenance_user_enabled', userEnabled)
+      );
+    }
+    // Independent of maintenance_user_enabled: closing submissions to new
+    // papers no longer requires also announcing a portal-wide outage.
+    const paperAcceptance = str(body.paper_acceptance_enabled);
+    if (paperAcceptance !== undefined) {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('paper_acceptance_enabled', paperAcceptance)
       );
     }
     const userUntil = str(body.maintenance_user_until);

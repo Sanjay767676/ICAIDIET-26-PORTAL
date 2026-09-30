@@ -1,0 +1,19 @@
+-- Separates "Accepting Paper Submissions" from "User Portal Maintenance".
+--
+-- These used to be the same switch: the admin portal rendered both cards bound
+-- to the same `maintenance_user_enabled` key, so turning either one turned the
+-- other and there was no way to close submissions to new papers without also
+-- announcing a portal-wide maintenance outage. They are now independent:
+--
+--   paper_acceptance_enabled  -> may authors CREATE new submissions
+--   maintenance_user_enabled  -> portal-wide maintenance (blocks submissions)
+--   file_edits_enabled        -> may authors REPLACE files on existing papers
+--   approved_mail_ids_enabled -> exempts named addresses from the two above
+--
+-- Seeded to 'true' so applying this migration cannot change who may submit.
+-- Read via `paperAcceptanceOpen` and `userPortalGate` in src/index.ts; written
+-- by POST /api/admin/settings.
+--
+-- INSERT OR IGNORE (not ON CONFLICT DO UPDATE) so re-applying can never
+-- overwrite a choice an admin has already saved.
+INSERT OR IGNORE INTO settings (key, value) VALUES ('paper_acceptance_enabled', 'true');

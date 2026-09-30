@@ -2109,6 +2109,11 @@ export default function App() {
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
   const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
+  // Accepting Paper Submissions. Deliberately a SEPARATE switch from
+  // mtUserEnabled (User Portal Maintenance): they used to be the same setting
+  // rendered as two cards, so flipping either one flipped both. Default true
+  // because an absent key means open -- see paperAcceptanceOpen in the backend.
+  const [paperAcceptanceEnabled, setPaperAcceptanceEnabled] = useState<boolean>(true);
   const [registrationOpen, setRegistrationOpen] = useState<boolean>(false);
   const [mtUserUntil, setMtUserUntil] = useState<string>('');
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
@@ -2218,6 +2223,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
       if (res.ok && data?.success) {
         const s = data.settings || {};
         setMtUserEnabled(s.maintenance_user_enabled === 'true' || s.maintenance_mode === 'true');
+        setPaperAcceptanceEnabled(s.paper_acceptance_enabled !== 'false');
           setRegistrationOpen(s.registration_open === 'true');
         setMtUserUntil(s.maintenance_user_until || '');
         setMtReviewEnabled(s.maintenance_review_enabled === 'true');
@@ -2246,6 +2252,9 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         },
         body: JSON.stringify({
           maintenance_user_enabled: mtUserEnabled,
+          // Sent as its own key so closing submissions to new papers does not
+          // also flip the maintenance switch, and vice versa.
+          paper_acceptance_enabled: paperAcceptanceEnabled,
             registration_open: registrationOpen,
           maintenance_user_until: mtUserUntil,
           maintenance_review_enabled: mtReviewEnabled,
@@ -3268,32 +3277,33 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                     <div>
                       <h4 className="font-semibold text-brand-text">Accepting Paper Submissions</h4>
                       <p className="text-sm text-brand-text/60 mt-1">
-                        When on, the user portal accepts new paper submissions. When off, users cannot submit new
-                        papers (file updates are also blocked).
+                        When on, the user portal accepts new paper submissions. When off, nobody can start a new
+                        paper &mdash; unless their email is on the Approved Email IDs list below. This switch is
+                        independent of User Portal Maintenance.
                       </p>
                     </div>
                     <button
-                      onClick={() => setMtUserEnabled(!mtUserEnabled)}
+                      onClick={() => setPaperAcceptanceEnabled(!paperAcceptanceEnabled)}
                       disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${paperAcceptanceEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
                       role="switch"
-                      aria-checked={mtUserEnabled}
+                      aria-checked={paperAcceptanceEnabled}
                     >
                       <span className="sr-only">Toggle accepting paper submissions</span>
                       <span
                         aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-5' : 'translate-x-0'}`}
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${paperAcceptanceEnabled ? 'translate-x-5' : 'translate-x-0'}`}
                       />
                     </button>
                   </div>
                   <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
                     <span
                       className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                        mtUserEnabled ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'
+                        paperAcceptanceEnabled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
                       }`}
                     >
-                      <span className={`w-1.5 h-1.5 rounded-full ${mtUserEnabled ? 'bg-red-600' : 'bg-green-600'}`} />
-                      {mtUserEnabled ? 'Not accepting submissions' : 'Accepting submissions'}
+                      <span className={`w-1.5 h-1.5 rounded-full ${paperAcceptanceEnabled ? 'bg-green-600' : 'bg-red-600'}`} />
+                      {paperAcceptanceEnabled ? 'Accepting submissions' : 'Not accepting submissions'}
                     </span>
                     <span className="text-xs text-brand-text/50">
                       Save the settings below to apply.
@@ -3301,16 +3311,17 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   </div>
                 </div>
 
-                {/* 1b. Approved Email IDs -- only meaningful while paper acceptance is off */}
-                {!mtUserEnabled && (
-                  <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                {/* 2. Approved Email IDs -- fully independent, always visible */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
                     <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
                       <div>
                         <h4 className="font-semibold text-brand-text">Approved Email IDs</h4>
                         <p className="text-sm text-brand-text/60 mt-1">
-                          Paper acceptance is currently <strong>off</strong>, so the submission portal is closed to
-                          everyone. Turn this on and list the email addresses that should still be able to submit
-                          papers and update their files. Everyone else stays blocked.
+                          An exemption list, independent of every other switch. While this is{' '}
+                          <strong>off</strong> it does nothing at all. Turn it <strong>on</strong> and enter the email
+                          addresses that should keep working even when the submission window is shut &mdash; those
+                          people sign in with that Google account and can submit papers and update their files. Everyone
+                          else is still blocked.
                         </p>
                       </div>
                       <button
@@ -3355,8 +3366,8 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
 
                       {approvedMailEnabled && approvedMailIds.trim() === '' && (
                         <p className="text-sm font-medium text-red-600">
-                          This is on with no addresses listed, so the submission portal is closed to everyone. Add at
-                          least one address or turn it off.
+                          This is on with no addresses listed, so nobody is exempt &mdash; everyone stays blocked. Add
+                          at least one address or turn it off.
                         </p>
                       )}
 
@@ -3375,26 +3386,44 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                         >
                           {savingApprovedMail ? 'Saving...' : 'Save Approved Emails'}
                         </button>
+                        {/* Reports the list on its own terms, and separately says
+                            whether anything is actually closed right now, so the
+                            two switches can be reasoned about independently. */}
                         <span
                           className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                            !mtUserEnabled && approvedMailEnabled ? 'bg-green-100 text-green-700' : 'bg-stone-200 text-stone-600'
+                            approvedMailEnabled ? 'bg-green-100 text-green-700' : 'bg-stone-200 text-stone-600'
                           }`}
                         >
                           <span
                             className={`w-1.5 h-1.5 rounded-full ${
-                              !mtUserEnabled && approvedMailEnabled ? 'bg-green-600' : 'bg-stone-400'
+                              approvedMailEnabled ? 'bg-green-600' : 'bg-stone-400'
                             }`}
                           />
-                          {!mtUserEnabled && approvedMailEnabled
-                            ? `${approvedMailIds.split(/[\s,;]+/).filter(Boolean).length} address(es) allowed`
-                            : 'Inactive while accepting submissions'}
+                          {approvedMailEnabled
+                            ? `${approvedMailIds.split(/[\s,;]+/).filter(Boolean).length} address(es) exempt`
+                            : 'Off — has no effect'}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
+                            paperAcceptanceEnabled && !mtUserEnabled
+                              ? 'bg-green-100 text-green-700'
+                              : 'bg-amber-100 text-amber-700'
+                          }`}
+                        >
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${
+                              paperAcceptanceEnabled && !mtUserEnabled ? 'bg-green-600' : 'bg-amber-600'
+                            }`}
+                          />
+                          {paperAcceptanceEnabled && !mtUserEnabled
+                            ? 'Submissions open to everyone'
+                            : 'Submissions closed to everyone else'}
                         </span>
                       </div>
                     </div>
                   </div>
-                )}
 
-                {/* 2. Ready for Registration */}
+                {/* 3. Ready for Registration */}
                 <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between gap-4 px-5 py-4">
                     <div>
@@ -3467,7 +3496,8 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                     <div>
                       <h4 className="font-semibold text-brand-text">User Portal Maintenance</h4>
                       <p className="text-sm text-brand-text/60 mt-1">
-                        When on, users cannot create or update submissions and see a maintenance message.
+                        A portal-wide outage switch: when on, users cannot create or update submissions and see a
+                        maintenance message. Independent of Accepting Paper Submissions and Allow File Edits.
                       </p>
                     </div>
                     <button

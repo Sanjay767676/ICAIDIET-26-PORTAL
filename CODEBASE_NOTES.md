@@ -299,43 +299,49 @@ portal's Settings tab.
   group. Rows are held locally because they are the render source — publishing drops rows whose label is
   blank, and a row mid-retype must stay on screen while that happens.
 
-**W11 Approved email list (added 2026-09-30, migration `0027`).** An admin-managed
-exemption list for the "Accepting Paper Submissions" switch. While acceptance is OFF the
-portal blocks everyone; this lets a named set of email addresses still submit **and**
-replace files, instead of reopening the portal for the whole conference.
+**W11 The four independent portal switches + approved email list (2026-09-30, migrations
+`0027`, `0028`).** Each switch below is its own settings key and its own React state. This
+was NOT always true: "Accepting Paper Submissions" and "User Portal Maintenance" were both
+bound to `maintenance_user_enabled` and rendered as two cards, so flipping either one
+flipped both and there was no way to close submissions without also announcing a
+portal-wide outage. `0028` gives acceptance its own key.
 
-- **Settings keys:** `approved_mail_ids_enabled` and `approved_mail_ids` (one canonical
-  address per line). Written by `POST /api/admin/settings`; **it has its own Save button
-  and its own request** — it is deliberately not folded into `savePortalSettings`, so
-  editing the list can never roll the maintenance toggles back to whatever that browser
-  last fetched, and a list validation error cannot take the toggles down with it.
-- **One gate, one place:** `userPortalGate(settings, email, action)` in `index.ts`. Both
-  `POST /api/submissions` and `POST /api/submissions/:id/files` call it, so an approved
-  address can start a paper and finish one in the same closed window. Returns
-  `null` = proceed, else the refusal. Do not re-add an inline `portalMaintenanceActive`
-  check in those handlers.
-- **Two properties that are deliberate — do not "simplify" them away:**
-  1. **The list is inert while acceptance is ON.** It only ever *relaxes* the OFF state;
-     it never adds a restriction of its own. A stale entry therefore cannot lock out an
-     author who could previously have submitted.
-  2. **Enabled with zero addresses blocks everyone** — same as off. The admin card
-     surfaces the count and shows a red warning so an empty-but-enabled list is visibly a
-     mistake rather than a silent door slam.
+| Admin card | Settings key | Blocks |
+|---|---|---|
+| Ready for Registration | `registration_open` | registration/payment only, never submissions |
+| Allow File Edits | `file_edits_enabled` | replacing files on existing papers |
+| Accepting Paper Submissions | `paper_acceptance_enabled` | creating NEW papers |
+| User Portal Maintenance | `maintenance_user_enabled` | everything user-facing |
+| Reviewer Portal Maintenance | `maintenance_review_enabled` | reviewer sign-in |
+| Approved Email IDs | `approved_mail_ids_enabled` + `approved_mail_ids` | nothing — it only ever exempts |
+
+- **Defaults are chosen so a missing key is never the destructive one.**
+  `paper_acceptance_enabled` and `file_edits_enabled` both treat "absent" as OPEN; a
+  dropped row can therefore never silently close submissions or block a revision
+  mid-cycle. Only the explicit opt-in switches default to off.
+- `userPortalGate(settings, email, action)` is the single decision point for both
+  `POST /api/submissions` and `POST /api/submissions/:id/files`. It takes two
+  independent inputs — acceptance and maintenance — and either one alone blocks. Do not
+  re-add an inline `portalMaintenanceActive` check in those handlers.
+- **The approved list is an EXEMPTION, never a restriction.** It is read only once
+  something is already blocking, so enabling it cannot lock out an author who could
+  previously submit, and disabling it cannot re-block somebody deliberately let in.
+  With acceptance ON the list is not consulted at all.
+- **Two refusals so the portal can explain itself:** `503` = closed to everyone, list off;
+  `403` + `code: 'NOT_APPROVED'` = window open to a named list, this author not on it.
+  Both carry a human `error` string, and the user portal already prefers `data.error` at
+  both call sites, so no frontend change was needed to surface it.
 - **Identity** comes from `c.get('clerkEmail')` — the address Clerk verified for the
-  session — never from a client-supplied field. Comparison lowercases both sides and
-  splits on `[\s,;]+` (an email cannot contain whitespace, so that is unambiguous).
-- **Two distinct refusals so the portal can explain itself:** `503` = portal-wide
-  maintenance, nobody can submit; `403` + `code: 'NOT_APPROVED'` = the window is open to
-  a named list and this author is not on it. Both carry a human `error` string, and the
-  user portal already prefers `data.error` at both call sites, so no frontend change was
-  needed to surface it.
+  session — never a client-supplied field. Comparison lowercases both sides and splits on
+  `[\s,;]+` (an email cannot contain whitespace, so that is unambiguous).
 - **The list is private.** Public `GET /api/settings` redacts `approved_mail_ids` to `''`
-  (it is unauthenticated, and the addresses are nobody else's business). Admins read the
-  real list from the new token-guarded **`GET /api/admin/settings`**, which is what
-  `fetchSettings` in the admin portal now calls.
+  (it is unauthenticated). Admins read the real list from the token-guarded
+  **`GET /api/admin/settings`**, which is what `fetchSettings` in the admin portal calls.
 - `normalizeApprovedMailIds` lowercases, dedupes, validates each address by name and caps
   the list at 200, so a mistyped address fails at save time rather than silently never
   matching a real Google sign-in.
+- The list has its **own save button and own request**, so editing it can never roll the
+  other switches back to whatever that browser last fetched.
 
 ---
 
