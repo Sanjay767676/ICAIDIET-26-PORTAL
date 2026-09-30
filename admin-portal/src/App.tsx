@@ -3278,8 +3278,9 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                       <h4 className="font-semibold text-brand-text">Accepting Paper Submissions</h4>
                       <p className="text-sm text-brand-text/60 mt-1">
                         When on, the user portal accepts new paper submissions. When off, nobody can start a new
-                        paper &mdash; unless their email is on the Approved Email IDs list below. This switch is
-                        independent of User Portal Maintenance.
+                        paper &mdash; unless their email is on the Approved Email IDs list below. Authors can still
+                        replace files on papers they already submitted; that is controlled separately by Allow File
+                        Edits.
                       </p>
                     </div>
                     <button
@@ -3456,7 +3457,8 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                       <p className="text-sm text-brand-text/60 mt-1">
                         When on, authors can replace the files on a paper they have already submitted. Turn this off
                         to close revisions without taking the portal into maintenance &mdash; new submissions are
-                        still accepted.
+                        still accepted. This is the only switch that governs file replacement: closing Accepting Paper
+                        Submissions does not close it.
                       </p>
                     </div>
                     <button

@@ -3077,16 +3077,18 @@ function normalizeApprovedMailIds(
 // The single gate for "may this author create a submission or replace files".
 // Returns null when the request may proceed, or the refusal to send.
 //
-// It takes two INDEPENDENT inputs and the optional approved list:
+// It takes INDEPENDENT inputs and the optional approved list, and which inputs
+// apply depends on the action:
 //
-//   paperAcceptanceOpen()  false -> new submissions are closed
-//   user portal maintenance  true -> the whole portal is in an outage window
+//   action 'submit' -> paperAcceptanceOpen() false closes it,
+//                      plus user portal maintenance closes it
+//   action 'edit'   -> paper acceptance is NOT consulted; only maintenance
+//                      applies here, and file replacement is then governed by
+//                      the independent file_edits_enabled switch in the handler
 //
-// Either one alone blocks submissions, which is what makes the switches
-// independent: you can close the submission window without announcing a
-// maintenance outage, and you can run maintenance without implying the call
-// for papers is over. When both are clear, everyone may submit and the
-// approved list is not even read.
+// This split is the point: the three switches close different things and must
+// not bleed into each other. Closing the call for papers does not close file
+// replacement, and maintenance is the only switch that closes both.
 //
 // The approved list is an EXEMPTION, never a restriction. It is consulted only
 // once something is already blocking, so switching it on can never lock out an
@@ -3104,7 +3106,13 @@ function userPortalGate(
   action: 'submit' | 'edit'
 ): { status: 403 | 503; body: Record<string, unknown> } | null {
   const maintenance = portalMaintenanceActive(settings, 'user');
-  const acceptanceOpen = paperAcceptanceOpen(settings);
+
+  // Paper acceptance governs CREATING papers only. It must not gate file edits:
+  // 'Allow File Edits' is the independent switch for replacing files on an
+  // existing submission, and is enforced separately by fileEditsAllowed in the
+  // /files handler. Folding acceptance in here meant turning off "Accepting
+  // Paper Submissions" silently closed file replacement too.
+  const acceptanceOpen = action === 'submit' ? paperAcceptanceOpen(settings) : true;
 
   // Nothing is blocking: open submissions, no maintenance window. The approved
   // list is deliberately not read here -- it is an exemption, not a filter.

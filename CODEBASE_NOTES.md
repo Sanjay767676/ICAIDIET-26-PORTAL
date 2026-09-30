@@ -310,10 +310,18 @@ portal-wide outage. `0028` gives acceptance its own key.
 |---|---|---|
 | Ready for Registration | `registration_open` | registration/payment only, never submissions |
 | Allow File Edits | `file_edits_enabled` | replacing files on existing papers |
-| Accepting Paper Submissions | `paper_acceptance_enabled` | creating NEW papers |
+| Accepting Paper Submissions | `paper_acceptance_enabled` | creating NEW papers **only** |
 | User Portal Maintenance | `maintenance_user_enabled` | everything user-facing |
 | Reviewer Portal Maintenance | `maintenance_review_enabled` | reviewer sign-in |
 | Approved Email IDs | `approved_mail_ids_enabled` + `approved_mail_ids` | nothing — it only ever exempts |
+
+- **`paper_acceptance_enabled` must never gate file replacement.** The gate computes
+  `acceptanceOpen = action === 'submit' ? paperAcceptanceOpen(settings) : true`, precisely so
+  that closing the call for papers leaves revisions open. An earlier version used the same
+  gate for both actions, so turning acceptance off silently closed file replacement too and
+  the three switches were not actually independent. `file_edits_enabled` is the only switch
+  that governs replacement; it is enforced separately in the `/files` handler via
+  `fileEditsAllowed`, after the gate.
 
 - **Defaults are chosen so a missing key is never the destructive one.**
   `paper_acceptance_enabled` and `file_edits_enabled` both treat "absent" as OPEN; a
