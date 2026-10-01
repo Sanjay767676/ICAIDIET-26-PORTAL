@@ -32,8 +32,13 @@ const OCR_SPACE_FALLBACK_KEY = 'helloworld';
  * instead of silently missing a reused one.
  *
  * Raise this to 5 MB once a PRO key is configured.
+ *
+ * 1.5 MB is the ceiling OCR.space actually enforces on the free key, measured
+ * rather than assumed: a 1.18 MB file is accepted, a 3 MB file is refused with
+ * `E556: File too large. Max 1.5 MB for Free Plan`. The website advertises 1 MB,
+ * which is stricter than the service and would needlessly reject real proofs.
  */
-const OCR_MAX_BYTES = 1 * 1024 * 1024;
+const OCR_MAX_BYTES = Math.floor(1.5 * 1024 * 1024);
 
 /** Give up on the request rather than holding a background task open. */
 const OCR_TIMEOUT_MS = 25000;
@@ -160,8 +165,25 @@ function describeOcrError(raw: unknown): string {
   return firstLine.trim().slice(0, 300);
 }
 
-/** Pull `ParsedText` out of an OCR.space response, throwing on an error body. */
+/**
+ * Pull `ParsedText` out of an OCR.space response, throwing only on a real error.
+ *
+ * An empty result is returned as an empty string rather than raised: OCR.space
+ * answers a blank or unreadable image with `ParsedText: ""` and
+ * `IsErroredOnProcessing: false`, which is a successful scan of an empty page,
+ * not a failure. Throwing here would record it as FAILED, and since a FAILED row
+ * is retryable that would make the sweep re-scan the same unusable photo on
+ * every run forever. The caller maps "" to the EMPTY status.
+ */
 function parseOcrSpaceResponse(payload: any): string {
+  // Rejections that never reach the parser -- an oversized file, a bad key --
+  // come back as a bare top-level `error` with no ParsedResults at all:
+  //   {"error":"E556: File too large. Max 1.5 MB for Free Plan (...)"}
+  // Without this branch the admin is told the file had no text, which is both
+  // wrong and hides the one thing they need to know: ask for a smaller image.
+  if (typeof payload?.error === 'string' && payload.error.trim()) {
+    throw new Error(describeOcrError(payload.error));
+  }
   if (payload?.IsErroredOnProcessing) {
     throw new Error(describeOcrError(payload?.ErrorMessage));
   }
@@ -169,9 +191,7 @@ function parseOcrSpaceResponse(payload: any): string {
   if (!Array.isArray(results) || results.length === 0) {
     throw new Error(describeOcrError(payload?.ErrorMessage));
   }
-  const text = (results[0]?.ParsedText || '').trim();
-  if (!text) throw new Error('OCR.space found no readable text in this file.');
-  return text;
+  return (results[0]?.ParsedText || '').trim();
 }
 
 /**
@@ -204,8 +224,9 @@ export async function scanProofOcr(env: ProofOcrEnv, scan: ProofOcrScan): Promis
     const limit = OCR_MAX_BYTES;
     if (bytes.byteLength > limit) {
       throw new Error(
-        `Proof is ${Math.round((bytes.byteLength / 1024 / 1024) * 10) / 10} MB; the free OCR.space key only reads up to 1 MB. ` +
-          `Ask the author for a screenshot (not a camera photo) of the receipt, or configure a PRO key.`
+        `Proof is ${Math.round((bytes.byteLength / 1024 / 1024) * 10) / 10} MB; the free OCR.space key only reads up to ` +
+          `${Math.floor(OCR_MAX_BYTES / 1024 / 1024 * 10) / 10} MB. Ask the author for a screenshot (not a camera ` +
+          `photo) of the receipt, or configure a PRO key.`
       );
     }
 

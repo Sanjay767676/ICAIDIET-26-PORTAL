@@ -1039,8 +1039,11 @@ const MAX_PAYMENT_PROOF_SIZE = 4 * 1024 * 1024; // 4 MB
 // still comfortably legible to a human reading it and to OCR reading it, but it
 // fits the free key.
 //
-// Must match OCR_MAX_BYTES in backend/src/paymentOcr.ts. If a PRO key (5 MB) is
-// configured there, raise this to 5 MB to stop shrinking files unnecessarily.
+// Must stay at or below OCR_MAX_BYTES in backend/src/paymentOcr.ts. Kept at
+// 1 MB rather than matching the 1.5 MB the free key technically allows, so the
+// file lands clear of the boundary and a receipt stays small enough to read
+// crisply. If a PRO key (5 MB) is configured there, raise this to 5 MB to stop
+// shrinking files unnecessarily.
 // ------------------------------------------------------------------
 const OCR_PROOF_TARGET_BYTES = 1 * 1024 * 1024; // 1 MB
 const OCR_PROOF_MAX_EDGE_PX = 1600;
