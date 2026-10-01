@@ -3,6 +3,7 @@ import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Load
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
 import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
+import DuplicatePaymentsPanel from './components/DuplicatePaymentsPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -357,6 +358,7 @@ function matchesSearch(sub: Submission, q: string) {
     sub.author_email,
     sub.review_decision,
     sub.review_feedback,
+    sub.utr_transaction_id,
     ...(sub.authors || []).flatMap((a) => [
       a.first_name,
       a.last_name,
@@ -2082,7 +2084,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'duplicatePayments' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
@@ -2985,12 +2987,19 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   onClick={() => changeTab('duplicates')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'duplicates' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
                 >
-                  Duplicates
+Duplicates
                   {duplicatesSubmissionsList.length > 0 && (
                     <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'duplicates' ? 'bg-red-500 text-white' : 'bg-red-500 text-white'}`}>
                       {duplicatesSubmissionsList.length}
                     </span>
                   )}
+                </button>
+                <button
+                  onClick={() => changeTab('duplicatePayments')}
+                  title="Payments that share a UTR or reuse the same payment-proof screenshot"
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'duplicatePayments' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Duplicate Payments
                 </button>
 <button
                   onClick={() => changeTab('downloads')}
@@ -3167,6 +3176,14 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
             onDelete={setDeleteTarget}
             enquiredSaving={enquiredSaving}
             onToggleEnquired={handleEnquiredToggle}
+          />
+        )}
+
+        {activeTab === 'duplicatePayments' && (
+          <DuplicatePaymentsPanel
+            token={token}
+            onUnauthorized={handleLogout}
+            onOpenProof={(id, filename) => openPdf(id, 'payment', filename)}
           />
         )}
 

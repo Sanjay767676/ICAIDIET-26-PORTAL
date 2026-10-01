@@ -1,6 +1,13 @@
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { verifyToken as clerkVerifyToken } from '@clerk/backend';
+import {
+  findDuplicatePaymentGroups,
+  findProofsNeedingScan,
+  proofNeedsScan,
+  scanProofOcr,
+  stuckScanCutoff,
+} from './paymentOcr';
 
 type Bindings = {
   DB: D1Database;
@@ -11,6 +18,10 @@ type Bindings = {
   RESEND_API_KEY?: string;
   MAIL_FROM_EMAIL?: string;
   MAIL_FROM_NAME?: string;
+  // OCR.space key used to read text out of uploaded payment proofs so the
+  // duplicate-payment check can spot a reused screenshot. Falls back to
+  // OCR.space's public demo key when unset, so local dev needs no secret.
+  OCR_SPACE_API_KEY?: string;
 };
 
 type Variables = {
@@ -3484,7 +3495,10 @@ async function purgeExpiredDeleted(env: Bindings) {
 // ------------------------------------------------------------------
 // User: Upload payment proof
 // ------------------------------------------------------------------
-const PAYMENT_PROOF_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+// Payment proofs are capped tighter than manuscripts: they are phone
+// screenshots, so anything near 10 MB is a camera photo rather than a receipt
+// screenshot, and a smaller ceiling keeps each proof cheap to store and to scan.
+const PAYMENT_PROOF_MAX_BYTES = 4 * 1024 * 1024; // 4MB
 const PAYMENT_PROOF_ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const PAYMENT_PROOF_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.pdf']);
 
@@ -3513,7 +3527,7 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
     if (!file) return c.json({ success: false, error: 'No file provided.' }, 400);
 
     if (file.size > PAYMENT_PROOF_MAX_BYTES) {
-      return c.json({ success: false, error: 'Payment proof file must be 10MB or smaller.' }, 400);
+      return c.json({ success: false, error: 'Payment proof file must be 4MB or smaller.' }, 400);
     }
     const name = file.name || 'proof.png';
     const ext = name.includes('.') ? name.substring(name.lastIndexOf('.')).toLowerCase() : '';
@@ -3546,6 +3560,17 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
        SET payment_proof_url = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ?
        WHERE id = ?`
     ).bind(storageKey, now, now, submissionId).run();
+
+    // Read the text out of the proof in the background, so the author is not
+    // held waiting on OCR and a slow or failed scan cannot block registration.
+    // The admin's duplicate-payment tab picks the result up when it lands.
+    c.executionCtx.waitUntil(
+      scanProofOcr(c.env, {
+        submissionId: submissionId as string,
+        storageKey,
+        originalFilename: file.name || name,
+      })
+    );
 
     return c.json({ success: true, payment_proof_url: storageKey, payment_status: 'PENDING' });
   } catch (err: any) {
@@ -3698,6 +3723,260 @@ app.get('/api/admin/submissions/:id/payment-proof', async (c) => {
   } catch (err: any) {
     console.error('Payment proof stream error:', err);
     return c.json({ success: false, error: 'Failed to retrieve payment proof.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Duplicate payment report
+//
+// A declared UTR is self-reported and trivially faked, so the check pairs it
+// with the text OCR read out of the uploaded proof. Two submissions are grouped
+// when they share a UTR, share byte-identical OCR text (the same file uploaded
+// twice), or their OCR texts overlap enough to be the same screenshot after a
+// crop/resize/recompression -- see src/paymentOcr.ts for the thresholds.
+//
+// Only rows that actually have a payment are read: a submission with neither a
+// UTR nor a proof cannot collide with anything.
+// ------------------------------------------------------------------
+const PROOF_OCR_EXCERPT_CHARS = 400;
+
+const truncateExcerpt = (text: string | null | undefined) => {
+  const trimmed = (text || '').replace(/\s+/g, ' ').trim();
+  if (trimmed.length <= PROOF_OCR_EXCERPT_CHARS) return trimmed;
+  return `${trimmed.slice(0, PROOF_OCR_EXCERPT_CHARS)}…`;
+};
+
+app.get('/api/admin/duplicate-payments', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.author_name, s.author_email,
+              s.registration_type, s.author_type, s.payment_status, s.utr_transaction_id,
+              s.fee_amount, s.fee_tier, s.payment_submitted_at, s.payment_approved_at,
+              s.payment_proof_url, s.created_at,
+              o.original_filename AS proof_filename,
+              o.ocr_text        AS proof_ocr_text,
+              o.ocr_norm        AS proof_ocr_norm,
+              o.ocr_hash        AS proof_ocr_hash,
+              o.token_count     AS proof_ocr_token_count,
+              o.status          AS proof_ocr_status,
+              o.error           AS proof_ocr_error,
+              o.scanned_at      AS proof_ocr_scanned_at,
+              o.updated_at      AS proof_ocr_updated_at
+       FROM submissions s
+       LEFT JOIN payment_proof_ocr o ON o.submission_id = s.id
+       WHERE s.deleted_at IS NULL
+         AND (s.utr_transaction_id IS NOT NULL AND TRIM(s.utr_transaction_id) <> ''
+              OR s.payment_proof_url IS NOT NULL)
+       ORDER BY s.payment_submitted_at DESC, s.created_at DESC`
+    ).all() as any;
+
+    const rows = (results || []) as any[];
+
+    const groups = findDuplicatePaymentGroups(
+      rows.map((r) => ({
+        id: r.id as string,
+        utr: r.utr_transaction_id as string | null,
+        hash: r.proof_ocr_hash as string | null,
+        normalized: r.proof_ocr_norm as string | null,
+        tokenCount: r.proof_ocr_token_count as number | null,
+      }))
+    );
+
+    // A group can join several submissions; keep them in report order.
+    const order = new Map(rows.map((r, i) => [r.id as string, i]));
+    const groupIds = new Set<string>();
+    groups.forEach((g) => g.submissionIds.forEach((id) => groupIds.add(id)));
+
+    const toEntry = (r: any) => ({
+      id: r.id,
+      paper_id: r.paper_id,
+      submission_code: r.submission_code,
+      title: r.title,
+      author_name: r.author_name,
+      author_email: r.author_email,
+      registration_type: r.registration_type,
+      author_type: r.author_type,
+      payment_status: r.payment_status,
+      utr_transaction_id: r.utr_transaction_id,
+      fee_amount: r.fee_amount,
+      fee_tier: r.fee_tier,
+      payment_submitted_at: r.payment_submitted_at,
+      payment_approved_at: r.payment_approved_at,
+      has_proof: !!r.payment_proof_url,
+      proof_filename: r.proof_filename || null,
+      ocr_status: r.proof_ocr_status || (r.payment_proof_url ? 'PENDING' : 'NONE'),
+      ocr_error: r.proof_ocr_error || null,
+      ocr_scanned_at: r.proof_ocr_scanned_at || null,
+      ocr_excerpt: truncateExcerpt(r.proof_ocr_text),
+    });
+
+    // Proofs the admin still has to act on, surfaced as counts so the tab can
+    // say "3 scans failed" instead of silently under-reporting duplicates.
+    const needsScan = findProofsNeedingScan(rows, groupIds);
+    const needsScanTotal = rows.filter((r) => proofNeedsScan(r)).length;
+
+    return c.json({
+      success: true,
+      summary: {
+        payments_with_reference: rows.length,
+        flagged: groupIds.size,
+        groups: groups.length,
+        ocr_done: rows.filter((r) => r.proof_ocr_status === 'DONE').length,
+        ocr_pending: rows.filter((r) => r.payment_proof_url && !r.proof_ocr_status).length,
+        ocr_failed: rows.filter((r) => r.proof_ocr_status === 'FAILED').length,
+        ocr_empty: rows.filter((r) => r.proof_ocr_status === 'EMPTY').length,
+        needs_scan: needsScanTotal,
+      },
+      // Proofs that still have to be read, minus the ones already rendered
+      // inside a duplicate group. Anything still waiting here is invisible to
+      // the group list by definition -- a payment nobody has scanned cannot be
+      // known to duplicate anything yet -- so it needs its own section or the
+      // admin is never offered the button that would clear it.
+      needs_scan: needsScan.slice(0, 200).map(toEntry),
+      groups: groups.map((g) => ({
+        id: g.id,
+        reasons: g.reasons,
+        entries: g.submissionIds
+          .map((id) => rows.find((r) => r.id === id))
+          .filter(Boolean)
+          .sort((a: any, b: any) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+          .map(toEntry),
+      })),
+    });
+  } catch (err: any) {
+    console.error('Duplicate payments report error:', err);
+    return c.json({ success: false, error: 'Failed to build the duplicate payment report.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Re-run OCR on a payment proof
+//
+// Used for proofs uploaded before OCR existed, for scans that failed (a
+// transient OCR.space error, or a proof that was too large for the free key),
+// and to pick up a proof whose filename changed.
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/:id/payment-ocr', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
+
+    const submissionId = c.req.param('id') as string;
+    const sub = await c.env.DB.prepare(
+      `SELECT id, payment_proof_url FROM submissions WHERE id = ?`
+    ).bind(submissionId).first() as any;
+    if (!sub) return c.json({ success: false, error: 'Submission not found.' }, 404);
+    if (!sub.payment_proof_url) {
+      return c.json({ success: false, error: 'This submission has no payment proof to scan.' }, 400);
+    }
+
+    // Reuse the filename from the previous scan so a rescan reports the same
+    // file the admin clicked on.
+    const prev = await c.env.DB.prepare(
+      `SELECT original_filename FROM payment_proof_ocr WHERE submission_id = ?`
+    ).bind(submissionId).first() as any;
+
+    c.executionCtx.waitUntil(
+      scanProofOcr(c.env, {
+        submissionId,
+        storageKey: sub.payment_proof_url as string,
+        originalFilename: prev?.original_filename || null,
+      })
+    );
+
+    return c.json({ success: true, status: 'PENDING' });
+  } catch (err: any) {
+    console.error('Payment OCR rescan error:', err);
+    return c.json({ success: false, error: 'Failed to start the OCR scan.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Sweep proofs that have never been scanned
+//
+// Migration 0029 starts with an empty table, so every proof uploaded before it
+// has no OCR text and therefore cannot appear in any duplicate group. Those are
+// precisely the established registrations, i.e. the most likely place a reused
+// screenshot is sitting unnoticed. This starts a bounded batch of them.
+//
+// Deliberately NOT limited to the rows the report's `needs_scan` list returns:
+// that list drops proofs already shown in a duplicate group, but a group formed
+// only from a matching UTR still has un-scanned screenshots that the screenshot
+// comparison needs to see.
+//
+// Bounded on purpose. OCR.space's free key allows 500 requests/day per IP, so
+// this fires a small batch per call and the admin sweeps repeatedly rather than
+// launching hundreds of concurrent requests that would exhaust the quota and
+// fail. The caller paces itself between batches.
+// ------------------------------------------------------------------
+app.post('/api/admin/duplicate-payments/scan-missing', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
+
+    const requested = Number(c.req.query('limit'));
+    const limit = Number.isFinite(requested) ? Math.min(25, Math.max(1, Math.trunc(requested))) : 8;
+    const cutoff = stuckScanCutoff();
+
+    // Same predicate as `proofNeedsScan`, expressed in SQL because the sweep
+    // must not trust the rows it was handed by the client.
+    const NEEDS_SCAN_SQL = `
+      FROM submissions s
+      LEFT JOIN payment_proof_ocr o ON o.submission_id = s.id
+      WHERE s.deleted_at IS NULL
+        AND s.payment_proof_url IS NOT NULL
+        AND (
+              o.submission_id IS NULL
+           OR o.status = 'FAILED'
+           OR (o.status = 'PENDING' AND o.updated_at < ?)
+        )`;
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT s.id, s.payment_proof_url, o.original_filename ${NEEDS_SCAN_SQL}
+       ORDER BY s.payment_submitted_at DESC, s.created_at DESC
+       LIMIT ?`
+    )
+      .bind(cutoff, limit)
+      .all() as any;
+
+    const batch = (results || []) as any[];
+
+    const remaining = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS n ${NEEDS_SCAN_SQL}`
+    )
+      .bind(cutoff)
+      .first<{ n: number }>();
+    const outstanding = (remaining?.n ?? 0) - batch.length;
+
+    for (const row of batch) {
+      c.executionCtx.waitUntil(
+        scanProofOcr(c.env, {
+          submissionId: row.id as string,
+          storageKey: row.payment_proof_url as string,
+          originalFilename: row.original_filename || null,
+        })
+      );
+    }
+
+    return c.json({
+      success: true,
+      started: batch.length,
+      // What is still queued after this batch, so the UI can show real progress
+      // instead of guessing how many clicks are left.
+      remaining: Math.max(0, outstanding),
+    });
+  } catch (err: any) {
+    console.error('Duplicate payments sweep error:', err);
+    return c.json({ success: false, error: 'Failed to start the scan sweep.' }, 500);
   }
 });
 

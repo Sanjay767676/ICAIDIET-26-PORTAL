@@ -13,7 +13,8 @@ import {
   XCircle,
   CreditCard,
   ChevronRight,
-  AlertCircle
+  AlertCircle,
+  Info
 } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
 
@@ -298,6 +299,10 @@ function RegistrationFormBody({
   // The author must tick this before submitting, so the amount on the record is
   // something they affirmatively agreed to rather than something inferred.
   const [confirmedPaid, setConfirmedPaid] = useState(false);
+  // Set while the picked screenshot is being re-encoded, and used afterwards to
+  // tell the author their file was shrunk before it was sent.
+  const [compressing, setCompressing] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     setType(sub.registration_type || '');
@@ -310,6 +315,8 @@ function RegistrationFormBody({
     setConfirmedPaid(false);
     setEditingSubmitted(false);
     setLoading(false);
+    setCompressing(false);
+    setNotice(null);
   }, [resetKey]);
 
   // The options are the keys of the admin-editable fee matrix, so the choices
@@ -446,13 +453,19 @@ function RegistrationFormBody({
       setError('Please confirm you have paid the amount shown above.');
       return;
     }
-    if (file && file.size > MAX_FILE_SIZE) {
-      setError('The proof file must be 10MB or smaller.');
+    if (file && file.size > MAX_PAYMENT_PROOF_SIZE) {
+      setError('The proof file must be 4MB or smaller. Please crop or screenshot the receipt again.');
       return;
     }
     if (isRejected) {
-      if (!file && !sub.payment_proof_url) {
-        setError('Please upload a new, corrected payment proof after your payment was declined.');
+      // The declined proof is still stored on the submission, so
+      // `!sub.payment_proof_url` can never be true here -- checking it made this
+      // branch unreachable, and the banner told the author to re-upload a
+      // corrected proof without the form actually requiring one. Require the
+      // new file outright, which is both what the banner promises and what
+      // keeps a proof the admin already refused from being resubmitted as-is.
+      if (!file) {
+        setError('Please upload a new, corrected payment proof before resubmitting.');
         return;
       }
     } else if (!file && !sub.payment_proof_url) {
@@ -465,14 +478,34 @@ function RegistrationFormBody({
     }
     setLoading(true);
     setError(null);
+    setNotice(null);
 
     try {
       const token = await getToken();
       if (!token) throw new Error('Not authenticated');
 
       if (file) {
+        // Shrink an oversized screenshot before sending it, so the text in it
+        // can actually be read back for the duplicate check.
+        let uploadFile = file;
+        if (file.size > OCR_PROOF_TARGET_BYTES && file.type !== 'application/pdf') {
+          setCompressing(true);
+          try {
+            uploadFile = await compressProofForOcr(file);
+          } finally {
+            setCompressing(false);
+          }
+          if (uploadFile !== file) {
+            setNotice(
+              `Your screenshot was reduced from ${(file.size / 1024 / 1024).toFixed(1)}MB to ` +
+                `${Math.max(0.1, uploadFile.size / 1024 / 1024).toFixed(1)}MB so the transfer details can be read ` +
+                `automatically. The admin still sees the full receipt.`
+            );
+          }
+        }
+
         const formData = new FormData();
-        formData.append('file', file);
+        formData.append('file', uploadFile);
 
         const fileRes = await fetch(`${API_URL}/api/user/submissions/${sub.id}/payment-proof`, {
           method: 'POST',
@@ -775,9 +808,19 @@ function RegistrationFormBody({
                 className="w-full text-sm file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-brand-text file:text-white hover:file:bg-brand-accent file:cursor-pointer transition-colors"
                 disabled={loading}
               />
+              {file && file.size > MAX_PAYMENT_PROOF_SIZE && (
+                <p className="text-xs text-red-600 font-medium mt-1">
+                  That file is {Math.round((file.size / 1024 / 1024) * 10) / 10}MB. The limit is 4MB — please use a
+                  screenshot of the receipt rather than a camera photo.
+                </p>
+              )}
               {sub.payment_proof_url && !file && (
                 <p className="text-xs text-green-700 font-medium mt-1">✓ A payment proof file has already been uploaded.</p>
               )}
+              <p className="text-xs text-black/50 mt-1">
+                JPG, PNG, WebP or PDF, up to 4MB. The text in your screenshot is read automatically so we can confirm the
+                transfer.
+              </p>
             </div>
 
             {/* UTR / Transaction ID */}
@@ -834,6 +877,12 @@ function RegistrationFormBody({
               </label>
             )}
 
+            {notice && (
+              <div className="flex items-start gap-2 p-3 bg-blue-50 text-blue-800 border border-blue-200 rounded-xl text-sm font-medium">
+                <Info className="w-4 h-4 shrink-0 mt-0.5 text-blue-600" /> {notice}
+              </div>
+            )}
+
             {error && (
               <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-sm font-medium">
                 <AlertCircle className="w-4 h-4 shrink-0 text-red-600" /> {error}
@@ -842,12 +891,13 @@ function RegistrationFormBody({
 
             <button
               type="submit"
-              disabled={loading || !liveFee || !confirmedPaid}
+              disabled={loading || compressing || !liveFee || !confirmedPaid}
               className="w-full py-3 bg-brand-text text-white rounded-xl font-bold text-base hover:bg-brand-accent transition-all shadow-md hover:shadow-lg disabled:opacity-50 flex items-center justify-center gap-2"
             >
-              {loading ? (
+              {loading || compressing ? (
                 <>
-                  <Loader2 className="w-5 h-5 animate-spin" /> Submitting...
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  {compressing && !loading ? 'Preparing screenshot...' : 'Submitting...'}
                 </>
               ) : (
                 'Submit Payment Details'
@@ -971,6 +1021,105 @@ function RegistrationForm({
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+
+// Payment proofs are capped tighter than manuscripts. They are bank-app
+// screenshots, so anything near 10 MB is a camera photo rather than a receipt
+// screenshot; 4 MB is comfortably above a real screenshot and keeps each proof
+// cheap to store and to read back with OCR. Must match PAYMENT_PROOF_MAX_BYTES
+// in backend/src/index.ts, which enforces the same ceiling server-side.
+const MAX_PAYMENT_PROOF_SIZE = 4 * 1024 * 1024; // 4 MB
+
+// ------------------------------------------------------------------
+// Payment-proof compression.
+//
+// OCR.space's free plan refuses anything over 1 MB, and the text it reads out
+// of the screenshot is the only thing that can catch an author reusing someone
+// else's receipt with a made-up UTR. So any image above that ceiling is
+// re-encoded in the browser before it is sent: a 1600px receipt screenshot is
+// still comfortably legible to a human reading it and to OCR reading it, but it
+// fits the free key.
+//
+// Must match OCR_MAX_BYTES in backend/src/paymentOcr.ts. If a PRO key (5 MB) is
+// configured there, raise this to 5 MB to stop shrinking files unnecessarily.
+// ------------------------------------------------------------------
+const OCR_PROOF_TARGET_BYTES = 1 * 1024 * 1024; // 1 MB
+const OCR_PROOF_MAX_EDGE_PX = 1600;
+
+function canvasToJpeg(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality));
+}
+
+/** Rename to .jpg so the stored extension matches the bytes we are sending. */
+function asJpgName(name: string) {
+  const base = name.includes('.') ? name.slice(0, name.lastIndexOf('.')) : name;
+  return `${(base || 'payment-proof').replace(/[^\w.-]+/g, '_')}.jpg`;
+}
+
+/**
+ * Shrink an oversized screenshot to fit the OCR free tier, or return it
+ * unchanged when that is not possible or not worthwhile.
+ *
+ * Always returns a usable File: a PDF cannot be re-encoded in the browser, and
+ * an image too small to shrink without destroying the digits is better sent as
+ *-is so the admin can still read it (the Duplicate Payments tab then reports
+ * the scan as too large rather than silently skipping the proof).
+ */
+async function compressProofForOcr(file: File): Promise<File> {
+  if (file.size <= OCR_PROOF_TARGET_BYTES) return file;
+  if (file.type === 'application/pdf') return file;
+
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file);
+  } catch {
+    return file;
+  }
+
+  try {
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return file;
+
+    const longestEdge = Math.max(bitmap.width, bitmap.height);
+    let scale = Math.min(1, OCR_PROOF_MAX_EDGE_PX / longestEdge);
+    let quality = 0.82;
+
+    // Lower quality first, then shrink the image. Dropping quality alone turns
+    // small digits into smudges, so scale is what actually saves a very large
+    // screenshot -- and the cap stops the loop ending in a useless 200px blob.
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (scale < 0.25) break;
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+
+      // Fill white first: a PNG screenshot with transparency flattens to black
+      // on a JPEG background, which would destroy dark text on a dark page.
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+      const blob = await canvasToJpeg(canvas, quality);
+      if (blob && blob.size <= OCR_PROOF_TARGET_BYTES) {
+        return new File([blob], asJpgName(file.name), {
+          type: 'image/jpeg',
+          lastModified: Date.now(),
+        });
+      }
+
+      if (quality > 0.65) quality -= 0.09;
+      else {
+        scale *= 0.8;
+        quality = 0.78;
+      }
+    }
+
+    return file;
+  } catch {
+    return file;
+  } finally {
+    bitmap.close();
+  }
+}
 
 // ------------------------------------------------------------------
 // Edit modal: only the uploaded files can be replaced, never the details.
