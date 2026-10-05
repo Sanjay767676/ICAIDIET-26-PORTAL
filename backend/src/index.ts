@@ -276,6 +276,109 @@ async function verifyClerkJwt(c: Context<AppEnv>, rawToken: string): Promise<{ o
   }
 }
 
+// ------------------------------------------------------------------
+// Resolving the author's real email address
+//
+// The `clerkEmail` on the context is load-bearing: it is what the
+// approved-email list is matched against, so a wrong or missing value here
+// refuses authors the admin deliberately allowed.
+//
+// Clerk's DEFAULT session token carries only sub / iss / azp / exp / iat /
+// nbf. An `email` claim appears only if the instance's JWT template was
+// hand-edited to add one, so reading the claim alone makes `email` an empty
+// string for every author on a stock instance -- and an empty string reads as
+// "not on the list", which turns a correctly configured allowlist into a
+// portal that turns away everyone. That is why the address is resolved here
+// rather than assumed from the token.
+//
+// Order, cheapest first:
+//   1. the token's own email / email_address claim, when the template has one
+//   2. the users row already linked to this Clerk identity via
+//      user_profiles.clerk_id
+//   3. the Clerk Backend API, which is authoritative
+//
+// The @clerk.local address ensureUserForClerk synthesizes for identities that
+// arrive with no address is a placeholder, not a real one, so it is never
+// accepted here and never allowed to shadow a real address found later.
+// ------------------------------------------------------------------
+
+const CLERK_PLACEHOLDER_EMAIL_DOMAIN = '@clerk.local';
+
+// Positive lookups are cached briefly to keep a burst of requests (wizard
+// pre-check, then submit) to one Clerk call; failures are cached far shorter so
+// a transient outage cannot keep a legitimate author locked out for long.
+const CLERK_EMAIL_CACHE_TTL_MS = 10 * 60 * 1000;
+const CLERK_EMAIL_NEGATIVE_CACHE_TTL_MS = 60 * 1000;
+const clerkEmailCache = new Map<string, { email: string; expiresAt: number }>();
+
+// Kept bounded so a long-lived isolate cannot accumulate one entry per visitor.
+const CLERK_EMAIL_CACHE_MAX = 5000;
+
+function normalizeResolvedEmail(value: unknown): string {
+  const email = typeof value === 'string' ? value.trim() : '';
+  if (!email || !email.includes('@')) return '';
+  if (email.toLowerCase().endsWith(CLERK_PLACEHOLDER_EMAIL_DOMAIN)) return '';
+  return email;
+}
+
+async function clerkEmailFromBackendApi(env: Bindings, clerkUserId: string): Promise<string> {
+  const cached = clerkEmailCache.get(clerkUserId);
+  if (cached && cached.expiresAt > Date.now()) return cached.email;
+
+  let email = '';
+  if (env.CLERK_SECRET_KEY) {
+    try {
+      const res = await fetch(`https://api.clerk.com/v1/users/${encodeURIComponent(clerkUserId)}`, {
+        headers: { Authorization: `Bearer ${env.CLERK_SECRET_KEY}` },
+      });
+      if (res.ok) {
+        const data: any = await res.json();
+        const addresses: any[] = Array.isArray(data?.email_addresses) ? data.email_addresses : [];
+        const primaryId = data?.primary_email_address_id;
+        email = normalizeResolvedEmail(
+          data?.primary_email_address?.email_address ||
+            addresses.find((a: any) => a?.id === primaryId)?.email_address ||
+            addresses[0]?.email_address ||
+            data?.email ||
+            data?.email_address
+        );
+      } else {
+        console.error('Clerk user lookup failed:', res.status);
+      }
+    } catch (err) {
+      console.error('Clerk user lookup error:', err);
+    }
+  } else {
+    console.error('CLERK_SECRET_KEY is not configured; cannot resolve the author email.');
+  }
+
+  if (clerkEmailCache.size >= CLERK_EMAIL_CACHE_MAX) clerkEmailCache.clear();
+  clerkEmailCache.set(clerkUserId, {
+    email,
+    expiresAt: Date.now() + (email ? CLERK_EMAIL_CACHE_TTL_MS : CLERK_EMAIL_NEGATIVE_CACHE_TTL_MS),
+  });
+  return email;
+}
+
+async function resolveClerkEmail(env: Bindings, clerkUserId: string, tokenEmail: string): Promise<string> {
+  const fromToken = normalizeResolvedEmail(tokenEmail);
+  if (fromToken) return fromToken;
+
+  try {
+    const row = await env.DB.prepare(
+      `SELECT u.email FROM user_profiles p
+       JOIN users u ON u.id = p.user_id
+       WHERE p.clerk_id = ? LIMIT 1`
+    ).bind(clerkUserId).first() as any;
+    const fromDb = normalizeResolvedEmail(row?.email);
+    if (fromDb) return fromDb;
+  } catch (err) {
+    console.error('Linked-email lookup failed:', err);
+  }
+
+  return clerkEmailFromBackendApi(env, clerkUserId);
+}
+
 // Middleware: require Clerk auth
 async function requireClerkAuth(c: Context<AppEnv>, next: () => Promise<void>) {
   const header = c.req.header('Authorization') || '';
@@ -287,9 +390,14 @@ async function requireClerkAuth(c: Context<AppEnv>, next: () => Promise<void>) {
   if (!result.ok || !result.userId) {
     return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
   }
-  // Attach userId to context for downstream handlers
+  // Attach identity to the context for downstream handlers. The email is the
+  // verified address of THIS Clerk identity -- resolved server-side when the
+  // token does not carry one, and never taken from the request body.
   c.set('clerkUserId', result.userId);
-  c.set('clerkEmail', result.email || '');
+  c.set(
+    'clerkEmail',
+    await resolveClerkEmail(c.env as Bindings, result.userId, result.email || '')
+  );
   return next();
 }
 
@@ -704,6 +812,33 @@ async function ensureUserForClerk(c: Context<AppEnv>, clerkUserId: string, clerk
   const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE lower(email) = ?`)
     .bind(email).first() as any;
   if (existing?.id) return existing.id;
+
+  // A real address arrived for an identity that previously only ever had a
+  // synthesized one. Rename that row rather than inserting a second row: the
+  // placeholder's id is what their existing submissions point at via user_id,
+  // so a fresh row would orphan them out of "My Submissions" and out of every
+  // admin count that joins on user_id. The lookup is by the exact derived
+  // placeholder string, so this can only ever touch a row this function made.
+  const placeholder = `${clerkUserId}@clerk.local`;
+  if (email !== placeholder) {
+    try {
+      const renamed = await c.env.DB.prepare(
+        `UPDATE users SET email = ?, updated_at = datetime('now') WHERE email = ?`
+      ).bind(email, placeholder).run();
+      if ((renamed?.meta?.changes || 0) > 0) {
+        const upgraded = await c.env.DB.prepare(`SELECT id FROM users WHERE lower(email) = ?`)
+          .bind(email).first() as any;
+        if (upgraded?.id) return upgraded.id;
+      }
+    } catch (err) {
+      // The address can already belong to another row (the lookup above missed
+      // it only in a race), and users.email is UNIQUE. Losing this race is not
+      // an error: fall through, and the re-select below finds whichever row owns
+      // the address. That author's own submissions stay visible either way via
+      // the author_email fallback in /api/submissions/mine.
+      console.error('Placeholder email upgrade failed:', err);
+    }
+  }
 
   // Race-safe: two concurrent requests (e.g. /users/sync + /users/me firing
   // together) can both miss the SELECT above. ON CONFLICT turns the second
@@ -1330,14 +1465,22 @@ app.post('/api/users/sync', async (c) => {
 
     const clerkId = authResult.userId;
     const body = await c.req.json().catch(() => null);
-    const email = (body?.email || authResult.email || '').trim().toLowerCase();
+    // Same resolution requireClerkAuth applies, so the row created here is keyed
+    // to the author's real address rather than a synthesized placeholder that
+    // could never match the approved-email list.
+    const verifiedEmail = await resolveClerkEmail(
+      c.env as Bindings,
+      clerkId,
+      authResult.email || ''
+    );
+    const email = (body?.email || verifiedEmail).trim().toLowerCase();
     const name = (body?.name || '').trim() || email.split('@')[0] || 'User';
 
     // SECURITY: resolve the internal user strictly from the verified Clerk
     // identity (clerk linkage / token email), never from client data.
     // Only the display name is enriched from the body; email is never
     // taken from the client to avoid hijacking rows or colliding users.
-    const userId = await ensureUserForClerk(c, clerkId, authResult.email || '');
+    const userId = await ensureUserForClerk(c, clerkId, verifiedEmail);
 
     await c.env.DB.prepare(
       `UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?`
@@ -1440,6 +1583,51 @@ app.post('/api/users/profile', requireClerkAuth, async (c) => {
     return c.json({ success: true, hasProfile: true, profile: saved });
   } catch (error) {
     console.error('Save profile error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Submission eligibility (requires Clerk auth)
+//
+// The same decision POST /api/submissions makes, asked one step earlier.
+//
+// Without it, an author who is not exempt walks the whole three-step wizard,
+// picks a file, uploads it, and only then is told the window is closed to them
+// -- which reads as the allowlist not working rather than as a closed window.
+// Asking the server up front means the portal can say so before any work is
+// wasted, and it is the only place the answer can come from: the list itself is
+// redacted from the public settings endpoint, so the client cannot work it out.
+//
+// Deliberately returns a 200 with canSubmit=false rather than the gate's own
+// refusal status: this is a question, not an attempt. The list is NEVER
+// included, only whether this one author matched it.
+// ------------------------------------------------------------------
+app.get('/api/submission-eligibility', requireClerkAuth, async (c) => {
+  try {
+    const settings = await loadSettingsRecord(c.env as Bindings);
+    const email = (c.get('clerkEmail') || '').trim();
+    const refusal = userPortalGate(settings, email, 'submit');
+    const maintenance = portalMaintenanceActive(settings, 'user');
+
+    return c.json({
+      success: true,
+      can_submit: refusal === null,
+      // The resolved address, so an author can see which of their accounts the
+      // allowlist is being matched against when it disagrees with them. This is
+      // the caller's own address, not anyone else's.
+      email,
+      // Enough for the portal to render an accurate explanation without the
+      // list itself.
+      reason: refusal ? String((refusal.body as any).code || 'CLOSED') : '',
+      message: refusal ? String((refusal.body as any).error || '') : '',
+      paper_acceptance_open: paperAcceptanceOpen(settings),
+      approved_list_active: approvedMailListEnabled(settings),
+      maintenance_active: maintenance.active,
+      maintenance_until: maintenance.until,
+    });
+  } catch (error) {
+    console.error('Fetch submission eligibility error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -3135,6 +3323,26 @@ function userPortalGate(
   if (approvedMailAllowed(settings, email)) return null;
 
   const until = maintenance.active ? maintenance.until : '';
+
+  // Something is blocking AND we could not establish this author's address at
+  // all. That is a different fact from "not on the list", and reporting it as
+  // NOT_APPROVED is actively misleading: the admin sees a correct allowlist
+  // while a correctly-listed author is turned away with no way to tell why.
+  // resolveClerkEmail normally prevents this, so reaching here means Clerk's
+  // own lookup failed -- still refused (an unidentifiable caller is not an
+  // approved one) but with its own code and a message that points at the fix.
+  if (!(email || '').trim()) {
+    return {
+      status: 503,
+      body: {
+        success: false,
+        code: 'EMAIL_UNAVAILABLE',
+        error:
+          'We could not read the email address of your signed-in account, so the approved list cannot be checked. Please sign out and sign in again, or contact the conference team.',
+        maintenance_until: until,
+      },
+    };
+  }
 
   if (approvedMailListEnabled(settings)) {
     return {
