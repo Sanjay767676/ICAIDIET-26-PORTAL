@@ -3,7 +3,6 @@ import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Load
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
 import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
-import DuplicatePaymentsPanel from './components/DuplicatePaymentsPanel';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -2084,7 +2083,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'duplicatePayments' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
@@ -2125,6 +2124,11 @@ export default function App() {
   // meaningful in that state -- see userPortalGate in backend/src/index.ts.
   const [approvedMailEnabled, setApprovedMailEnabled] = useState<boolean>(false);
   const [approvedMailIds, setApprovedMailIds] = useState<string>('');
+  // The server's canonical (lowercased, deduplicated, newline-joined) copy of
+  // the saved list. Kept apart from the textarea so the membership check below
+  // answers for what is really stored rather than for unsaved edits.
+  const [savedApprovedMailIds, setSavedApprovedMailIds] = useState<string>('');
+  const [approvedMailCheck, setApprovedMailCheck] = useState<string>('');
   const [savingApprovedMail, setSavingApprovedMail] = useState<boolean>(false);
   const [approvedMailMessage, setApprovedMailMessage] = useState<string | null>(null);
   const [approvedMailError, setApprovedMailError] = useState<string | null>(null);
@@ -2232,8 +2236,12 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setMtReviewUntil(s.maintenance_review_until || '');
         // Absent key means allowed; see fileEditsAllowed in backend/src/index.ts.
         setFileEditsEnabled(s.file_edits_enabled !== 'false');
-        setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
-        setApprovedMailIds(s.approved_mail_ids || '');
+setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
+          setApprovedMailIds(s.approved_mail_ids || '');
+          // The server's canonical copy, kept apart from the textarea so the
+          // "is this address approved?" check below always answers for what is
+          // actually saved, never for edits that have not been saved yet.
+          setSavedApprovedMailIds(s.approved_mail_ids || '');
         // Parsed and default-merged by the backend, so the editors always open
         // on the values that are actually live for authors.
         if (data.registration) setRegistrationConfig(data.registration);
@@ -2994,13 +3002,6 @@ Duplicates
                     </span>
                   )}
                 </button>
-                <button
-                  onClick={() => changeTab('duplicatePayments')}
-                  title="Payments that share a UTR or reuse the same payment-proof screenshot"
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'duplicatePayments' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
-                >
-                  Duplicate Payments
-                </button>
 <button
                   onClick={() => changeTab('downloads')}
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'downloads' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
@@ -3176,14 +3177,6 @@ Duplicates
             onDelete={setDeleteTarget}
             enquiredSaving={enquiredSaving}
             onToggleEnquired={handleEnquiredToggle}
-          />
-        )}
-
-        {activeTab === 'duplicatePayments' && (
-          <DuplicatePaymentsPanel
-            token={token}
-            onUnauthorized={handleLogout}
-            onOpenProof={(id, filename) => openPdf(id, 'payment', filename)}
           />
         )}
 
@@ -3380,6 +3373,61 @@ Duplicates
                           One address per line. Commas and semicolons also work. Matching ignores case and surrounding
                           spaces, and uses the email address of the signed-in Google account.
                         </p>
+                      </div>
+
+                      {/* Confirms against the SAVED list, so a typo or a save that
+                          did not land is visible here instead of only showing up as
+                          an author who is mysteriously still blocked. */}
+                      <div>
+                        <label htmlFor="approved-mail-check" className="block text-sm font-medium text-brand-text mb-1">
+                          Check an address
+                        </label>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <input
+                            id="approved-mail-check"
+                            type="email"
+                            value={approvedMailCheck}
+                            onChange={(e) => setApprovedMailCheck(e.target.value)}
+                            placeholder="author@gmail.com"
+                            spellCheck={false}
+                            className="w-full sm:w-72 rounded-lg border border-brand-text/20 px-3 py-2 text-sm font-mono bg-white text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                          />
+                          {(() => {
+                            const candidate = approvedMailCheck.trim().toLowerCase();
+                            if (!candidate) return null;
+                            // Same split/lowercase the backend uses on both write and
+                            // read, so this answers exactly as the gate would.
+                            const onList = savedApprovedMailIds
+                              .split(/[\s,;]+/)
+                              .map((v) => v.trim().toLowerCase())
+                              .filter(Boolean)
+                              .includes(candidate);
+                            if (onList && approvedMailEnabled) {
+                              return (
+                                <span className="text-sm font-medium text-green-700">
+                                  On the saved list and active &mdash; this account can submit.
+                                </span>
+                              );
+                            }
+                            if (onList) {
+                              return (
+                                <span className="text-sm font-medium text-amber-700">
+                                  On the saved list but the toggle is off, so it has no effect yet.
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="text-sm font-medium text-red-600">
+                                Not on the saved list. Check for typos and save again.
+                              </span>
+                            );
+                          })()}
+                        </div>
+                        {approvedMailIds !== savedApprovedMailIds && (
+                          <p className="text-xs text-amber-700 mt-1.5">
+                            Unsaved changes in the box above &mdash; this check is against the last saved list.
+                          </p>
+                        )}
                       </div>
 
                       {approvedMailEnabled && approvedMailIds.trim() === '' && (
