@@ -157,6 +157,29 @@ export default function App() {
     };
   }, [isSignedIn, currentView, getToken]);
 
+  // Sync the signed-in user's verified identity to the backend immediately on sign-in
+  useEffect(() => {
+    if (!isSignedIn || !clerkUser) return;
+    const syncUser = async () => {
+      try {
+        const token = await getToken();
+        if (!token) return;
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+        await fetch(apiUrl + '/api/users/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify({
+            name: clerkUser.fullName || '',
+            email: clerkUser.primaryEmailAddress?.emailAddress || '',
+          }),
+        });
+      } catch {
+        // Non-fatal
+      }
+    };
+    syncUser();
+  }, [isSignedIn, clerkUser, getToken]);
+
   return (
     <>
       <MainLayout view={currentView} onNavigate={navigate} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil}>

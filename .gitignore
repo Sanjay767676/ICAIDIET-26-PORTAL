@@ -22,3 +22,5 @@ user-portal/assets/
 # names, phone numbers, email addresses and live bank details, so they must
 # never be committed. Restore locally with a `wrangler d1 export` instead.
 backup/
+*.sql
+!backend/migrations/*.sql

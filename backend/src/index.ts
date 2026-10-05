@@ -376,6 +376,18 @@ async function resolveClerkEmail(env: Bindings, clerkUserId: string, tokenEmail:
     console.error('Linked-email lookup failed:', err);
   }
 
+  // Fallback: check if this user previously submitted a paper under a placeholder account
+  try {
+    const subEmail = await env.DB.prepare(
+      `SELECT s.author_email FROM submissions s
+       JOIN users u ON u.id = s.user_id
+       WHERE u.email = ? || '@clerk.local'
+       LIMIT 1`
+    ).bind(clerkUserId).first() as any;
+    const fromSub = normalizeResolvedEmail(subEmail?.author_email);
+    if (fromSub) return fromSub;
+  } catch {}
+
   return clerkEmailFromBackendApi(env, clerkUserId);
 }
 
@@ -811,7 +823,20 @@ async function ensureUserForClerk(c: Context<AppEnv>, clerkUserId: string, clerk
 
   const existing = await c.env.DB.prepare(`SELECT id FROM users WHERE lower(email) = ?`)
     .bind(email).first() as any;
-  if (existing?.id) return existing.id;
+  if (existing?.id) {
+    const placeholder = `${clerkUserId}@clerk.local`;
+    if (email !== placeholder) {
+      try {
+        await c.env.DB.prepare(
+          `UPDATE submissions SET user_id = ?
+           WHERE user_id = (SELECT id FROM users WHERE email = ? LIMIT 1)`
+        ).bind(existing.id, placeholder).run();
+      } catch (err) {
+        console.error('Placeholder submissions adopt failed:', err);
+      }
+    }
+    return existing.id;
+  }
 
   // A real address arrived for an identity that previously only ever had a
   // synthesized one. Rename that row rather than inserting a second row: the
@@ -2071,6 +2096,37 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
   }
 });
 
+// Check if an authenticated user owns or is an author on this submission
+async function isAuthorizedForSubmission(
+  env: Bindings,
+  submission: { id: string; user_id: string; author_email?: string },
+  userId: string,
+  clerkUserId: string,
+  clerkEmail: string
+): Promise<boolean> {
+  if (submission.user_id === userId) return true;
+
+  if (clerkUserId) {
+    const isPlaceholder = await env.DB.prepare(
+      `SELECT 1 FROM users WHERE id = ? AND email = ? || '@clerk.local' LIMIT 1`
+    ).bind(submission.user_id, clerkUserId).first();
+    if (isPlaceholder) return true;
+  }
+
+  const cleanEmail = (clerkEmail || '').trim().toLowerCase();
+  if (cleanEmail) {
+    if ((submission.author_email || '').trim().toLowerCase() === cleanEmail) {
+      return true;
+    }
+    const inAuthors = await env.DB.prepare(
+      `SELECT 1 FROM authors WHERE submission_id = ? AND lower(trim(email)) = ? LIMIT 1`
+    ).bind(submission.id, cleanEmail).first();
+    if (inAuthors) return true;
+  }
+
+  return false;
+}
+
 // ------------------------------------------------------------------
 // User: Get the signed-in user's own submissions only.
 // ------------------------------------------------------------------
@@ -2095,11 +2151,41 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
        FROM submissions s
        WHERE s.deleted_at IS NULL
-         AND (s.user_id = ? OR (lower(trim(s.author_email)) = lower(?) AND trim(coalesce(?, '')) <> ''))
+         AND (
+           s.user_id = ?
+           OR s.user_id IN (SELECT id FROM users WHERE email = ? || '@clerk.local')
+           OR (trim(coalesce(?, '')) <> '' AND (
+             lower(trim(s.author_email)) = lower(?)
+             OR EXISTS (
+               SELECT 1 FROM authors a
+               WHERE a.submission_id = s.id AND lower(trim(a.email)) = lower(?)
+             )
+           ))
+         )
        ORDER BY s.created_at DESC`
-    ).bind(userId, clerkEmail, clerkEmail).all();
+    ).bind(userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
 
-    return c.json({ success: true, submissions: results as any[] });
+    const submissions = (results as any[]) || [];
+
+    // Self-heal: if any retrieved submission was pointing to a placeholder user_id
+    // or different user row, adopt it to this active user account in the background.
+    const unownedIds = submissions
+      .filter((s) => s.user_id !== userId)
+      .map((s) => s.id);
+    if (unownedIds.length > 0) {
+      c.executionCtx.waitUntil(
+        Promise.all(
+          unownedIds.map((id) =>
+            c.env.DB.prepare(`UPDATE submissions SET user_id = ? WHERE id = ? AND user_id != ?`)
+              .bind(userId, id, userId)
+              .run()
+              .catch(() => {})
+          )
+        )
+      );
+    }
+
+    return c.json({ success: true, submissions });
   } catch (error) {
     console.error('Fetch my submissions error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
@@ -2146,13 +2232,22 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const submission = await c.env.DB.prepare(
-      `SELECT id, user_id, status, created_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, user_id, author_email, status, created_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
     }
-    if (submission.user_id !== userId) {
+    const authorized = await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail);
+    if (!authorized) {
       return c.json({ success: false, error: 'You can only edit files of your own submission.' }, 403);
+    }
+    if (submission.user_id !== userId) {
+      c.executionCtx.waitUntil(
+        c.env.DB.prepare(`UPDATE submissions SET user_id = ? WHERE id = ?`)
+          .bind(userId, submissionId)
+          .run()
+          .catch(() => {})
+      );
     }
 
     const formData = await c.req.parseBody();
@@ -3721,11 +3816,16 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
       `SELECT id, user_id, author_email FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
-    const ownsSubmission =
-      submission.user_id === userId ||
-      ((clerkEmail || '').trim().toLowerCase() !== '' &&
-        (submission.author_email || '').trim().toLowerCase() === clerkEmail.trim().toLowerCase());
+    const ownsSubmission = await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail);
     if (!ownsSubmission) return c.json({ success: false, error: 'Unauthorized.' }, 403);
+    if (submission.user_id !== userId) {
+      c.executionCtx.waitUntil(
+        c.env.DB.prepare(`UPDATE submissions SET user_id = ? WHERE id = ?`)
+          .bind(userId, submissionId)
+          .run()
+          .catch(() => {})
+      );
+    }
 
     const eligibility = await registrationEligible(c.env, submissionId as string);
     if (!eligibility.ok) return c.json({ success: false, error: eligibility.error }, 403);
@@ -3801,11 +3901,16 @@ app.post('/api/user/submissions/:id/register', requireClerkAuth, async (c) => {
       `SELECT id, user_id, author_email, payment_proof_url, registration_type, author_type, fee_amount, fee_tier FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) return c.json({ success: false, error: 'Submission not found.' }, 404);
-    const ownsSubmission =
-      submission.user_id === userId ||
-      ((clerkEmail || '').trim().toLowerCase() !== '' &&
-        (submission.author_email || '').trim().toLowerCase() === clerkEmail.trim().toLowerCase());
+    const ownsSubmission = await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail);
     if (!ownsSubmission) return c.json({ success: false, error: 'Unauthorized.' }, 403);
+    if (submission.user_id !== userId) {
+      c.executionCtx.waitUntil(
+        c.env.DB.prepare(`UPDATE submissions SET user_id = ? WHERE id = ?`)
+          .bind(userId, submissionId)
+          .run()
+          .catch(() => {})
+      );
+    }
 
     const eligibility = await registrationEligible(c.env, submissionId as string);
     if (!eligibility.ok) return c.json({ success: false, error: eligibility.error }, 403);
