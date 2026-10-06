@@ -2136,6 +2136,7 @@ export default function App() {
     early_bird_until: '',
     fees: {},
     bank: {},
+    banks: [],
   });
   const [savingSettings, setSavingSettings] = useState<boolean>(false);
   const [backingUp, setBackingUp] = useState(false);

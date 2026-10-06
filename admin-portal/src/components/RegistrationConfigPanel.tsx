@@ -74,7 +74,30 @@ export function rowsToConfig(
       standard: row.standard.trim(),
     };
   }
-  return { early_bird_until: earlyBirdUntil.trim(), fees, bank: baseConfig.bank, banks: baseConfig.banks };
+  return {
+    early_bird_until: earlyBirdUntil.trim(),
+    fees,
+    bank: baseConfig.bank || {},
+    banks: baseConfig.banks || [],
+  };
+}
+
+function getInitialBanks(config: RegistrationConfig): BankAccount[] {
+  if (config.banks && config.banks.length > 0) {
+    return config.banks;
+  }
+  if (config.bank && Object.keys(config.bank).length > 0 && (config.bank.account_number || config.bank.bank_name)) {
+    return [{
+      id: 'default',
+      account_number: config.bank.account_number || '',
+      ifsc: config.bank.ifsc || '',
+      branch: config.bank.branch || '',
+      beneficiary: config.bank.beneficiary || '',
+      bank_name: config.bank.bank_name || '',
+      show_in_portal: true,
+    }];
+  }
+  return [];
 }
 
 function formatCutoffForHumans(value: string): string {
@@ -105,7 +128,9 @@ export default function RegistrationConfigPanel({
   onChange: (config: RegistrationConfig) => void;
 }) {
   const [rows, setRows] = useState<FeeRow[]>(() => configToRows(config));
+  const [banks, setBanks] = useState<BankAccount[]>(() => getInitialBanks(config));
   const lastEmitted = useRef<string>(JSON.stringify(config.fees));
+  const lastEmittedBanks = useRef<string>(JSON.stringify(getInitialBanks(config)));
 
   const feesKey = JSON.stringify(config.fees);
   useEffect(() => {
@@ -114,9 +139,38 @@ export default function RegistrationConfigPanel({
     lastEmitted.current = feesKey;
   }, [feesKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const banksKey = JSON.stringify(config.banks);
+  useEffect(() => {
+    if (banksKey === lastEmittedBanks.current) return;
+    const initial = getInitialBanks(config);
+    setBanks(initial);
+    lastEmittedBanks.current = JSON.stringify(initial);
+  }, [banksKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const syncBanks = (nextBanks: BankAccount[]) => {
+    setBanks(nextBanks);
+    lastEmittedBanks.current = JSON.stringify(nextBanks);
+    const primary = nextBanks.find((b) => b.show_in_portal) || nextBanks[0] || ({} as BankAccount);
+    const primaryBankObj = {
+      account_number: primary.account_number || '',
+      ifsc: primary.ifsc || '',
+      branch: primary.branch || '',
+      beneficiary: primary.beneficiary || '',
+      bank_name: primary.bank_name || '',
+    };
+    onChange({
+      ...config,
+      banks: nextBanks,
+      bank: primaryBankObj,
+    });
+  };
+
   const commit = (nextRows: FeeRow[]) => {
     setRows(nextRows);
-    const next = rowsToConfig(nextRows, config.early_bird_until, config);
+    const next = rowsToConfig(nextRows, config.early_bird_until, {
+      ...config,
+      banks,
+    });
     lastEmitted.current = JSON.stringify(next.fees);
     onChange(next);
   };
@@ -144,44 +198,28 @@ export default function RegistrationConfigPanel({
     commit(rows.filter((_, i) => i !== index));
   };
 
-  const banks = config.banks || (config.bank && Object.keys(config.bank).length > 0 ? [{
-    id: 'legacy',
-    account_number: config.bank.account_number || '',
-    ifsc: config.bank.ifsc || '',
-    branch: config.bank.branch || '',
-    beneficiary: config.bank.beneficiary || '',
-    bank_name: config.bank.bank_name || '',
-    show_in_portal: true
-  }] : []);
-
   const updateBank = (index: number, patch: Partial<BankAccount>) => {
-    const nextBanks = [...banks];
-    nextBanks[index] = { ...nextBanks[index], ...patch };
-    onChange({ ...config, banks: nextBanks });
+    const nextBanks = banks.map((b, i) => (i === index ? { ...b, ...patch } : b));
+    syncBanks(nextBanks);
   };
 
   const addBank = () => {
-    onChange({
-      ...config,
-      banks: [
-        ...banks,
-        {
-          id: Math.random().toString(36).substring(2, 9),
-          account_number: '',
-          ifsc: '',
-          branch: '',
-          beneficiary: '',
-          bank_name: '',
-          show_in_portal: false,
-        },
-      ],
-    });
+    const newBank: BankAccount = {
+      id: Math.random().toString(36).substring(2, 9),
+      account_number: '',
+      ifsc: '',
+      branch: '',
+      beneficiary: '',
+      bank_name: '',
+      show_in_portal: true,
+    };
+    const nextBanks = [...banks, newBank];
+    syncBanks(nextBanks);
   };
 
   const removeBank = (index: number) => {
-    const nextBanks = [...banks];
-    nextBanks.splice(index, 1);
-    onChange({ ...config, banks: nextBanks });
+    const nextBanks = banks.filter((_, i) => i !== index);
+    syncBanks(nextBanks);
   };
 
   const setCutoff = (value: string) => {
@@ -335,7 +373,7 @@ export default function RegistrationConfigPanel({
             <div>
               <h4 className="font-semibold text-brand-text">Bank transfer details</h4>
               <p className="text-sm text-brand-text/60 mt-1">
-                Configure one or more bank accounts. You can select up to 3 accounts to show in the user portal payment form.
+                Configure one or more bank accounts. You can select which accounts to show in the user portal payment form (select all to display all accounts).
               </p>
             </div>
           </div>
@@ -352,16 +390,12 @@ export default function RegistrationConfigPanel({
           {banks.map((bank, index) => (
             <div key={bank.id} className="p-5 bg-stone-50/50">
               <div className="flex items-center justify-between mb-4">
-                <label className="flex items-center gap-2 cursor-pointer">
+                <label className="flex items-center gap-2 cursor-pointer select-none">
                   <input
                     type="checkbox"
                     checked={bank.show_in_portal}
                     onChange={(e) => updateBank(index, { show_in_portal: e.target.checked })}
-                    disabled={e => {
-                      if (!e.target.checked) return false;
-                      return banks.filter(b => b.show_in_portal).length >= 3;
-                    }}
-                    className="w-4 h-4 text-brand-accent rounded border-stone-300 focus:ring-brand-accent"
+                    className="w-4 h-4 text-brand-accent rounded border-stone-300 focus:ring-brand-accent cursor-pointer"
                   />
                   <span className="text-sm font-semibold text-brand-text">
                     Show in user portal

@@ -413,7 +413,7 @@ function RegistrationFormBody({
   }, [type, authorType, getToken]);
 
   // Hide the block entirely rather than print a heading over nothing
-  const visibleBanks = (config.banks || []).filter(b => b.show_in_portal).slice(0, 3);
+  const visibleBanks = (config.banks || []).filter(b => b.show_in_portal);
   const hasBankDetails = visibleBanks.length > 0;
 
   // 1. APPROVED STATUS

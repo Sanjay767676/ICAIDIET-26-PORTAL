@@ -131,8 +131,8 @@ type BankDetails = {
 type RegistrationConfig = {
   early_bird_until: string;
   fees: Record<string, Record<string, RegistrationFeeRow>>;
-  bank?: Record<string, string>;
-  banks?: BankDetails[];
+  bank: Record<string, string>;
+  banks: BankDetails[];
 };
 
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -3078,7 +3078,12 @@ function parseRegistrationConfig(raw: unknown): RegistrationConfig {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return fallback;
   const src = raw as Record<string, any>;
 
-  const config: RegistrationConfig = { ...fallback, fees: {}, bank: { ...fallback.bank } };
+  const config: RegistrationConfig = {
+    early_bird_until: fallback.early_bird_until,
+    fees: {},
+    bank: { ...fallback.bank },
+    banks: [...fallback.banks],
+  };
 
   if (typeof src.early_bird_until === 'string' && isCalendarDate(src.early_bird_until)) {
     config.early_bird_until = src.early_bird_until;
@@ -3104,10 +3109,58 @@ function parseRegistrationConfig(raw: unknown): RegistrationConfig {
   // defaults instead.
   if (Object.keys(config.fees).length === 0) config.fees = fallback.fees;
 
-  if (src.bank && typeof src.bank === 'object' && !Array.isArray(src.bank)) {
+  if (Array.isArray(src.banks) && src.banks.length > 0) {
+    const parsedBanks: BankDetails[] = [];
+    for (const rawBank of src.banks) {
+      if (!rawBank || typeof rawBank !== 'object') continue;
+      const b = rawBank as Record<string, unknown>;
+      const account_number = cleanDisplayText(b.account_number, 80);
+      const ifsc = cleanDisplayText(b.ifsc, 40);
+      const branch = cleanDisplayText(b.branch, 160);
+      const beneficiary = cleanDisplayText(b.beneficiary, 160);
+      const bank_name = cleanDisplayText(b.bank_name, 160);
+      const show_in_portal = typeof b.show_in_portal === 'boolean' ? b.show_in_portal : true;
+      const id = cleanDisplayText(b.id, 60) || Math.random().toString(36).substring(2, 9);
+      if (account_number || ifsc || branch || beneficiary || bank_name) {
+        parsedBanks.push({
+          id,
+          account_number,
+          ifsc,
+          branch,
+          beneficiary,
+          bank_name,
+          show_in_portal,
+        });
+      }
+    }
+    if (parsedBanks.length > 0) {
+      config.banks = parsedBanks;
+      const primaryBank = parsedBanks.find(b => b.show_in_portal) || parsedBanks[0];
+      config.bank = {
+        account_number: primaryBank.account_number,
+        ifsc: primaryBank.ifsc,
+        branch: primaryBank.branch,
+        beneficiary: primaryBank.beneficiary,
+        bank_name: primaryBank.bank_name,
+      };
+    }
+  } else if (src.bank && typeof src.bank === 'object' && !Array.isArray(src.bank)) {
+    const legacyBank: Record<string, string> = {};
     for (const field of ['account_number', 'ifsc', 'branch', 'beneficiary', 'bank_name']) {
       const value = cleanDisplayText((src.bank as Record<string, unknown>)[field], 160);
-      if (value) config.bank[field] = value;
+      if (value) legacyBank[field] = value;
+    }
+    if (Object.keys(legacyBank).length > 0) {
+      config.bank = legacyBank;
+      config.banks = [{
+        id: 'default',
+        account_number: legacyBank.account_number || '',
+        ifsc: legacyBank.ifsc || '',
+        branch: legacyBank.branch || '',
+        beneficiary: legacyBank.beneficiary || '',
+        bank_name: legacyBank.bank_name || '',
+        show_in_portal: true,
+      }];
     }
   }
 
@@ -3176,14 +3229,73 @@ function validateRegistrationConfig(
     fees[authorType] = rows;
   }
 
-  const bank: Record<string, string> = {};
-  const bankSource = src.bank && typeof src.bank === 'object' && !Array.isArray(src.bank) ? src.bank : {};
-  for (const field of ['account_number', 'ifsc', 'branch', 'beneficiary', 'bank_name']) {
-    bank[field] = cleanDisplayText(bankSource[field], 160);
+  const banks: BankDetails[] = [];
+  if (Array.isArray(src.banks)) {
+    for (const rawBank of src.banks) {
+      if (!rawBank || typeof rawBank !== 'object') continue;
+      const b = rawBank as Record<string, unknown>;
+      const account_number = cleanDisplayText(b.account_number, 80);
+      const ifsc = cleanDisplayText(b.ifsc, 40);
+      const branch = cleanDisplayText(b.branch, 160);
+      const beneficiary = cleanDisplayText(b.beneficiary, 160);
+      const bank_name = cleanDisplayText(b.bank_name, 160);
+      const show_in_portal = typeof b.show_in_portal === 'boolean' ? b.show_in_portal : true;
+      const id = cleanDisplayText(b.id, 60) || Math.random().toString(36).substring(2, 9);
+
+      // If the row has no content at all, skip it
+      if (!account_number && !ifsc && !branch && !beneficiary && !bank_name) continue;
+
+      if (!account_number || !ifsc) {
+        return { ok: false, error: 'Each bank account must have an account number and IFSC code.' };
+      }
+
+      banks.push({
+        id,
+        account_number,
+        ifsc,
+        branch,
+        beneficiary,
+        bank_name,
+        show_in_portal,
+      });
+    }
   }
-  if (!bank.account_number || !bank.ifsc) {
-    return { ok: false, error: 'Enter the bank account number and IFSC code.' };
+
+  if (banks.length === 0 && src.bank && typeof src.bank === 'object' && !Array.isArray(src.bank)) {
+    const bankSource = src.bank as Record<string, unknown>;
+    const account_number = cleanDisplayText(bankSource.account_number, 80);
+    const ifsc = cleanDisplayText(bankSource.ifsc, 40);
+    const branch = cleanDisplayText(bankSource.branch, 160);
+    const beneficiary = cleanDisplayText(bankSource.beneficiary, 160);
+    const bank_name = cleanDisplayText(bankSource.bank_name, 160);
+    if (account_number || ifsc) {
+      if (!account_number || !ifsc) {
+        return { ok: false, error: 'Enter the bank account number and IFSC code.' };
+      }
+      banks.push({
+        id: 'default',
+        account_number,
+        ifsc,
+        branch,
+        beneficiary,
+        bank_name,
+        show_in_portal: true,
+      });
+    }
   }
+
+  if (banks.length === 0) {
+    return { ok: false, error: 'Add at least one bank account with account number and IFSC code.' };
+  }
+
+  const primaryBank = banks.find(b => b.show_in_portal) || banks[0];
+  const bank: Record<string, string> = {
+    account_number: primaryBank.account_number,
+    ifsc: primaryBank.ifsc,
+    branch: primaryBank.branch,
+    beneficiary: primaryBank.beneficiary,
+    bank_name: primaryBank.bank_name,
+  };
 
   return {
     ok: true,
@@ -3191,6 +3303,7 @@ function validateRegistrationConfig(
       early_bird_until: earlyBirdUntil,
       fees,
       bank,
+      banks,
     },
   };
 }
