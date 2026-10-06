@@ -104,13 +104,35 @@ const DEFAULT_REGISTRATION_CONFIG = {
     beneficiary: 'SNSCT CH4 CS',
     bank_name: 'CENTRAL BANK OF INDIA',
   },
+  banks: [
+    {
+      id: 'default',
+      account_number: '5904946502',
+      ifsc: 'CBIN0281361',
+      branch: 'Crosscut Road, CBE',
+      beneficiary: 'SNSCT CH4 CS',
+      bank_name: 'CENTRAL BANK OF INDIA',
+      show_in_portal: true
+    }
+  ]
 } as const;
 
 type RegistrationFeeRow = { early: string; standard: string };
+type BankDetails = {
+  id: string;
+  account_number: string;
+  ifsc: string;
+  branch: string;
+  beneficiary: string;
+  bank_name: string;
+  show_in_portal: boolean;
+};
+
 type RegistrationConfig = {
   early_bird_until: string;
   fees: Record<string, Record<string, RegistrationFeeRow>>;
-  bank: Record<string, string>;
+  bank?: Record<string, string>;
+  banks?: BankDetails[];
 };
 
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();

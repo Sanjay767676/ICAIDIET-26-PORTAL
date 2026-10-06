@@ -51,10 +51,21 @@ interface MySubmission {
   fee_tier?: string | null;
 }
 
+export interface BankAccount {
+  id: string;
+  account_number: string;
+  ifsc: string;
+  branch: string;
+  beneficiary: string;
+  bank_name: string;
+  show_in_portal: boolean;
+}
+
 export interface RegistrationConfig {
   early_bird_until: string;
   fees: Record<string, Record<string, { early: string; standard: string }>>;
-  bank: Record<string, string>;
+  bank?: Record<string, string>;
+  banks?: BankAccount[];
 }
 
 interface MySubmissionsProps {
@@ -221,6 +232,17 @@ const FALLBACK_REGISTRATION: RegistrationConfig = {
     beneficiary: 'SNSCT CH4 CS',
     bank_name: 'CENTRAL BANK OF INDIA',
   },
+  banks: [
+    {
+      id: 'default',
+      account_number: '5904946502',
+      ifsc: 'CBIN0281361',
+      branch: 'Crosscut Road, CBE',
+      beneficiary: 'SNSCT CH4 CS',
+      bank_name: 'CENTRAL BANK OF INDIA',
+      show_in_portal: true
+    }
+  ]
 };
 
 function useRegistrationConfig(registration?: RegistrationConfig | null): RegistrationConfig {
@@ -228,10 +250,21 @@ function useRegistrationConfig(registration?: RegistrationConfig | null): Regist
     if (!registration || !registration.fees || Object.keys(registration.fees).length === 0) {
       return FALLBACK_REGISTRATION;
     }
+    const banks = registration.banks || (registration.bank && Object.keys(registration.bank).length > 0 ? [{
+      id: 'legacy',
+      account_number: registration.bank.account_number || '',
+      ifsc: registration.bank.ifsc || '',
+      branch: registration.bank.branch || '',
+      beneficiary: registration.bank.beneficiary || '',
+      bank_name: registration.bank.bank_name || '',
+      show_in_portal: true
+    }] : []);
+    
     return {
       early_bird_until: registration.early_bird_until || '',
       fees: registration.fees,
       bank: registration.bank || {},
+      banks,
     };
   }, [registration]);
 }
@@ -379,9 +412,9 @@ function RegistrationFormBody({
     };
   }, [type, authorType, getToken]);
 
-  // Hide the block entirely rather than print a heading over nothing, which is
-  // what clearing every bank field in the admin portal should do.
-  const hasBankDetails = Object.values(config.bank || {}).some((value) => (value || '').trim().length > 0);
+  // Hide the block entirely rather than print a heading over nothing
+  const visibleBanks = (config.banks || []).filter(b => b.show_in_portal).slice(0, 3);
+  const hasBankDetails = visibleBanks.length > 0;
 
   // 1. APPROVED STATUS
   if (sub.payment_status === 'APPROVED') {
@@ -774,25 +807,31 @@ function RegistrationFormBody({
 
             {/* Bank details */}
             {hasBankDetails && (
-              <div className="bg-stone-50 border border-stone-300 p-4 rounded-xl text-sm text-black/90 font-mono leading-relaxed shadow-inner">
-                <div className="font-bold text-xs uppercase tracking-wider text-black/60 mb-2 font-sans">
+              <div className="space-y-4">
+                <div className="font-bold text-xs uppercase tracking-wider text-black/60 font-sans px-2">
                   Bank Transfer Details
                 </div>
-                {config.bank.account_number && (
-                  <p><span className="font-semibold text-black">Account number:</span> {config.bank.account_number}</p>
-                )}
-                {config.bank.ifsc && (
-                  <p>
-                    <span className="font-semibold text-black">IFSC Code:</span> {config.bank.ifsc}
-                    {config.bank.branch ? ` [${config.bank.branch}]` : ''}
-                  </p>
-                )}
-                {config.bank.beneficiary && (
-                  <p><span className="font-semibold text-black">Beneficiary Name:</span> {config.bank.beneficiary}</p>
-                )}
-                {config.bank.bank_name && (
-                  <p><span className="font-semibold text-black">Bank Name:</span> {config.bank.bank_name}</p>
-                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {visibleBanks.map(bank => (
+                    <div key={bank.id} className="bg-stone-50 border border-stone-300 p-4 rounded-xl text-sm text-black/90 font-mono leading-relaxed shadow-inner space-y-1">
+                      {bank.account_number && (
+                        <p><span className="font-semibold text-black">Account number:</span> {bank.account_number}</p>
+                      )}
+                      {bank.ifsc && (
+                        <p>
+                          <span className="font-semibold text-black">IFSC Code:</span> {bank.ifsc}
+                          {bank.branch ? ` [${bank.branch}]` : ''}
+                        </p>
+                      )}
+                      {bank.beneficiary && (
+                        <p><span className="font-semibold text-black">Beneficiary Name:</span> {bank.beneficiary}</p>
+                      )}
+                      {bank.bank_name && (
+                        <p><span className="font-semibold text-black">Bank Name:</span> {bank.bank_name}</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

@@ -8,10 +8,21 @@ export interface FeeRow {
   standard: string;
 }
 
+export interface BankAccount {
+  id: string;
+  account_number: string;
+  ifsc: string;
+  branch: string;
+  beneficiary: string;
+  bank_name: string;
+  show_in_portal: boolean;
+}
+
 export interface RegistrationConfig {
   early_bird_until: string;
   fees: Record<string, Record<string, { early: string; standard: string }>>;
-  bank: Record<string, string>;
+  bank?: Record<string, string>;
+  banks?: BankAccount[];
 }
 
 const BANK_FIELDS: { key: string; label: string; placeholder: string; mono?: boolean }[] = [
@@ -50,7 +61,7 @@ export function configToRows(config: RegistrationConfig): FeeRow[] {
 export function rowsToConfig(
   rows: FeeRow[],
   earlyBirdUntil: string,
-  bank: Record<string, string>
+  baseConfig: Partial<RegistrationConfig>
 ): RegistrationConfig {
   const fees: RegistrationConfig['fees'] = {};
   for (const row of rows) {
@@ -63,7 +74,7 @@ export function rowsToConfig(
       standard: row.standard.trim(),
     };
   }
-  return { early_bird_until: earlyBirdUntil.trim(), fees, bank };
+  return { early_bird_until: earlyBirdUntil.trim(), fees, bank: baseConfig.bank, banks: baseConfig.banks };
 }
 
 function formatCutoffForHumans(value: string): string {
@@ -105,7 +116,7 @@ export default function RegistrationConfigPanel({
 
   const commit = (nextRows: FeeRow[]) => {
     setRows(nextRows);
-    const next = rowsToConfig(nextRows, config.early_bird_until, config.bank || {});
+    const next = rowsToConfig(nextRows, config.early_bird_until, config);
     lastEmitted.current = JSON.stringify(next.fees);
     onChange(next);
   };
@@ -133,8 +144,44 @@ export default function RegistrationConfigPanel({
     commit(rows.filter((_, i) => i !== index));
   };
 
-  const setBankField = (key: string, value: string) => {
-    onChange({ ...config, bank: { ...(config.bank || {}), [key]: value } });
+  const banks = config.banks || (config.bank && Object.keys(config.bank).length > 0 ? [{
+    id: 'legacy',
+    account_number: config.bank.account_number || '',
+    ifsc: config.bank.ifsc || '',
+    branch: config.bank.branch || '',
+    beneficiary: config.bank.beneficiary || '',
+    bank_name: config.bank.bank_name || '',
+    show_in_portal: true
+  }] : []);
+
+  const updateBank = (index: number, patch: Partial<BankAccount>) => {
+    const nextBanks = [...banks];
+    nextBanks[index] = { ...nextBanks[index], ...patch };
+    onChange({ ...config, banks: nextBanks });
+  };
+
+  const addBank = () => {
+    onChange({
+      ...config,
+      banks: [
+        ...banks,
+        {
+          id: Math.random().toString(36).substring(2, 9),
+          account_number: '',
+          ifsc: '',
+          branch: '',
+          beneficiary: '',
+          bank_name: '',
+          show_in_portal: false,
+        },
+      ],
+    });
+  };
+
+  const removeBank = (index: number) => {
+    const nextBanks = [...banks];
+    nextBanks.splice(index, 1);
+    onChange({ ...config, banks: nextBanks });
   };
 
   const setCutoff = (value: string) => {
@@ -282,28 +329,75 @@ export default function RegistrationConfigPanel({
 
       {/* Bank details */}
       <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-        <div className="px-5 py-4 border-b-2 border-brand-accent/40 flex items-start gap-3">
-          <Landmark className="w-5 h-5 text-brand-accent shrink-0 mt-0.5" />
-          <div>
-            <h4 className="font-semibold text-brand-text">Bank transfer details</h4>
-            <p className="text-sm text-brand-text/60 mt-1">
-              Shown to authors in the payment form. Leave a field blank to hide that line.
-            </p>
+        <div className="px-5 py-4 border-b-2 border-brand-accent/40 flex items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <Landmark className="w-5 h-5 text-brand-accent shrink-0 mt-0.5" />
+            <div>
+              <h4 className="font-semibold text-brand-text">Bank transfer details</h4>
+              <p className="text-sm text-brand-text/60 mt-1">
+                Configure one or more bank accounts. You can select up to 3 accounts to show in the user portal payment form.
+              </p>
+            </div>
           </div>
+          <button
+            type="button"
+            onClick={addBank}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-brand-text/20 bg-white text-sm font-semibold text-brand-text hover:border-brand-accent transition-colors"
+          >
+            <Plus className="w-4 h-4" /> Add account
+          </button>
         </div>
-        <div className="px-5 py-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {BANK_FIELDS.map((field) => (
-            <label key={field.key} className="block space-y-1.5">
-              <span className="text-sm font-medium text-brand-text/80">{field.label}</span>
-              <input
-                type="text"
-                value={config.bank?.[field.key] || ''}
-                onChange={(e) => setBankField(field.key, e.target.value)}
-                placeholder={field.placeholder}
-                className={`${inputClass} ${field.mono ? 'font-mono' : ''}`}
-              />
-            </label>
+        
+        <div className="divide-y divide-stone-200">
+          {banks.map((bank, index) => (
+            <div key={bank.id} className="p-5 bg-stone-50/50">
+              <div className="flex items-center justify-between mb-4">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={bank.show_in_portal}
+                    onChange={(e) => updateBank(index, { show_in_portal: e.target.checked })}
+                    disabled={e => {
+                      if (!e.target.checked) return false;
+                      return banks.filter(b => b.show_in_portal).length >= 3;
+                    }}
+                    className="w-4 h-4 text-brand-accent rounded border-stone-300 focus:ring-brand-accent"
+                  />
+                  <span className="text-sm font-semibold text-brand-text">
+                    Show in user portal
+                  </span>
+                </label>
+                <button
+                  type="button"
+                  onClick={() => removeBank(index)}
+                  className="p-1.5 rounded-md text-red-500 hover:bg-red-50 transition-colors"
+                  title="Remove this account"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {BANK_FIELDS.map((field) => (
+                  <label key={field.key} className="block space-y-1.5">
+                    <span className="text-sm font-medium text-brand-text/80">{field.label}</span>
+                    <input
+                      type="text"
+                      value={(bank as any)[field.key] || ''}
+                      onChange={(e) => updateBank(index, { [field.key]: e.target.value })}
+                      placeholder={field.placeholder}
+                      className={`${inputClass} ${field.mono ? 'font-mono' : ''}`}
+                    />
+                  </label>
+                ))}
+              </div>
+            </div>
           ))}
+          {banks.length === 0 && (
+            <div className="px-5 py-8 text-center text-sm text-black/50">
+              No bank accounts configured. Add one so authors know where to pay.
+            </div>
+          )}
         </div>
       </div>
     </div>
