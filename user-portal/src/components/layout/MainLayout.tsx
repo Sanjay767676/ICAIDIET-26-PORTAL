@@ -116,7 +116,7 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
               </SignInButton>
             </Show>
             <Show when="signed-in">
-              <UserButton afterSignOutUrl="/" />
+              <UserButton />
             </Show>
           </div>
         </div>

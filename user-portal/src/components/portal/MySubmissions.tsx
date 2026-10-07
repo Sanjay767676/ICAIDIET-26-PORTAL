@@ -575,7 +575,7 @@ function RegistrationFormBody({
       // path; re-fetch the live price and let the author confirm the new one.
       if (regRes.status === 409 && regData?.code === 'FEE_CHANGED') {
         setError('The fee changed a moment ago. The form has been refreshed with the current amount — please review it and confirm again.');
-        setLiveFee({ amount: regData.current_amount, tier: regData.current_tier });
+        setLiveFee(prev => prev ? { ...prev, amount: regData.current_amount, tier: regData.current_tier } : { amount: regData.current_amount, tier: regData.current_tier, otherAmount: '', cutoff: '' });
         setConfirmedPaid(false);
         return;
       }
