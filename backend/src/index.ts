@@ -2189,23 +2189,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
 
     const submissions = (results as any[]) || [];
 
-    // Self-heal: if any retrieved submission was pointing to a placeholder user_id
-    // or different user row, adopt it to this active user account in the background.
-    const unownedIds = submissions
-      .filter((s) => s.user_id !== userId)
-      .map((s) => s.id);
-    if (unownedIds.length > 0) {
-      c.executionCtx.waitUntil(
-        Promise.all(
-          unownedIds.map((id) =>
-            c.env.DB.prepare(`UPDATE submissions SET user_id = ? WHERE id = ? AND user_id != ?`)
-              .bind(userId, id, userId)
-              .run()
-              .catch(() => {})
-          )
-        )
-      );
-    }
+    // Removed self-heal logic that inadvertently transferred ownership when an author logs in
 
     return c.json({ success: true, submissions });
   } catch (error) {
