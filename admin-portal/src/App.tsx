@@ -1469,7 +1469,16 @@ function SubmissionListing({
   onDelete: (sub: Submission) => void;
   enquiredSaving: string | null;
   onToggleEnquired: (sub: Submission) => void;
+  mailTemplates?: MailTemplate[];
+  selectedTemplateId?: string;
+  onSelectedTemplateChange?: (v: string) => void;
+  mailSelected?: string[];
+  onToggleMailSelect?: (id: string) => void;
+  onToggleMailSelectAll?: (list: Submission[]) => void;
+  onSendMail?: () => void;
+  mailSending?: boolean;
 }) {
+  const allSelected = mailSelected && rows.length > 0 && rows.every((s) => mailSelected.includes(s.id));
   return (
     <>
       {error && (
@@ -1477,6 +1486,50 @@ function SubmissionListing({
           <div className="flex items-center gap-2">
             <AlertCircle className="w-4 h-4 shrink-0" /> {error}
           </div>
+        </div>
+      )}
+
+      {mailTemplates && mailSelected && onToggleMailSelectAll && onSelectedTemplateChange && onSendMail && (
+        <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border-2 border-brand-accent px-3 py-2.5 shadow-sm mb-4">
+          <label
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-text/80 cursor-pointer select-none"
+            title="Select / deselect all visible papers"
+          >
+            <input
+              type="checkbox"
+              checked={allSelected}
+              onChange={() => onToggleMailSelectAll(rows)}
+              disabled={mailSending || rows.length === 0}
+              className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+            />
+            Select all {rows.length > 0 ? `(${rows.length})` : ''}
+          </label>
+          <div className="w-px h-6 bg-brand-text/10 mx-1"></div>
+          <select
+            value={selectedTemplateId || ''}
+            onChange={(e) => onSelectedTemplateChange(e.target.value)}
+            disabled={mailSending || mailSelected.length === 0}
+            className="px-2.5 py-1.5 rounded-lg border-2 border-brand-accent/50 bg-white text-xs text-brand-text shadow-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent outline-none flex-1 min-w-[150px] max-w-xs"
+          >
+            <option value="">-- Choose Template --</option>
+            {mailTemplates.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={onSendMail}
+            disabled={mailSending || mailSelected.length === 0}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-brand-text text-white rounded-lg font-semibold text-xs hover:bg-brand-accent transition-colors disabled:opacity-50 disabled:cursor-wait shadow-sm"
+          >
+            <Send className="w-3.5 h-3.5" />
+            {mailSending
+              ? 'Queuing...'
+              : mailSelected.length > 0
+                ? `Send Email (${mailSelected.length})`
+                : 'Send Email'}
+          </button>
         </div>
       )}
 
@@ -1499,7 +1552,8 @@ function SubmissionListing({
         <table className="w-full text-left border-collapse table-fixed">
           <thead>
             <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-              <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] rounded-tl-xl">Paper ID</th>
+              {mailSelected && <th className="py-4 px-3 w-[4%] rounded-tl-xl"></th>}
+              <th className={`py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] ${!mailSelected ? 'rounded-tl-xl' : ''}`}>Paper ID</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Paper Title</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Track</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
@@ -1512,18 +1566,37 @@ function SubmissionListing({
           <tbody className="divide-y divide-brand-accent/40">
             {loading ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                <td colSpan={mailSelected ? 9 : 8} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={8} className="py-8 text-center text-brand-text/60">
+                <td colSpan={mailSelected ? 9 : 8} className="py-8 text-center text-brand-text/60">
                   {filtersActive ? emptyFilteredMsg : emptyMsg}
                 </td>
               </tr>
             ) : (
               rows.map((sub, idx) => (
                 <tr key={sub.id} className="bg-white">
-                  <td className={`py-4 px-5 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                  {mailSelected && (
+                    <td
+                      className={`py-4 px-3 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}
+                      onMouseEnter={(e) => {
+                        if (e.buttons === 1 && onToggleMailSelect && !mailSelected.includes(sub.id) && !mailSending) {
+                          onToggleMailSelect(sub.id);
+                        }
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={mailSelected.includes(sub.id)}
+                        onChange={() => onToggleMailSelect && onToggleMailSelect(sub.id)}
+                        disabled={mailSending}
+                        className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                        aria-label={`Select ${sub.paper_id || sub.title}`}
+                      />
+                    </td>
+                  )}
+                  <td className={`py-4 px-5 align-top ${!mailSelected && idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
                     <div className="font-semibold text-brand-text break-words">{sub.paper_id || 'NA'}</div>
                     <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words">{sub.submission_code}</div>
                   </td>
@@ -1869,7 +1942,14 @@ function ReviewSection({
             ) : (
               rows.map((sub, idx) => (
                 <tr key={sub.id} className={`${sub.review_resubmitted === 1 ? 'animate-updated-pulse bg-teal-50/50' : 'bg-white'}`}>
-                  <td className={`py-4 px-3 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                  <td
+                    className={`py-4 px-3 align-top ${idx === rows.length - 1 ? 'rounded-bl-xl' : ''}`}
+                    onMouseEnter={(e) => {
+                      if (e.buttons === 1 && !mailSelected.includes(sub.id) && !mailSending) {
+                        onToggleMailSelect(sub.id);
+                      }
+                    }}
+                  >
                     <input
                       type="checkbox"
                       checked={mailSelected.includes(sub.id)}
@@ -2579,6 +2659,10 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
           processed = true;
           fetchSubmissions({ silent: true });
         }
+        if (data.rateLimited) {
+          setMailSendMessage(`Rate limit reached. ${data.remaining} emails queued for background processing.`);
+          break;
+        }
         if (Number(data.remaining || 0) <= 0) break;
         // Pace sends at ~1 per second to respect Resend's free-tier limit.
         await new Promise((r) => setTimeout(r, 1200));
@@ -3147,6 +3231,14 @@ Duplicates
             onDelete={setDeleteTarget}
             enquiredSaving={enquiredSaving}
             onToggleEnquired={handleEnquiredToggle}
+            mailTemplates={mailTemplates}
+            selectedTemplateId={selectedTemplateId}
+            onSelectedTemplateChange={setSelectedTemplateId}
+            mailSelected={mailSelected}
+            onToggleMailSelect={toggleMailSelect}
+            onToggleMailSelectAll={toggleMailSelectAll}
+            onSendMail={handleSendMail}
+            mailSending={mailSending}
           />
         )}
 

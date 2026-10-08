@@ -517,11 +517,11 @@ function mailHtmlBody(text: string): string {
 }
 
 async function sendViaResend(
-  c: Context<AppEnv>,
+  c: { env: AppEnv },
   to: string,
   subject: string,
   body: string
-): Promise<{ ok: boolean; id?: string; error?: string }> {
+): Promise<{ ok: boolean; id?: string; error?: string; rateLimited?: boolean }> {
   const key = c.env.RESEND_API_KEY;
   if (!key) {
     return { ok: false, error: 'RESEND_API_KEY is not configured on the Worker.' };
@@ -558,7 +558,7 @@ async function sendViaResend(
       data && (data.message || data.error)
         ? String(data.message || data.error)
         : `Resend error ${res.status}`;
-    return { ok: false, error: msg };
+    return { ok: false, rateLimited: res.status === 429, error: msg };
   }
   return { ok: true, id: data.id };
 }
@@ -766,6 +766,22 @@ app.post('/api/admin/mail/process', async (c) => {
       await c.env.DB.prepare(
         `UPDATE mail_logs SET status = 'delivered', resend_id = ?, error = NULL, updated_at = ? WHERE id = ?`
       ).bind(result.id || null, new Date().toISOString(), queued.id).run();
+    } else if (result.rateLimited) {
+      await c.env.DB.prepare(
+        `UPDATE mail_logs SET status = 'queued', error = ?, updated_at = ? WHERE id = ?`
+      ).bind(result.error || 'Rate Limit Exceeded', new Date().toISOString(), queued.id).run();
+      
+      const remaining = await c.env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM mail_logs WHERE status IN ('queued', 'sending')`
+      ).first() as any;
+
+      return c.json({
+        success: true,
+        processed: false,
+        rateLimited: true,
+        error: result.error,
+        remaining: Number(remaining?.n || 0),
+      });
     } else {
       await c.env.DB.prepare(
         `UPDATE mail_logs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
@@ -4451,8 +4467,43 @@ app.post('/api/admin/submissions/:id/payment-status', async (c) => {
   }
 });
 
+async function processMailQueue(env: Bindings) {
+  try {
+    for (let i = 0; i < 50; i++) {
+      const now = new Date().toISOString();
+      const queued = await env.DB.prepare(
+        `UPDATE mail_logs SET status = 'sending', updated_at = ?
+         WHERE id = (SELECT id FROM mail_logs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1)
+         RETURNING id, recipient_email, subject, body`
+      ).bind(now).first() as any;
+
+      if (!queued) break;
+
+      const result = await sendViaResend({ env } as any, queued.recipient_email, queued.subject, queued.body);
+      
+      if (result.ok) {
+        await env.DB.prepare(
+          `UPDATE mail_logs SET status = 'delivered', resend_id = ?, error = NULL, updated_at = ? WHERE id = ?`
+        ).bind(result.id || null, new Date().toISOString(), queued.id).run();
+      } else if (result.rateLimited) {
+        await env.DB.prepare(
+          `UPDATE mail_logs SET status = 'queued', error = ?, updated_at = ? WHERE id = ?`
+        ).bind(result.error || 'Rate Limit Exceeded', new Date().toISOString(), queued.id).run();
+        break; // Stop processing further
+      } else {
+        await env.DB.prepare(
+          `UPDATE mail_logs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
+        ).bind(result.error || 'Send failed.', new Date().toISOString(), queued.id).run();
+      }
+    }
+  } catch (err) {
+    console.error('Cron processMailQueue error:', err);
+  }
+}
+
 async function scheduled(_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
   await purgeExpiredDeleted(env);
+  await processMailQueue(env);
 }
 
 export default {
