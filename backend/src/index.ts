@@ -2170,7 +2170,14 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
-              (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at
+              (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
+              (
+                 s.user_id = ?
+                 OR (trim(coalesce(?, '')) <> '' AND EXISTS (
+                   SELECT 1 FROM authors a
+                   WHERE a.submission_id = s.id AND lower(trim(a.email)) = lower(?) AND a.is_primary = 1
+                 ))
+              ) AS can_pay
        FROM submissions s
        WHERE s.deleted_at IS NULL
          AND (
@@ -2185,7 +2192,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
            ))
          )
        ORDER BY s.created_at DESC`
-    ).bind(userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
+    ).bind(userId, clerkEmail, clerkEmail, userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
 
     const submissions = (results as any[]) || [];
 

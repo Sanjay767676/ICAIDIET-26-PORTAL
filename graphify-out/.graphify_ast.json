@@ -1,0 +1,688 @@
+{
+  "nodes": [
+    {
+      "id": "admin_portal_src_components_registrationconfigpanel_feerow",
+      "label": "FeeRow",
+      "file_type": "code",
+      "source_file": "admin-portal/src/components/RegistrationConfigPanel.tsx",
+      "source_location": "L4",
+      "_origin": "ast"
+    },
+    {
+      "id": "admin_portal_src_components_registrationconfigpanel_bankaccount",
+      "label": "BankAccount",
+      "file_type": "code",
+      "source_file": "admin-portal/src/components/RegistrationConfigPanel.tsx",
+      "source_location": "L11",
+      "_origin": "ast"
+    },
+    {
+      "id": "admin_portal_src_components_registrationconfigpanel_registrationconfig",
+      "label": "RegistrationConfig",
+      "file_type": "code",
+      "source_file": "admin-portal/src/components/RegistrationConfigPanel.tsx",
+      "source_location": "L21",
+      "_origin": "ast"
+    },
+    {
+      "id": "admin_portal_src_components_registrationconfigpanel_configtorows",
+      "label": "configToRows",
+      "file_type": "code",
+      "source_file": "admin-portal/src/components/RegistrationConfigPanel.tsx",
+      "source_location": "L42",
+      "_origin": "ast"
+    },
+    {
+      "id": "admin_portal_src_components_registrationconfigpanel_rowstoconfig",
+      "label": "rowsToConfig",
+      "file_type": "code",
+      "source_file": "admin-portal/src/components/RegistrationConfigPanel.tsx",
+      "source_location": "L61",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_proofocrstatus",
+      "label": "ProofOcrStatus",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L62",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_stuckscancutoff",
+      "label": "stuckScanCutoff",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L71",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_proofneedsscan",
+      "label": "proofNeedsScan",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L92",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_findproofsneedingscan",
+      "label": "findProofsNeedingScan",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L110",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_proofocrenv",
+      "label": "ProofOcrEnv",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L118",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_proofocrscan",
+      "label": "ProofOcrScan",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L125",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_normalizeocrtext",
+      "label": "normalizeOcrText",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L139",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_tokenize",
+      "label": "tokenize",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L147",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_scanproofocr",
+      "label": "scanProofOcr",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L204",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_paymentcheckrecord",
+      "label": "PaymentCheckRecord",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L376",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_duplicatereasoncode",
+      "label": "DuplicateReasonCode",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L384",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_duplicatereason",
+      "label": "DuplicateReason",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L386",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_duplicategroup",
+      "label": "DuplicateGroup",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L393",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_ocrsimilarity",
+      "label": "ocrSimilarity",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L417",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_src_paymentocr_findduplicatepaymentgroups",
+      "label": "findDuplicatePaymentGroups",
+      "file_type": "code",
+      "source_file": "backend/src/paymentOcr.ts",
+      "source_location": "L493",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_pipelinetransformationentrypoint",
+      "label": "PipelineTransformationEntrypoint",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13430",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_pipelinerecord",
+      "label": "PipelineRecord",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13443",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_pipelinebatchmetadata",
+      "label": "PipelineBatchMetadata",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13444",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_pipeline",
+      "label": "Pipeline",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13448",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_rpctargetbranded",
+      "label": "RpcTargetBranded",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13518",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workerentrypointbranded",
+      "label": "WorkerEntrypointBranded",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13521",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_durableobjectbranded",
+      "label": "DurableObjectBranded",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13524",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowentrypointbranded",
+      "label": "WorkflowEntrypointBranded",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13527",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_entrypointbranded",
+      "label": "EntrypointBranded",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13530",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_stubable",
+      "label": "Stubable",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13532",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_stub",
+      "label": "Stub",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13554",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_provider",
+      "label": "Provider",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13601",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_rpcstub",
+      "label": "RpcStub",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13649",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_rpctarget",
+      "label": "RpcTarget",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13653",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workerentrypoint",
+      "label": "WorkerEntrypoint",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13657",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_durableobject",
+      "label": "DurableObject",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13672",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowdurationlabel",
+      "label": "WorkflowDurationLabel",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13684",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowsleepduration",
+      "label": "WorkflowSleepDuration",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13685",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowdelayduration",
+      "label": "WorkflowDelayDuration",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13686",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowdynamicdelaycontext",
+      "label": "WorkflowDynamicDelayContext",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13687",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowdelayfunction",
+      "label": "WorkflowDelayFunction",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13691",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowtimeoutduration",
+      "label": "WorkflowTimeoutDuration",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13692",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowretentionduration",
+      "label": "WorkflowRetentionDuration",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13693",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowbackoff",
+      "label": "WorkflowBackoff",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13694",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowstepsensitivity",
+      "label": "WorkflowStepSensitivity",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13695",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowstepconfig",
+      "label": "WorkflowStepConfig",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13696",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowsteprollbackconfig",
+      "label": "WorkflowStepRollbackConfig",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13725",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowcronschedule",
+      "label": "WorkflowCronSchedule",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13726",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowevent",
+      "label": "WorkflowEvent",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13732",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowstepevent",
+      "label": "WorkflowStepEvent",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13739",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowstepcontext",
+      "label": "WorkflowStepContext",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13745",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowrollbackcontext",
+      "label": "WorkflowRollbackContext",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13767",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowrollbackhandler",
+      "label": "WorkflowRollbackHandler",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13774",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowsteprollbackoptions",
+      "label": "WorkflowStepRollbackOptions",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13775",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowstep",
+      "label": "WorkflowStep",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13779",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowinstancestatus",
+      "label": "WorkflowInstanceStatus",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13798",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowentrypoint",
+      "label": "WorkflowEntrypoint",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13799",
+      "_origin": "ast"
+    },
+    {
+      "id": "backend_worker_configuration_d_nonretryableerror",
+      "label": "NonRetryableError",
+      "file_type": "code",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L15210",
+      "_origin": "ast"
+    },
+    {
+      "id": "user_portal_src_components_popup_popupinfo",
+      "label": "PopupInfo",
+      "file_type": "code",
+      "source_file": "user-portal/src/components/Popup.tsx",
+      "source_location": "L3",
+      "_origin": "ast"
+    },
+    {
+      "id": "user_portal_src_components_popup_popup",
+      "label": "Popup",
+      "file_type": "code",
+      "source_file": "user-portal/src/components/Popup.tsx",
+      "source_location": "L14",
+      "_origin": "ast"
+    },
+    {
+      "id": "user_portal_src_components_portal_herosection_herosection",
+      "label": "HeroSection",
+      "file_type": "code",
+      "source_file": "user-portal/src/components/portal/HeroSection.tsx",
+      "source_location": "L2",
+      "_origin": "ast"
+    },
+    {
+      "id": "user_portal_src_components_portal_mysubmissions_bankaccount",
+      "label": "BankAccount",
+      "file_type": "code",
+      "source_file": "user-portal/src/components/portal/MySubmissions.tsx",
+      "source_location": "L54",
+      "_origin": "ast"
+    },
+    {
+      "id": "user_portal_src_components_portal_mysubmissions_registrationconfig",
+      "label": "RegistrationConfig",
+      "file_type": "code",
+      "source_file": "user-portal/src/components/portal/MySubmissions.tsx",
+      "source_location": "L64",
+      "_origin": "ast"
+    }
+  ],
+  "edges": [
+    {
+      "source": "admin_portal_src_app",
+      "target": "admin_portal_src_components_registrationconfigpanel_registrationconfig",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "admin-portal/src/App.tsx",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_src_index",
+      "target": "backend_src_paymentocr_findduplicatepaymentgroups",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_src_index",
+      "target": "backend_src_paymentocr_findproofsneedingscan",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_src_index",
+      "target": "backend_src_paymentocr_proofneedsscan",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_src_index",
+      "target": "backend_src_paymentocr_scanproofocr",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_src_index",
+      "target": "backend_src_paymentocr_stuckscancutoff",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/src/index.ts",
+      "source_location": "L4",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "user_portal_src_app",
+      "target": "user_portal_src_components_portal_herosection_herosection",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "user-portal/src/App.tsx",
+      "source_location": "L5",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "user_portal_src_app",
+      "target": "user_portal_src_components_portal_mysubmissions_registrationconfig",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "user-portal/src/App.tsx",
+      "source_location": "L7",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "user_portal_src_components_portal_mysubmissions",
+      "target": "user_portal_src_components_popup_popup",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "user-portal/src/components/portal/MySubmissions.tsx",
+      "source_location": "L19",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "user_portal_src_components_portal_mysubmissions",
+      "target": "user_portal_src_components_popup_popupinfo",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "user-portal/src/components/portal/MySubmissions.tsx",
+      "source_location": "L19",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "user_portal_src_components_portal_submissionwizard",
+      "target": "user_portal_src_components_popup_popup",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "user-portal/src/components/portal/SubmissionWizard.tsx",
+      "source_location": "L15",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "user_portal_src_components_portal_submissionwizard",
+      "target": "user_portal_src_components_popup_popupinfo",
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "user-portal/src/components/portal/SubmissionWizard.tsx",
+      "source_location": "L15",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_worker_configuration_d_rpctarget",
+      "target": "backend_worker_configuration_d_rpctargetbranded",
+      "relation": "implements",
+      "context": "type",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13653",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_worker_configuration_d_workerentrypoint",
+      "target": "backend_worker_configuration_d_workerentrypointbranded",
+      "relation": "implements",
+      "context": "type",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13657",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_worker_configuration_d_durableobject",
+      "target": "backend_worker_configuration_d_durableobjectbranded",
+      "relation": "implements",
+      "context": "type",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13672",
+      "weight": 1.0,
+      "_origin": "ast"
+    },
+    {
+      "source": "backend_worker_configuration_d_workflowentrypoint",
+      "target": "backend_worker_configuration_d_workflowentrypointbranded",
+      "relation": "implements",
+      "context": "type",
+      "confidence": "EXTRACTED",
+      "source_file": "backend/worker-configuration.d.ts",
+      "source_location": "L13799",
+      "weight": 1.0,
+      "_origin": "ast"
+    }
+  ],
+  "input_tokens": 0,
+  "output_tokens": 0
+}

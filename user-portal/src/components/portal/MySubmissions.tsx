@@ -49,6 +49,7 @@ interface MySubmission {
   // was charged stays on record even after an admin edits the fee matrix.
   fee_amount?: string | null;
   fee_tier?: string | null;
+  can_pay?: boolean | number;
 }
 
 export interface BankAccount {
@@ -1603,39 +1604,57 @@ export function MySubmissions({
                 {/* Bottom Box (Accepted Callout Card & Payment Form matching Excalidraw mockup) */}
                 {isSubAccepted && (
                   <div className="space-y-4">
-                    <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
-                      <h4 className="text-xl sm:text-2xl font-bold font-serif text-brand-text mb-2">
-                        Congratulations Your Paper is Accepted
-                      </h4>
-                      <p className="text-sm sm:text-base text-black/80 max-w-2xl mx-auto leading-relaxed mb-6 font-normal">
-                        Please complete the payment as soon as possible because we accept a limited number of papers. Registration operates on a first-come, first-served basis.
-                      </p>
-                      {!isPaymentOpen ? (
-                        <button
-                          type="button"
-                          onClick={() => togglePayment(sub.id)}
-                          className="inline-flex items-center gap-2 px-8 py-3.5 bg-brand-text text-white rounded-xl font-bold text-sm sm:text-base hover:bg-brand-accent transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5"
-                        >
-                          <CreditCard className="w-4 h-4" /> Complete Your payment <ChevronRight className="w-4 h-4" />
-                        </button>
-                      ) : null}
-                    </div>
+                    {sub.can_pay ? (
+                      <>
+                        <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
+                          <h4 className="text-xl sm:text-2xl font-bold font-serif text-brand-text mb-2">
+                            Congratulations Your Paper is Accepted
+                          </h4>
+                          <p className="text-sm sm:text-base text-black/80 max-w-2xl mx-auto leading-relaxed mb-6 font-normal">
+                            Please complete the payment as soon as possible because we accept a limited number of papers. Registration operates on a first-come, first-served basis.
+                          </p>
+                          {!isPaymentOpen ? (
+                            <button
+                              type="button"
+                              onClick={() => togglePayment(sub.id)}
+                              className="inline-flex items-center gap-2 px-8 py-3.5 bg-brand-text text-white rounded-xl font-bold text-sm sm:text-base hover:bg-brand-accent transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5"
+                            >
+                              <CreditCard className="w-4 h-4" /> Complete Your payment <ChevronRight className="w-4 h-4" />
+                            </button>
+                          ) : null}
+                        </div>
 
-                    {/* Payment Form (Progressive Disclosure) */}
-                    {isPaymentOpen && (
-                      <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border-2 border-yellow-400 text-black animate-fadeIn">
-                        {registrationOpen || sub.payment_status === 'APPROVED' ? (
-                          <RegistrationForm
-                            sub={sub}
-                            payable={payableSubs}
-                            totalPapers={subs.length}
-                            getToken={getToken}
-                            onSaved={loadSubmissions}
-                            config={config}
-                          />
-                        ) : (
-                          <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
-                            Registration &amp; payment for accepted papers will open soon. Please check back here.
+                        {/* Payment Form (Progressive Disclosure) */}
+                        {isPaymentOpen && (
+                          <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border-2 border-yellow-400 text-black animate-fadeIn">
+                            {registrationOpen || sub.payment_status === 'APPROVED' ? (
+                              <RegistrationForm
+                                sub={sub}
+                                payable={payableSubs}
+                                totalPapers={subs.length}
+                                getToken={getToken}
+                                onSaved={loadSubmissions}
+                                config={config}
+                              />
+                            ) : (
+                              <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
+                                Registration &amp; payment for accepted papers will open soon. Please check back here.
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      <div className="bg-white rounded-2xl p-6 shadow-md border-2 border-gray-200 text-center flex flex-col items-center">
+                        <h4 className="text-lg sm:text-xl font-bold font-serif text-gray-700 mb-2">
+                          Paper Accepted
+                        </h4>
+                        <p className="text-sm text-gray-600 max-w-xl mx-auto leading-relaxed">
+                          Your paper has been accepted. Only the primary author or the original submitter can make the payment for this submission.
+                        </p>
+                        {sub.payment_status === 'APPROVED' && (
+                          <div className="mt-4 px-4 py-2 bg-green-100 text-green-800 border border-green-300 rounded-lg text-sm font-semibold">
+                            Payment Confirmed
                           </div>
                         )}
                       </div>

@@ -2848,13 +2848,13 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     // Find titles that appear more than once (case insensitive)
     const titleCounts: Record<string, number> = {};
     submissions.forEach(s => {
-      const t = (s.title || '').trim().toLowerCase();
+      const t = (s.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
       if (t) {
         titleCounts[t] = (titleCounts[t] || 0) + 1;
       }
     });
     const duplicatesSubmissionsList = submissions.filter(s => {
-      const t = (s.title || '').trim().toLowerCase();
+      const t = (s.title || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
       return t && titleCounts[t] > 1;
     });
 
