@@ -2747,7 +2747,7 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
         const next = prev.filter((s) => s.id !== deleteTarget.id);
         const active = next.filter((s) => s.payment_status !== 'APPROVED');
         setStats({
-          total: list.length,
+          total: next.length,
           submitted: active.filter((s) => s.status === 'SUBMITTED').length,
           underReview: active.filter((s) => s.status === 'UNDER_REVIEW').length,
           readyForRegistration: active.filter((s) => s.status === 'READY_FOR_REGISTRATION').length,
