@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck } from 'lucide-react';
+import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck, Send } from 'lucide-react';
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
 import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
@@ -1442,6 +1442,14 @@ function SubmissionListing({
   onDelete,
   enquiredSaving,
   onToggleEnquired,
+  mailTemplates,
+  selectedTemplateId,
+  onSelectedTemplateChange,
+  mailSelected,
+  onToggleMailSelect,
+  onToggleMailSelectAll,
+  onSendMail,
+  mailSending,
 }: {
   rows: Submission[];
   total: number;
