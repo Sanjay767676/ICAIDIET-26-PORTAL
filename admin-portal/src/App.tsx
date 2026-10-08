@@ -1334,6 +1334,9 @@ function FilterPanel({
   onPaperIdFilterChange,
   tracks,
   paperIds,
+  dateFilter,
+  onDateFilterChange,
+  dates,
   resultCount,
   totalCount,
   onClear,
@@ -1346,11 +1349,14 @@ function FilterPanel({
   onPaperIdFilterChange: (v: string) => void;
   tracks: string[];
   paperIds: string[];
+  dateFilter?: string;
+  onDateFilterChange?: (v: string) => void;
+  dates?: string[];
   resultCount: number;
   totalCount: number;
   onClear: () => void;
 }) {
-  const filtersActive = !!(searchTerm.trim() || trackFilter || paperIdFilter);
+  const filtersActive = !!(searchTerm.trim() || trackFilter || paperIdFilter || dateFilter);
   return (
     <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 mb-4">
       <div className="flex flex-col lg:flex-row gap-3">
@@ -1388,6 +1394,20 @@ function FilterPanel({
             {paperIds.map((p) => (
               <option key={p} value={p}>
                 {p}
+              </option>
+            ))}
+          </select>
+        )}
+        {dates && dates.length > 0 && (
+          <select
+            value={dateFilter || ''}
+            onChange={(e) => onDateFilterChange && onDateFilterChange(e.target.value)}
+            className="w-full lg:w-48 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+          >
+            <option value="">All Dates</option>
+            {dates.map((d) => (
+              <option key={d} value={d}>
+                {d}
               </option>
             ))}
           </select>
@@ -1466,6 +1486,9 @@ function SubmissionListing({
   onPaperIdFilterChange: (v: string) => void;
   tracks: string[];
   paperIds: string[];
+  dateFilter?: string;
+  onDateFilterChange?: (v: string) => void;
+  dates?: string[];
   onClear: () => void;
   token: string;
   refresh: () => void;
@@ -1550,6 +1573,9 @@ function SubmissionListing({
         onPaperIdFilterChange={onPaperIdFilterChange}
         tracks={tracks}
         paperIds={paperIds}
+        dateFilter={dateFilter}
+        onDateFilterChange={onDateFilterChange}
+        dates={dates}
         resultCount={rows.length}
         totalCount={total}
         onClear={onClear}
@@ -2197,6 +2223,7 @@ export default function App() {
   const [searchTerm, setSearchTerm] = useState('');
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
   const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
   // Accepting Paper Submissions. Deliberately a SEPARATE switch from
   // mtUserEnabled (User Portal Maintenance): they used to be the same setting
@@ -2916,7 +2943,8 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
         const matchSearch = matchesSearch(s, q);
         const matchTrack = !trackFilter || s.track === trackFilter;
         const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
-        return matchSearch && matchTrack && matchPaper;
+        const matchDate = !dateFilter || (s.payment_submitted_at && s.payment_submitted_at.startsWith(dateFilter));
+        return matchSearch && matchTrack && matchPaper && matchDate;
       });
 
 const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]) => {
@@ -2928,6 +2956,12 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     const filteredMinor = masterApply(minorSubmissionsList, submissions);
     const filteredMajor = masterApply(majorSubmissionsList, submissions);
     const filteredPayments = masterApply(paymentsSubmissionsList);
+    
+    const paymentDates = Array.from(new Set(paymentsSubmissionsList.map(s => {
+      if (!s.payment_submitted_at) return '';
+      return s.payment_submitted_at.split('T')[0];
+    }).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+    
     const hasViewablePayment = (s: Submission) => !!(s.payment_proof_url || s.utr_transaction_id || s.registration_type);
     const filteredAccepted = [...masterApply(acceptedSubmissionsList, submissions)].sort((a, b) => {
       const aPay = hasViewablePayment(a);
@@ -2956,6 +2990,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     setSearchTerm('');
     setTrackFilter('');
     setPaperIdFilter('');
+    setDateFilter('');
   };
 
   // Switching tabs resets the mail selection so checked papers from the
@@ -3228,6 +3263,9 @@ Duplicates
             onPaperIdFilterChange={setPaperIdFilter}
             tracks={tracks}
             paperIds={paperIds}
+            dateFilter={dateFilter}
+            onDateFilterChange={setDateFilter}
+            dates={paymentDates}
             onClear={clearFilters}
             token={token}
             refresh={fetchSubmissions}
