@@ -2927,7 +2927,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     const filteredSubmissions = masterApply(mainSubmissionsList, submissions);
     const filteredMinor = masterApply(minorSubmissionsList, submissions);
     const filteredMajor = masterApply(majorSubmissionsList, submissions);
-    const filteredPayments = masterApply(paymentsSubmissionsList, submissions);
+    const filteredPayments = masterApply(paymentsSubmissionsList);
     const hasViewablePayment = (s: Submission) => !!(s.payment_proof_url || s.utr_transaction_id || s.registration_type);
     const filteredAccepted = [...masterApply(acceptedSubmissionsList, submissions)].sort((a, b) => {
       const aPay = hasViewablePayment(a);
