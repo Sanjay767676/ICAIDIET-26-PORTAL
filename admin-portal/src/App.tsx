@@ -2249,7 +2249,7 @@ export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
   const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
-  const [paymentViewMode, setPaymentViewMode] = useState<'list' | 'dashboard'>('dashboard');
+  const [paymentViewMode, setPaymentViewMode] = useState<'list' | 'dashboard'>('list');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
@@ -3328,16 +3328,6 @@ Duplicates
           <div className="space-y-4">
             <div className="flex border-b border-brand-text/10 mb-4">
               <button
-                onClick={() => setPaymentViewMode('dashboard')}
-                className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-                  paymentViewMode === 'dashboard'
-                    ? 'border-brand-accent text-brand-text'
-                    : 'border-transparent text-brand-text/60 hover:text-brand-text'
-                }`}
-              >
-                Dashboard
-              </button>
-              <button
                 onClick={() => setPaymentViewMode('list')}
                 className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
                   paymentViewMode === 'list'
@@ -3347,10 +3337,20 @@ Duplicates
               >
                 Payments List
               </button>
+              <button
+                onClick={() => setPaymentViewMode('dashboard')}
+                className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                  paymentViewMode === 'dashboard'
+                    ? 'border-brand-accent text-brand-text'
+                    : 'border-transparent text-brand-text/60 hover:text-brand-text'
+                }`}
+              >
+                Dashboard
+              </button>
             </div>
 
             {paymentViewMode === 'dashboard' ? (
-              <div className="bg-brand-card/50 rounded-2xl p-4 sm:p-6 mb-6 min-h-[500px]">
+              <div className="rounded-2xl p-4 sm:p-6 mb-6 min-h-[500px]">
                 <PaymentDashboard payments={paymentsSubmissionsList} />
               </div>
             ) : (

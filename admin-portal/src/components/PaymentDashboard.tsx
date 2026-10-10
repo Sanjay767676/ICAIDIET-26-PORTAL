@@ -1,17 +1,17 @@
 import React, { useMemo } from 'react';
 import {
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
+  Chart as ChartJS,
+  ArcElement,
   Tooltip,
   Legend,
-  ResponsiveContainer
-} from 'recharts';
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  Title,
+} from 'chart.js';
+import { Pie, Bar } from 'react-chartjs-2';
+
+ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
 
 interface Submission {
   id: string;
@@ -25,8 +25,6 @@ interface PaymentDashboardProps {
   payments: Submission[];
 }
 
-const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
-
 const parseAmount = (feeStr: string | null | undefined): { val: number; currency: string } => {
   if (!feeStr) return { val: 0, currency: '₹' };
   const str = feeStr.trim();
@@ -36,7 +34,11 @@ const parseAmount = (feeStr: string | null | undefined): { val: number; currency
 };
 
 const formatCurrency = (amount: number, currency: string) => {
-  return `${currency}${amount.toLocaleString()}`;
+  // Use en-IN for Indian Rupee format (e.g., 12,00,000)
+  if (currency === '₹') {
+    return `${currency}${amount.toLocaleString('en-IN')}`;
+  }
+  return `${currency}${amount.toLocaleString('en-US')}`;
 };
 
 export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ payments }) => {
@@ -88,6 +90,7 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ payments }) 
       conferenceAloneCount,
       indianAuthorCount,
       industryCount,
+      othersCount: payments.length - indianAuthorCount - industryCount,
       totalINR,
       totalUSD,
       indianScopusINR,
@@ -97,141 +100,147 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ payments }) 
     };
   }, [payments]);
 
-  const regTypeData = [
-    { name: 'Scopus Proceedings', value: metrics.scopusCount },
-    { name: 'Conference Alone', value: metrics.conferenceAloneCount },
-  ];
-
-  const authorTypeData = [
-    { name: 'Indian Author', value: metrics.indianAuthorCount },
-    { name: 'Industry', value: metrics.industryCount },
-    { name: 'Others', value: payments.length - metrics.indianAuthorCount - metrics.industryCount }
-  ];
-
-  const revenueData = [
-    {
-      name: 'Indian Author',
-      'Scopus Proceedings': metrics.indianScopusINR,
-      'Conference Alone': metrics.indianAloneINR,
+  const pieOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'bottom' as const,
+      },
     },
-    {
-      name: 'Industry Delegate',
-      'Scopus Proceedings': metrics.industryScopusINR,
-      'Conference Alone': metrics.industryAloneINR,
-    }
-  ];
+  };
+
+  const regTypeData = {
+    labels: ['Scopus Proceedings', 'Conference Alone'],
+    datasets: [
+      {
+        data: [metrics.scopusCount, metrics.conferenceAloneCount],
+        backgroundColor: ['rgba(54, 162, 235, 0.8)', 'rgba(75, 192, 192, 0.8)'],
+        borderColor: ['rgba(54, 162, 235, 1)', 'rgba(75, 192, 192, 1)'],
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const authorTypeData = {
+    labels: ['Indian Author', 'Industry', 'Others'],
+    datasets: [
+      {
+        data: [metrics.indianAuthorCount, metrics.industryCount, metrics.othersCount],
+        backgroundColor: ['rgba(255, 159, 64, 0.8)', 'rgba(153, 102, 255, 0.8)', 'rgba(201, 203, 207, 0.8)'],
+        borderColor: ['rgba(255, 159, 64, 1)', 'rgba(153, 102, 255, 1)', 'rgba(201, 203, 207, 1)'],
+        borderWidth: 1,
+      },
+    ],
+  };
+
+  const barData = {
+    labels: ['Indian Author', 'Industry Delegate'],
+    datasets: [
+      {
+        label: 'Scopus Proceedings',
+        data: [metrics.indianScopusINR, metrics.industryScopusINR],
+        backgroundColor: 'rgba(54, 162, 235, 0.8)',
+      },
+      {
+        label: 'Conference Alone',
+        data: [metrics.indianAloneINR, metrics.industryAloneINR],
+        backgroundColor: 'rgba(75, 192, 192, 0.8)',
+      },
+    ],
+  };
+
+  const barOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        position: 'top' as const,
+      },
+      tooltip: {
+        callbacks: {
+          label: (context: any) => {
+            let label = context.dataset.label || '';
+            if (label) {
+              label += ': ';
+            }
+            if (context.parsed.y !== null) {
+              label += formatCurrency(context.parsed.y, '₹');
+            }
+            return label;
+          },
+        },
+      },
+    },
+    scales: {
+      y: {
+        beginAtZero: true,
+      },
+    },
+  };
 
   return (
     <div className="space-y-6">
       {/* Top Level Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/10 p-4">
-          <div className="text-sm font-semibold text-brand-text/60 mb-1">Total Amount (₹)</div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div className="text-sm font-semibold text-gray-500 mb-1">Total Amount (₹)</div>
           <div className="text-2xl font-bold font-serif text-green-700">{formatCurrency(metrics.totalINR, '₹')}</div>
         </div>
-        <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/10 p-4">
-          <div className="text-sm font-semibold text-brand-text/60 mb-1">Total Amount ($)</div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div className="text-sm font-semibold text-gray-500 mb-1">Total Amount ($)</div>
           <div className="text-2xl font-bold font-serif text-blue-700">{formatCurrency(metrics.totalUSD, '$')}</div>
         </div>
-        <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/10 p-4">
-          <div className="text-sm font-semibold text-brand-text/60 mb-1">Scopus Registrations</div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div className="text-sm font-semibold text-gray-500 mb-1">Scopus Registrations</div>
           <div className="text-2xl font-bold font-serif text-purple-700">{metrics.scopusCount}</div>
         </div>
-        <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/10 p-4">
-          <div className="text-sm font-semibold text-brand-text/60 mb-1">Conference Alone</div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <div className="text-sm font-semibold text-gray-500 mb-1">Conference Alone</div>
           <div className="text-2xl font-bold font-serif text-amber-700">{metrics.conferenceAloneCount}</div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Registration Types Pie Chart */}
-        <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/10 p-4">
-          <h3 className="text-lg font-bold font-serif text-brand-text mb-4">Registration Breakdown</h3>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={regTypeData}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                >
-                  {regTypeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <h3 className="text-lg font-bold font-serif text-gray-800 mb-4">Registration Breakdown</h3>
+          <div className="h-[300px] relative">
+            <Pie data={regTypeData} options={pieOptions} />
           </div>
         </div>
 
         {/* Author Types Pie Chart */}
-        <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/10 p-4">
-          <h3 className="text-lg font-bold font-serif text-brand-text mb-4">Author Categories</h3>
-          <div className="h-[300px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={authorTypeData}
-                  cx="50%"
-                  cy="50%"
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                >
-                  {authorTypeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[(index + 2) % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+          <h3 className="text-lg font-bold font-serif text-gray-800 mb-4">Author Categories</h3>
+          <div className="h-[300px] relative">
+            <Pie data={authorTypeData} options={pieOptions} />
           </div>
         </div>
       </div>
 
       {/* Detailed Revenue Bar Chart */}
-      <div className="bg-brand-card rounded-xl shadow-sm border border-brand-text/10 p-4">
-        <h3 className="text-lg font-bold font-serif text-brand-text mb-4">Revenue by Category (₹)</h3>
-        <div className="h-[400px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <BarChart
-              data={revenueData}
-              margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-            >
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="name" />
-              <YAxis />
-              <Tooltip formatter={(value: number) => `₹${value.toLocaleString()}`} />
-              <Legend />
-              <Bar dataKey="Scopus Proceedings" fill="#8884d8" />
-              <Bar dataKey="Conference Alone" fill="#82ca9d" />
-            </BarChart>
-          </ResponsiveContainer>
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+        <h3 className="text-lg font-bold font-serif text-gray-800 mb-4">Revenue by Category (₹)</h3>
+        <div className="h-[400px] relative">
+          <Bar data={barData} options={barOptions} />
         </div>
         
         {/* Revenue Text Summary */}
         <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
+          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
             <div className="text-xs text-gray-500 font-semibold uppercase">Indian - Scopus</div>
             <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.indianScopusINR, '₹')}</div>
           </div>
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
+          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
             <div className="text-xs text-gray-500 font-semibold uppercase">Indian - Conf Alone</div>
             <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.indianAloneINR, '₹')}</div>
           </div>
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
+          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
             <div className="text-xs text-gray-500 font-semibold uppercase">Industry - Scopus</div>
             <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.industryScopusINR, '₹')}</div>
           </div>
-          <div className="bg-white rounded-lg p-3 border border-gray-200">
+          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
             <div className="text-xs text-gray-500 font-semibold uppercase">Industry - Conf Alone</div>
             <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.industryAloneINR, '₹')}</div>
           </div>
