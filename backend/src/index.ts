@@ -3360,7 +3360,14 @@ function resolveFeeSnapshot(
   }
 
   const until = (config.early_bird_until || '').trim();
-  const today = new Date().toISOString().slice(0, 10);
+  // The conference is in India (IST), so resolve 'today' in that timezone
+  // rather than UTC, preventing authors from getting an extra 5.5 hours.
+  const today = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
   const early = isCalendarDate(until) && today <= until;
   return { amount: early ? row.early : row.standard, tier: early ? 'EARLY' : 'STANDARD' };
 }

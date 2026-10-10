@@ -3,7 +3,7 @@ import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Load
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
 import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
-
+import { PaymentDashboard } from './components/PaymentDashboard';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
 const PHONE_MIN_DIGITS = 5;
@@ -2249,6 +2249,7 @@ export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
   const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [paymentViewMode, setPaymentViewMode] = useState<'list' | 'dashboard'>('dashboard');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
@@ -3324,45 +3325,76 @@ Duplicates
         )}
 
         {activeTab === 'payments' && (
-          <SubmissionListing
-            rows={filteredPayments}
-            total={paymentsSubmissionsList.length}
-            loading={loading}
-            error={error ? `Error loading submissions: ${error}` : null}
-            filtersActive={filtersActive}
-            emptyMsg="No payments submitted yet."
-            emptyFilteredMsg="No submissions match your search or filters."
-            searchTerm={searchTerm}
-            onSearchChange={setSearchTerm}
-            trackFilter={trackFilter}
-            onTrackFilterChange={setTrackFilter}
-            paperIdFilter={paperIdFilter}
-            onPaperIdFilterChange={setPaperIdFilter}
-            tracks={tracks}
-            paperIds={paperIds}
-            dateFilter={dateFilter}
-            onDateFilterChange={setDateFilter}
-            dates={paymentDates}
-            onClear={clearFilters}
-            token={token}
-            refresh={fetchSubmissions}
-            onUnauthorized={handleLogout}
-            onStatusError={setError}
-            onOpenPdf={openPdf}
-            onViewInfo={setMoreInfoTarget}
-            onViewPayment={setPaymentTarget}
-            onDelete={setDeleteTarget}
-            enquiredSaving={enquiredSaving}
-            onToggleEnquired={handleEnquiredToggle}
-            mailTemplates={mailTemplates}
-            selectedTemplateId={selectedTemplateId}
-            onSelectedTemplateChange={setSelectedTemplateId}
-            mailSelected={mailSelected}
-            onToggleMailSelect={toggleMailSelect}
-            onToggleMailSelectAll={toggleMailSelectAll}
-            onSendMail={handleSendMail}
-            mailSending={mailSending}
-          />
+          <div className="space-y-4">
+            <div className="flex border-b border-brand-text/10 mb-4">
+              <button
+                onClick={() => setPaymentViewMode('dashboard')}
+                className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                  paymentViewMode === 'dashboard'
+                    ? 'border-brand-accent text-brand-text'
+                    : 'border-transparent text-brand-text/60 hover:text-brand-text'
+                }`}
+              >
+                Dashboard
+              </button>
+              <button
+                onClick={() => setPaymentViewMode('list')}
+                className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                  paymentViewMode === 'list'
+                    ? 'border-brand-accent text-brand-text'
+                    : 'border-transparent text-brand-text/60 hover:text-brand-text'
+                }`}
+              >
+                Payments List
+              </button>
+            </div>
+
+            {paymentViewMode === 'dashboard' ? (
+              <div className="bg-brand-card/50 rounded-2xl p-4 sm:p-6 mb-6 min-h-[500px]">
+                <PaymentDashboard payments={paymentsSubmissionsList} />
+              </div>
+            ) : (
+              <SubmissionListing
+                rows={filteredPayments}
+                total={paymentsSubmissionsList.length}
+                loading={loading}
+                error={error ? `Error loading submissions: ${error}` : null}
+                filtersActive={filtersActive}
+                emptyMsg="No payments submitted yet."
+                emptyFilteredMsg="No submissions match your search or filters."
+                searchTerm={searchTerm}
+                onSearchChange={setSearchTerm}
+                trackFilter={trackFilter}
+                onTrackFilterChange={setTrackFilter}
+                paperIdFilter={paperIdFilter}
+                onPaperIdFilterChange={setPaperIdFilter}
+                tracks={tracks}
+                paperIds={paperIds}
+                dateFilter={dateFilter}
+                onDateFilterChange={setDateFilter}
+                dates={paymentDates}
+                onClear={clearFilters}
+                token={token}
+                refresh={fetchSubmissions}
+                onUnauthorized={handleLogout}
+                onStatusError={setError}
+                onOpenPdf={openPdf}
+                onViewInfo={setMoreInfoTarget}
+                onViewPayment={setPaymentTarget}
+                onDelete={setDeleteTarget}
+                enquiredSaving={enquiredSaving}
+                onToggleEnquired={handleEnquiredToggle}
+                mailTemplates={mailTemplates}
+                selectedTemplateId={selectedTemplateId}
+                onSelectedTemplateChange={setSelectedTemplateId}
+                mailSelected={mailSelected}
+                onToggleMailSelect={toggleMailSelect}
+                onToggleMailSelectAll={toggleMailSelectAll}
+                onSendMail={handleSendMail}
+                mailSending={mailSending}
+              />
+            )}
+          </div>
         )}
 
         {activeTab === 'duplicates' && (

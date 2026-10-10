@@ -1,0 +1,6 @@
+backend/worker-configuration.d.ts
+backup/
+graphify-out/
+**/node_modules/
+**/dist/
+**/*.d.ts
