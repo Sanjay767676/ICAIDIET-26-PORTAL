@@ -1891,6 +1891,8 @@ function ReviewSection({
   onToggleMailSelectAll: (list: Submission[]) => void;
   onSendMail: () => void;
   mailSending: boolean;
+  mailStatusFilter: string;
+  onMailStatusFilterChange: (v: string) => void;
 }) {
   const allSelected = rows.length > 0 && rows.every((s) => mailSelected.includes(s.id));
   return (
@@ -1903,6 +1905,17 @@ function ReviewSection({
 
         {/* Mail controls */}
         <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border-2 border-brand-accent px-3 py-2.5 shadow-sm">
+          <select
+            value={mailStatusFilter}
+            onChange={(e) => onMailStatusFilterChange(e.target.value)}
+            className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all mr-1"
+          >
+            <option value="">All Mail Statuses</option>
+            <option value="sent">Sent</option>
+            <option value="not_sent">Not Sent</option>
+            <option value="sending">Sending / Queued</option>
+          </select>
+          <div className="w-px h-6 bg-brand-text/10 mx-1 hidden sm:block"></div>
           <label
             className="inline-flex items-center gap-1.5 text-xs font-medium text-brand-text/80 cursor-pointer select-none"
             title="Select / deselect all visible papers"
@@ -2227,6 +2240,7 @@ export default function App() {
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
+  const [mailStatusFilter, setMailStatusFilter] = useState('');
   const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
   // Accepting Paper Submissions. Deliberately a SEPARATE switch from
   // mtUserEnabled (User Portal Maintenance): they used to be the same setting
@@ -2947,7 +2961,17 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
         const matchTrack = !trackFilter || s.track === trackFilter;
         const matchPaper = !paperIdFilter || s.paper_id === paperIdFilter;
         const matchDate = !dateFilter || (s.payment_submitted_at && s.payment_submitted_at.startsWith(dateFilter));
-        return matchSearch && matchTrack && matchPaper && matchDate;
+        
+        let matchMailStatus = true;
+        if (mailStatusFilter === 'sent') {
+          matchMailStatus = s.mail_status === 'delivered';
+        } else if (mailStatusFilter === 'not_sent') {
+          matchMailStatus = !s.mail_status || s.mail_status === 'failed';
+        } else if (mailStatusFilter === 'sending') {
+          matchMailStatus = s.mail_status === 'queued' || s.mail_status === 'sending';
+        }
+        
+        return matchSearch && matchTrack && matchPaper && matchDate && matchMailStatus;
       });
 
 const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]) => {
@@ -2994,6 +3018,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     setTrackFilter('');
     setPaperIdFilter('');
     setDateFilter('');
+    setMailStatusFilter('');
   };
 
   // Switching tabs resets the mail selection so checked papers from the
@@ -3245,6 +3270,8 @@ Duplicates
               onToggleMailSelectAll={toggleMailSelectAll}
               onSendMail={handleSendMail}
               mailSending={mailSending}
+              mailStatusFilter={mailStatusFilter}
+              onMailStatusFilterChange={setMailStatusFilter}
             />
           </>
         )}
