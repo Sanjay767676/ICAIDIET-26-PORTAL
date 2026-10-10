@@ -1893,6 +1893,9 @@ function ReviewSection({
   mailSending: boolean;
   mailStatusFilter: string;
   onMailStatusFilterChange: (v: string) => void;
+  reviewDateFilter: string;
+  onReviewDateFilterChange: (v: string) => void;
+  reviewDates: string[];
 }) {
   const allSelected = rows.length > 0 && rows.every((s) => mailSelected.includes(s.id));
   return (
@@ -1905,6 +1908,20 @@ function ReviewSection({
 
         {/* Mail controls */}
         <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border-2 border-brand-accent px-3 py-2.5 shadow-sm">
+          {reviewDates.length > 0 && (
+            <select
+              value={reviewDateFilter}
+              onChange={(e) => onReviewDateFilterChange(e.target.value)}
+              className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all mr-1"
+            >
+              <option value="">All Review Dates</option>
+              {reviewDates.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          )}
           <select
             value={mailStatusFilter}
             onChange={(e) => onMailStatusFilterChange(e.target.value)}
@@ -2241,6 +2258,7 @@ export default function App() {
   const [paperIdFilter, setPaperIdFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
   const [mailStatusFilter, setMailStatusFilter] = useState('');
+  const [reviewDateFilter, setReviewDateFilter] = useState('');
   const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
   // Accepting Paper Submissions. Deliberately a SEPARATE switch from
   // mtUserEnabled (User Portal Maintenance): they used to be the same setting
@@ -2971,7 +2989,9 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
           matchMailStatus = s.mail_status === 'queued' || s.mail_status === 'sending';
         }
         
-        return matchSearch && matchTrack && matchPaper && matchDate && matchMailStatus;
+        const matchReviewDate = !reviewDateFilter || (s.review_updated_at && s.review_updated_at.startsWith(reviewDateFilter));
+        
+        return matchSearch && matchTrack && matchPaper && matchDate && matchMailStatus && matchReviewDate;
       });
 
 const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]) => {
@@ -2987,6 +3007,11 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     const paymentDates = Array.from(new Set(paymentsSubmissionsList.map(s => {
       if (!s.payment_submitted_at) return '';
       return s.payment_submitted_at.split('T')[0];
+    }).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+    
+    const reviewDates = Array.from(new Set(submissions.map(s => {
+      if (!s.review_updated_at) return '';
+      return s.review_updated_at.split('T')[0];
     }).filter(Boolean))).sort((a, b) => b.localeCompare(a));
     
     const hasViewablePayment = (s: Submission) => !!(s.payment_proof_url || s.utr_transaction_id || s.registration_type);
@@ -3019,6 +3044,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     setPaperIdFilter('');
     setDateFilter('');
     setMailStatusFilter('');
+    setReviewDateFilter('');
   };
 
   // Switching tabs resets the mail selection so checked papers from the
@@ -3272,6 +3298,9 @@ Duplicates
               mailSending={mailSending}
               mailStatusFilter={mailStatusFilter}
               onMailStatusFilterChange={setMailStatusFilter}
+              reviewDateFilter={reviewDateFilter}
+              onReviewDateFilterChange={setReviewDateFilter}
+              reviewDates={reviewDates}
             />
           </>
         )}
