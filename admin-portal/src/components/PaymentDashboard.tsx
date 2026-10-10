@@ -1,17 +1,5 @@
 import React, { useMemo } from 'react';
-import {
-  Chart as ChartJS,
-  ArcElement,
-  Tooltip,
-  Legend,
-  CategoryScale,
-  LinearScale,
-  BarElement,
-  Title,
-} from 'chart.js';
-import { Pie, Bar } from 'react-chartjs-2';
-
-ChartJS.register(ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement, Title);
+import Chart from 'react-apexcharts';
 
 interface Submission {
   id: string;
@@ -34,7 +22,6 @@ const parseAmount = (feeStr: string | null | undefined): { val: number; currency
 };
 
 const formatCurrency = (amount: number, currency: string) => {
-  // Use en-IN for Indian Rupee format (e.g., 12,00,000)
   if (currency === '₹') {
     return `${currency}${amount.toLocaleString('en-IN')}`;
   }
@@ -100,149 +87,233 @@ export const PaymentDashboard: React.FC<PaymentDashboardProps> = ({ payments }) 
     };
   }, [payments]);
 
-  const pieOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'bottom' as const,
+  // ApexCharts Configs
+  const commonPieOptions: ApexCharts.ApexOptions = {
+    chart: {
+      type: 'donut',
+      fontFamily: 'inherit',
+      animations: {
+        enabled: true,
+        easing: 'easeinout',
+        speed: 800,
+      }
+    },
+    dataLabels: {
+      enabled: false,
+    },
+    stroke: {
+      width: 0,
+    },
+    plotOptions: {
+      pie: {
+        donut: {
+          size: '65%',
+          labels: {
+            show: true,
+            name: {
+              show: true,
+              fontSize: '14px',
+              fontFamily: 'inherit',
+              fontWeight: 600,
+            },
+            value: {
+              show: true,
+              fontSize: '24px',
+              fontFamily: 'inherit',
+              fontWeight: 700,
+            }
+          }
+        }
+      }
+    },
+    legend: {
+      position: 'bottom',
+      fontFamily: 'inherit',
+      fontWeight: 500,
+      markers: {
+        size: 8,
+      },
+    },
+    tooltip: {
+      theme: 'light',
+      style: {
+        fontSize: '13px',
+        fontFamily: 'inherit',
       },
     },
   };
 
-  const regTypeData = {
+  const regSeries = [metrics.scopusCount, metrics.conferenceAloneCount];
+  const regOptions: ApexCharts.ApexOptions = {
+    ...commonPieOptions,
     labels: ['Scopus Proceedings', 'Conference Alone'],
-    datasets: [
-      {
-        data: [metrics.scopusCount, metrics.conferenceAloneCount],
-        backgroundColor: ['rgba(54, 162, 235, 0.8)', 'rgba(75, 192, 192, 0.8)'],
-        borderColor: ['rgba(54, 162, 235, 1)', 'rgba(75, 192, 192, 1)'],
-        borderWidth: 1,
-      },
-    ],
+    colors: ['#3b82f6', '#10b981'], // Modern Blue & Emerald
   };
 
-  const authorTypeData = {
+  const authSeries = [metrics.indianAuthorCount, metrics.industryCount, metrics.othersCount];
+  const authOptions: ApexCharts.ApexOptions = {
+    ...commonPieOptions,
     labels: ['Indian Author', 'Industry', 'Others'],
-    datasets: [
-      {
-        data: [metrics.indianAuthorCount, metrics.industryCount, metrics.othersCount],
-        backgroundColor: ['rgba(255, 159, 64, 0.8)', 'rgba(153, 102, 255, 0.8)', 'rgba(201, 203, 207, 0.8)'],
-        borderColor: ['rgba(255, 159, 64, 1)', 'rgba(153, 102, 255, 1)', 'rgba(201, 203, 207, 1)'],
-        borderWidth: 1,
-      },
-    ],
+    colors: ['#f59e0b', '#8b5cf6', '#94a3b8'], // Modern Amber, Violet, Slate
   };
 
-  const barData = {
-    labels: ['Indian Author', 'Industry Delegate'],
-    datasets: [
-      {
-        label: 'Scopus Proceedings',
-        data: [metrics.indianScopusINR, metrics.industryScopusINR],
-        backgroundColor: 'rgba(54, 162, 235, 0.8)',
-      },
-      {
-        label: 'Conference Alone',
-        data: [metrics.indianAloneINR, metrics.industryAloneINR],
-        backgroundColor: 'rgba(75, 192, 192, 0.8)',
-      },
-    ],
-  };
+  const barSeries = [
+    {
+      name: 'Scopus Proceedings',
+      data: [metrics.indianScopusINR, metrics.industryScopusINR]
+    },
+    {
+      name: 'Conference Alone',
+      data: [metrics.indianAloneINR, metrics.industryAloneINR]
+    }
+  ];
 
-  const barOptions = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top' as const,
+  const barOptions: ApexCharts.ApexOptions = {
+    chart: {
+      type: 'bar',
+      fontFamily: 'inherit',
+      toolbar: {
+        show: false,
       },
-      tooltip: {
-        callbacks: {
-          label: (context: any) => {
-            let label = context.dataset.label || '';
-            if (label) {
-              label += ': ';
-            }
-            if (context.parsed.y !== null) {
-              label += formatCurrency(context.parsed.y, '₹');
-            }
-            return label;
-          },
+      animations: {
+        enabled: true,
+      }
+    },
+    plotOptions: {
+      bar: {
+        horizontal: false,
+        columnWidth: '55%',
+        borderRadius: 4,
+      },
+    },
+    dataLabels: {
+      enabled: false,
+    },
+    stroke: {
+      show: true,
+      width: 2,
+      colors: ['transparent']
+    },
+    xaxis: {
+      categories: ['Indian Author', 'Industry Delegate'],
+      labels: {
+        style: {
+          fontFamily: 'inherit',
+          fontWeight: 500,
+        }
+      }
+    },
+    yaxis: {
+      labels: {
+        formatter: (value) => {
+          if (value >= 100000) return `₹${(value / 100000).toFixed(1)}L`;
+          if (value >= 1000) return `₹${(value / 1000).toFixed(1)}k`;
+          return `₹${value}`;
         },
-      },
+        style: {
+          fontFamily: 'inherit',
+        }
+      }
     },
-    scales: {
+    colors: ['#3b82f6', '#10b981'],
+    fill: {
+      opacity: 1
+    },
+    tooltip: {
+      theme: 'light',
       y: {
-        beginAtZero: true,
+        formatter: (val) => formatCurrency(val, '₹')
       },
+      style: {
+        fontFamily: 'inherit',
+      }
     },
+    legend: {
+      position: 'top',
+      fontFamily: 'inherit',
+      fontWeight: 500,
+      markers: {
+        size: 8,
+      },
+    }
   };
 
   return (
     <div className="space-y-6">
       {/* Top Level Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-sm font-semibold text-gray-500 mb-1">Total Amount (₹)</div>
-          <div className="text-2xl font-bold font-serif text-green-700">{formatCurrency(metrics.totalINR, '₹')}</div>
+        <div className="bg-white rounded-xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-gray-100 p-5 transition-transform hover:-translate-y-1 duration-200">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-500 mb-2">
+            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+            Total Amount (₹)
+          </div>
+          <div className="text-3xl font-bold font-sans tracking-tight text-gray-900">{formatCurrency(metrics.totalINR, '₹')}</div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-sm font-semibold text-gray-500 mb-1">Total Amount ($)</div>
-          <div className="text-2xl font-bold font-serif text-blue-700">{formatCurrency(metrics.totalUSD, '$')}</div>
+        <div className="bg-white rounded-xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-gray-100 p-5 transition-transform hover:-translate-y-1 duration-200">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-500 mb-2">
+            <div className="w-2 h-2 rounded-full bg-blue-500"></div>
+            Total Amount ($)
+          </div>
+          <div className="text-3xl font-bold font-sans tracking-tight text-gray-900">{formatCurrency(metrics.totalUSD, '$')}</div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-sm font-semibold text-gray-500 mb-1">Scopus Registrations</div>
-          <div className="text-2xl font-bold font-serif text-purple-700">{metrics.scopusCount}</div>
+        <div className="bg-white rounded-xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-gray-100 p-5 transition-transform hover:-translate-y-1 duration-200">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-500 mb-2">
+            <div className="w-2 h-2 rounded-full bg-purple-500"></div>
+            Scopus Registrations
+          </div>
+          <div className="text-3xl font-bold font-sans tracking-tight text-gray-900">{metrics.scopusCount}</div>
         </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <div className="text-sm font-semibold text-gray-500 mb-1">Conference Alone</div>
-          <div className="text-2xl font-bold font-serif text-amber-700">{metrics.conferenceAloneCount}</div>
+        <div className="bg-white rounded-xl shadow-[0_2px_10px_-3px_rgba(6,81,237,0.1)] border border-gray-100 p-5 transition-transform hover:-translate-y-1 duration-200">
+          <div className="flex items-center gap-2 text-sm font-semibold text-gray-500 mb-2">
+            <div className="w-2 h-2 rounded-full bg-amber-500"></div>
+            Conference Alone
+          </div>
+          <div className="text-3xl font-bold font-sans tracking-tight text-gray-900">{metrics.conferenceAloneCount}</div>
         </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Registration Types Pie Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <h3 className="text-lg font-bold font-serif text-gray-800 mb-4">Registration Breakdown</h3>
-          <div className="h-[300px] relative">
-            <Pie data={regTypeData} options={pieOptions} />
+        {/* Registration Types Chart */}
+        <div className="bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-gray-50 p-6">
+          <h3 className="text-lg font-bold font-sans text-gray-900 mb-6">Registration Breakdown</h3>
+          <div className="h-[300px]">
+            <Chart options={regOptions} series={regSeries} type="donut" height="100%" />
           </div>
         </div>
 
-        {/* Author Types Pie Chart */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-          <h3 className="text-lg font-bold font-serif text-gray-800 mb-4">Author Categories</h3>
-          <div className="h-[300px] relative">
-            <Pie data={authorTypeData} options={pieOptions} />
+        {/* Author Types Chart */}
+        <div className="bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-gray-50 p-6">
+          <h3 className="text-lg font-bold font-sans text-gray-900 mb-6">Author Categories</h3>
+          <div className="h-[300px]">
+            <Chart options={authOptions} series={authSeries} type="donut" height="100%" />
           </div>
         </div>
       </div>
 
-      {/* Detailed Revenue Bar Chart */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
-        <h3 className="text-lg font-bold font-serif text-gray-800 mb-4">Revenue by Category (₹)</h3>
-        <div className="h-[400px] relative">
-          <Bar data={barData} options={barOptions} />
+      {/* Detailed Revenue Chart */}
+      <div className="bg-white rounded-xl shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] border border-gray-50 p-6">
+        <h3 className="text-lg font-bold font-sans text-gray-900 mb-6">Revenue by Category (₹)</h3>
+        <div className="h-[350px]">
+          <Chart options={barOptions} series={barSeries} type="bar" height="100%" />
         </div>
         
         {/* Revenue Text Summary */}
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-            <div className="text-xs text-gray-500 font-semibold uppercase">Indian - Scopus</div>
-            <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.indianScopusINR, '₹')}</div>
+        <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-gray-50/50 rounded-xl p-4 border border-gray-100">
+            <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Indian - Scopus</div>
+            <div className="text-xl font-bold text-gray-900">{formatCurrency(metrics.indianScopusINR, '₹')}</div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-            <div className="text-xs text-gray-500 font-semibold uppercase">Indian - Conf Alone</div>
-            <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.indianAloneINR, '₹')}</div>
+          <div className="bg-gray-50/50 rounded-xl p-4 border border-gray-100">
+            <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Indian - Conf Alone</div>
+            <div className="text-xl font-bold text-gray-900">{formatCurrency(metrics.indianAloneINR, '₹')}</div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-            <div className="text-xs text-gray-500 font-semibold uppercase">Industry - Scopus</div>
-            <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.industryScopusINR, '₹')}</div>
+          <div className="bg-gray-50/50 rounded-xl p-4 border border-gray-100">
+            <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Industry - Scopus</div>
+            <div className="text-xl font-bold text-gray-900">{formatCurrency(metrics.industryScopusINR, '₹')}</div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-3 border border-gray-200">
-            <div className="text-xs text-gray-500 font-semibold uppercase">Industry - Conf Alone</div>
-            <div className="text-lg font-bold text-gray-900 mt-1">{formatCurrency(metrics.industryAloneINR, '₹')}</div>
+          <div className="bg-gray-50/50 rounded-xl p-4 border border-gray-100">
+            <div className="text-xs text-gray-500 font-bold uppercase tracking-wider mb-1">Industry - Conf Alone</div>
+            <div className="text-xl font-bold text-gray-900">{formatCurrency(metrics.industryAloneINR, '₹')}</div>
           </div>
         </div>
       </div>
