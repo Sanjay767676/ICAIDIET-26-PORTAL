@@ -465,37 +465,32 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
 // ------------------------------------------------------------------
 function PdfViewer({ file, token, onClose }: { file: FileView; token: string; onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
-  const frameRef = useRef<HTMLIFrameElement>(null);
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 
   const loadPdf = useCallback(async () => {
     if (!file.url) return;
     setError(null);
+    setPdfUrl(null);
     const res = await fetch(file.url, { headers: { Authorization: `Bearer ${token}` } });
     if (!res.ok) {
-      setError('Could not load this manuscript. It may have been removed.');
+      setError('Could not load this document. It may have been removed.');
       return;
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    if (frameRef.current) frameRef.current.src = url;
+    setPdfUrl(url);
   }, [file.url, token]);
 
   useEffect(() => {
     loadPdf();
+    // We don't revoke the blob URL immediately on unmount because the browser
+    // might still be rendering it, but we can clean up old ones if needed.
   }, [loadPdf]);
 
   const downloadPdf = async () => {
-    if (!file.url) return;
-    setError(null);
-    const res = await fetch(file.url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      setError('Could not download this document. It may have been removed.');
-      return;
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
+    if (!pdfUrl) return;
     const a = document.createElement('a');
-    a.href = url;
+    a.href = pdfUrl;
     a.download =
       file.filename ||
       (file.kind === 'plagiarism'
@@ -508,7 +503,10 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
+  };
+
+  const openPdfTab = () => {
+    if (pdfUrl) window.open(pdfUrl, '_blank');
   };
 
   return (
@@ -531,8 +529,17 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={openPdfTab}
+              disabled={!pdfUrl}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm disabled:opacity-50"
+              aria-label="Open in new tab"
+            >
+              <FileText className="w-4 h-4" /> Open
+            </button>
+            <button
               onClick={downloadPdf}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm"
+              disabled={!pdfUrl}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg transition-colors text-sm disabled:opacity-50"
               aria-label="Download"
             >
               <Download className="w-4 h-4" /> Download
@@ -552,15 +559,21 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
             </button>
           </div>
         </div>
-        <div className="flex-1 bg-white relative">
+        <div className="flex-1 bg-white relative overflow-hidden flex flex-col">
           {error ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <div className="text-red-600 bg-red-50 border border-red-200 px-5 py-3 rounded-lg text-sm">
                 {error}
               </div>
             </div>
+          ) : pdfUrl ? (
+            <object data={pdfUrl} type="application/pdf" className="w-full h-full flex-1">
+              <iframe src={pdfUrl} title="Manuscript" className="w-full h-full flex-1 border-0" />
+            </object>
           ) : (
-            <iframe ref={frameRef} title="Manuscript" className="w-full h-full" />
+            <div className="absolute inset-0 flex items-center justify-center text-brand-text/50">
+              <Loader2 className="w-6 h-6 animate-spin" />
+            </div>
           )}
         </div>
       </div>
