@@ -1871,6 +1871,11 @@ function ReviewSection({
   onToggleMailSelectAll,
   onSendMail,
   mailSending,
+  mailStatusFilter,
+  onMailStatusFilterChange,
+  reviewDateFilter,
+  onReviewDateFilterChange,
+  reviewDates,
 }: {
   title: string;
   subtitle: string;
