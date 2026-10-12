@@ -3511,7 +3511,7 @@ Duplicates
           </>
         )}
         {activeTab === 'downloads' && (
-          <DownloadPanel token={token} onUnauthorized={handleLogout} />
+          <DownloadPanel token={token} onUnauthorized={handleLogout} submissions={submissions} />
         )}
 
         {activeTab === 'settings' && (

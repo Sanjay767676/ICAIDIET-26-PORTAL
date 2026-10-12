@@ -2790,7 +2790,15 @@ app.get('/api/admin/backup', async (c) => {
 // ------------------------------------------------------------------
 
 const EXPORT_STATUS_FILTERS = new Set(['SUBMITTED', 'UNDER_REVIEW', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY']);
-const EXPORT_REVIEW_FILTERS = new Set(['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES', 'NOT_ACCEPTED']);
+const EXPORT_REVIEW_FILTERS = new Set([
+  'ACCEPTED',
+  'ACCEPTED_AND_PAYMENT_APPROVED',
+  'ACCEPTED_PAYMENT_APPROVED',
+  'ACCEPTED_ALL',
+  'ACCEPTED_WITH_MINOR_CHANGES',
+  'ACCEPTED_WITH_MAJOR_CHANGES',
+  'NOT_ACCEPTED',
+]);
 // These are export filter ids, not payment_status values, so the ids stay
 // readable in the .xlsx filename and the two namespaces cannot collide with the
 // status/review filters above. PAYMENT_NONE maps to a NULL payment_status.
@@ -2802,7 +2810,10 @@ const EXPORT_FILTER_LABELS: Record<string, string> = {
   UNDER_REVIEW: 'UNDER_REVIEW',
   READY_FOR_REGISTRATION: 'READY_FOR_REGISTRATION',
   READY_FOR_CAMERA_READY: 'READY_FOR_CAMERA_READY',
-  ACCEPTED: 'ACCEPTED',
+  ACCEPTED: 'ACCEPTED_PENDING_PAYMENT',
+  ACCEPTED_AND_PAYMENT_APPROVED: 'ACCEPTED_PAYMENT_APPROVED',
+  ACCEPTED_PAYMENT_APPROVED: 'ACCEPTED_PAYMENT_APPROVED',
+  ACCEPTED_ALL: 'ALL_ACCEPTED',
   ACCEPTED_WITH_MINOR_CHANGES: 'ACCEPTED_WITH_MINOR_CHANGES',
   ACCEPTED_WITH_MAJOR_CHANGES: 'ACCEPTED_WITH_MAJOR_CHANGES',
   NOT_ACCEPTED: 'NOT_ACCEPTED',
@@ -2924,6 +2935,10 @@ app.post('/api/admin/export', async (c) => {
     const params: string[] = [];
     if (filter === 'ALL') {
       // no extra condition
+    } else if (filter === 'SUBMITTED') {
+      conds.push('s.status = ?');
+      params.push('SUBMITTED');
+      conds.push("(s.payment_status IS NULL OR s.payment_status != 'APPROVED')");
     } else if (EXPORT_STATUS_FILTERS.has(filter)) {
       conds.push('s.status = ?');
       params.push(filter);
@@ -2936,11 +2951,47 @@ app.post('/api/admin/export', async (c) => {
         conds.push('s.payment_status = ?');
         params.push(filter.replace('PAYMENT_', ''));
       }
+    } else if (filter === 'ACCEPTED') {
+      // Accepted state only: matches the Accepted tab in admin portal (payment not approved yet)
+      conds.push(
+        `((SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = 'ACCEPTED' OR s.status IN ('READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY')) AND (s.payment_status IS NULL OR s.payment_status != 'APPROVED')`
+      );
+    } else if (filter === 'ACCEPTED_AND_PAYMENT_APPROVED' || filter === 'ACCEPTED_PAYMENT_APPROVED') {
+      // Accepted with payment approved: matches approved registrations
+      conds.push(
+        `((SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = 'ACCEPTED' OR s.status IN ('READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY')) AND s.payment_status = 'APPROVED'`
+      );
+    } else if (filter === 'ACCEPTED_ALL') {
+      // All accepted papers regardless of payment status
+      conds.push(
+        `((SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = 'ACCEPTED' OR s.status IN ('READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'))`
+      );
+    } else if (filter === 'ACCEPTED_WITH_MINOR_CHANGES') {
+      conds.push(
+        `((SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = 'ACCEPTED_WITH_MINOR_CHANGES') AND (s.payment_status IS NULL OR s.payment_status != 'APPROVED')`
+      );
+    } else if (filter === 'ACCEPTED_WITH_MAJOR_CHANGES') {
+      conds.push(
+        `((SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = 'ACCEPTED_WITH_MAJOR_CHANGES') AND (s.payment_status IS NULL OR s.payment_status != 'APPROVED')`
+      );
     } else {
       conds.push(
         '(SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) = ?'
       );
       params.push(filter);
+    }
+
+    const paymentFilter = body?.paymentFilter ? String(body.paymentFilter).trim().toUpperCase() : null;
+    if (paymentFilter) {
+      if (paymentFilter === 'APPROVED' || paymentFilter === 'PAYMENT_APPROVED') {
+        conds.push("s.payment_status = 'APPROVED'");
+      } else if (paymentFilter === 'NOT_APPROVED' || paymentFilter === 'PENDING_OR_NONE') {
+        conds.push("(s.payment_status IS NULL OR s.payment_status != 'APPROVED')");
+      } else if (paymentFilter === 'PENDING' || paymentFilter === 'PAYMENT_PENDING') {
+        conds.push("s.payment_status = 'PENDING'");
+      } else if (paymentFilter === 'NONE' || paymentFilter === 'PAYMENT_NONE') {
+        conds.push("s.payment_status IS NULL");
+      }
     }
 
     const { results } = await c.env.DB.prepare(

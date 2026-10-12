@@ -11,40 +11,51 @@ interface ExportColumn {
 interface ExportFilter {
   id: string;
   label: string;
+  description?: string;
 }
 
 const FILTER_GROUPS: { group: string; filters: ExportFilter[] }[] = [
   {
-    group: 'Submission Status',
+    group: 'Review Decision & Acceptance',
     filters: [
-      { id: 'ALL', label: 'All Entries (not deleted)' },
-      { id: 'SUBMITTED', label: 'Submitted' },
-      { id: 'UNDER_REVIEW', label: 'Under Review' },
-      { id: 'READY_FOR_REGISTRATION', label: 'Ready for Registration' },
-      { id: 'READY_FOR_CAMERA_READY', label: 'Ready for Camera Ready' },
+      { id: 'ACCEPTED', label: 'Accepted (Awaiting Payment)', description: 'Accepted papers only; payment not approved yet (matches Accepted tab)' },
+      { id: 'ACCEPTED_AND_PAYMENT_APPROVED', label: 'Accepted & Payment Approved', description: 'Accepted papers with payment verified & approved' },
+      { id: 'ACCEPTED_ALL', label: 'All Accepted (Total)', description: 'All accepted entries, both paid and unpaid' },
+      { id: 'ACCEPTED_WITH_MINOR_CHANGES', label: 'Accepted with Minor Changes', description: 'Author must submit revisions' },
+      { id: 'ACCEPTED_WITH_MAJOR_CHANGES', label: 'Accepted with Major Changes', description: 'Author must submit major revisions' },
+      { id: 'NOT_ACCEPTED', label: 'Not Accepted', description: 'Paper rejected after review' },
     ],
   },
   {
-    group: 'Review Decision',
+    group: 'Workflow & Submission Status',
     filters: [
-      { id: 'ACCEPTED', label: 'Accepted' },
-      { id: 'ACCEPTED_WITH_MINOR_CHANGES', label: 'Accepted with Minor Changes' },
-      { id: 'ACCEPTED_WITH_MAJOR_CHANGES', label: 'Accepted with Major Changes' },
-      { id: 'NOT_ACCEPTED', label: 'Not Accepted' },
+      { id: 'ALL', label: 'All Entries (not deleted)', description: 'All active submissions' },
+      { id: 'SUBMITTED', label: 'Submitted (Initial)', description: 'Pending first review' },
+      { id: 'UNDER_REVIEW', label: 'Under Review', description: 'Currently assigned or in review' },
+      { id: 'READY_FOR_REGISTRATION', label: 'Ready for Registration', description: 'Eligible for payment & registration' },
+      { id: 'READY_FOR_CAMERA_READY', label: 'Ready for Camera Ready', description: 'Ready for camera ready upload' },
     ],
   },
   {
     group: 'Payment',
     filters: [
-      { id: 'PAYMENT_APPROVED', label: 'Payment Made (Approved)' },
-      { id: 'PAYMENT_PENDING', label: 'Payment Pending Review' },
-      { id: 'PAYMENT_REJECTED', label: 'Payment Rejected' },
-      { id: 'PAYMENT_NONE', label: 'No Payment Submitted' },
+      { id: 'PAYMENT_APPROVED', label: 'Payment Made (Approved)', description: 'All submissions with approved payment' },
+      { id: 'PAYMENT_PENDING', label: 'Payment Pending Review', description: 'Payment proof uploaded, pending check' },
+      { id: 'PAYMENT_REJECTED', label: 'Payment Rejected', description: 'Payment proof was rejected' },
+      { id: 'PAYMENT_NONE', label: 'No Payment Submitted', description: 'No payment proof uploaded' },
     ],
   },
 ];
 
-export default function DownloadPanel({ token, onUnauthorized }: { token: string; onUnauthorized: () => void }) {
+export default function DownloadPanel({
+  token,
+  onUnauthorized,
+  submissions = [],
+}: {
+  token: string;
+  onUnauthorized: () => void;
+  submissions?: any[];
+}) {
   const [option, setOption] = useState<'choose' | 'data' | 'papers'>('choose');
   const [step, setStep] = useState<1 | 2>(1);
   const [filter, setFilter] = useState<string>('ALL');
@@ -89,6 +100,68 @@ export default function DownloadPanel({ token, onUnauthorized }: { token: string
   const selectedFilterLabel = useMemo(
     () => FILTER_GROUPS.flatMap((g) => g.filters).find((f) => f.id === filter)?.label || filter,
     [filter]
+  );
+
+  const getCount = useCallback(
+    (filterId: string) => {
+      if (!submissions || submissions.length === 0) return null;
+      switch (filterId) {
+        case 'ALL':
+          return submissions.length;
+        case 'SUBMITTED':
+          return submissions.filter((s) => s.status === 'SUBMITTED' && s.payment_status !== 'APPROVED').length;
+        case 'UNDER_REVIEW':
+          return submissions.filter((s) => s.status === 'UNDER_REVIEW').length;
+        case 'READY_FOR_REGISTRATION':
+          return submissions.filter((s) => s.status === 'READY_FOR_REGISTRATION').length;
+        case 'READY_FOR_CAMERA_READY':
+          return submissions.filter((s) => s.status === 'READY_FOR_CAMERA_READY').length;
+        case 'ACCEPTED':
+          return submissions.filter(
+            (s) =>
+              (s.review_decision === 'ACCEPTED' ||
+                s.status === 'READY_FOR_REGISTRATION' ||
+                s.status === 'READY_FOR_CAMERA_READY') &&
+              s.payment_status !== 'APPROVED'
+          ).length;
+        case 'ACCEPTED_AND_PAYMENT_APPROVED':
+          return submissions.filter(
+            (s) =>
+              (s.review_decision === 'ACCEPTED' ||
+                s.status === 'READY_FOR_REGISTRATION' ||
+                s.status === 'READY_FOR_CAMERA_READY') &&
+              s.payment_status === 'APPROVED'
+          ).length;
+        case 'ACCEPTED_ALL':
+          return submissions.filter(
+            (s) =>
+              s.review_decision === 'ACCEPTED' ||
+              s.status === 'READY_FOR_REGISTRATION' ||
+              s.status === 'READY_FOR_CAMERA_READY'
+          ).length;
+        case 'ACCEPTED_WITH_MINOR_CHANGES':
+          return submissions.filter(
+            (s) => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES' && s.payment_status !== 'APPROVED'
+          ).length;
+        case 'ACCEPTED_WITH_MAJOR_CHANGES':
+          return submissions.filter(
+            (s) => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED'
+          ).length;
+        case 'NOT_ACCEPTED':
+          return submissions.filter((s) => s.review_decision === 'NOT_ACCEPTED').length;
+        case 'PAYMENT_APPROVED':
+          return submissions.filter((s) => s.payment_status === 'APPROVED').length;
+        case 'PAYMENT_PENDING':
+          return submissions.filter((s) => s.payment_status === 'PENDING').length;
+        case 'PAYMENT_REJECTED':
+          return submissions.filter((s) => s.payment_status === 'REJECTED').length;
+        case 'PAYMENT_NONE':
+          return submissions.filter((s) => !s.payment_status).length;
+        default:
+          return null;
+      }
+    },
+    [submissions]
   );
 
   const toggleAll = () => {
@@ -254,21 +327,51 @@ export default function DownloadPanel({ token, onUnauthorized }: { token: string
                   <div key={g.group}>
                     <div className="text-xs font-bold uppercase tracking-wide text-brand-text/50 mb-2">{g.group}</div>
                     <div className="space-y-2">
-                      {g.filters.map((f) => (
-                        <label
-                          key={f.id}
-                          className={`flex items-center gap-3 px-4 py-3 rounded-xl border-2 cursor-pointer transition-all shadow-sm ${filter === f.id ? 'border-amber-500 bg-amber-400' : 'bg-white border-transparent hover:border-brand-text/25'}`}
-                        >
-                          <input
-                            type="radio"
-                            name="export-filter"
-                            checked={filter === f.id}
-                            onChange={() => setFilter(f.id)}
-                            className="w-4 h-4 accent-brand-text"
-                          />
-                          <span className="text-sm font-medium text-brand-text">{f.label}</span>
-                        </label>
-                      ))}
+                      {g.filters.map((f) => {
+                        const count = getCount(f.id);
+                        const isSelected = filter === f.id;
+                        return (
+                          <label
+                            key={f.id}
+                            className={`flex items-start gap-3 p-3.5 rounded-xl border-2 cursor-pointer transition-all shadow-sm ${
+                              isSelected
+                                ? 'border-brand-accent bg-amber-50 shadow-md ring-2 ring-brand-accent/20'
+                                : 'bg-white border-transparent hover:border-brand-text/25'
+                            }`}
+                          >
+                            <input
+                              type="radio"
+                              name="export-filter"
+                              checked={isSelected}
+                              onChange={() => setFilter(f.id)}
+                              className="w-4 h-4 mt-0.5 accent-brand-accent shrink-0"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <span className={`text-sm font-semibold ${isSelected ? 'text-brand-text' : 'text-brand-text/90'}`}>
+                                  {f.label}
+                                </span>
+                                {count !== null && (
+                                  <span
+                                    className={`text-xs px-2 py-0.5 rounded-full font-bold shrink-0 ${
+                                      isSelected
+                                        ? 'bg-brand-accent text-white'
+                                        : 'bg-brand-text/10 text-brand-text/70'
+                                    }`}
+                                  >
+                                    {count}
+                                  </span>
+                                )}
+                              </div>
+                              {f.description && (
+                                <p className="text-xs text-brand-text/60 mt-0.5 leading-snug">
+                                  {f.description}
+                                </p>
+                              )}
+                            </div>
+                          </label>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
@@ -287,8 +390,14 @@ export default function DownloadPanel({ token, onUnauthorized }: { token: string
           {step === 2 && (
             <div className="p-5 sm:p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                <div className="text-sm text-brand-text/70">
-                  Filter: <span className="font-semibold text-brand-text">{selectedFilterLabel}</span>
+                <div className="text-sm text-brand-text/70 flex flex-wrap items-center gap-2">
+                  <span>Filter:</span>
+                  <span className="font-semibold text-brand-text">{selectedFilterLabel}</span>
+                  {getCount(filter) !== null && (
+                    <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-brand-accent text-white">
+                      {getCount(filter)} records
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-3">
                   {loadingColumns ? (
