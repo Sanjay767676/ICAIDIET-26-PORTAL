@@ -69,6 +69,8 @@ as top-level functions/constants. There is no `routes/`, `lib/`, `services/` or 
 | POST | `/api/submissions` | 1315 | **create submission** (multipart, 3 PDFs, rate-limited 10/min) |
 | GET | `/api/submissions/mine` | 1759 | author's own submissions + review + payment fields |
 | POST | `/api/submissions/:id/files` | 1798 | replace files (revision round-trip) |
+| POST | `/api/submissions/:id/copyright-form` | 2719 | **final phase**: upload signed copyright form (accepted papers, PDF ≤10MB) |
+| POST | `/api/submissions/:id/camera-ready` | 2737 | **final phase**: upload camera-ready manuscript (same gate) |
 | POST | `/api/user/submissions/:id/payment-proof` | 2765 | upload proof to `PROOF_BUCKET` → `payment_status='PENDING'` |
 | POST | `/api/user/submissions/:id/register` | 2834 | registration_type + author_type + UTR; requires proof; resets to PENDING |
 | GET | `/api/reviewer/submissions` | 945 | all live submissions + this reviewer's saved review |
@@ -101,7 +103,7 @@ Response convention everywhere: `{ success: boolean, ..., error?: string }`.
 
 ## 3. Data model (D1, `icaidiet_text_records`)
 
-24 migrations in `backend/migrations/`, `0001` → `0024`. All multi-step table rebuilds use
+33 migrations in `backend/migrations/`, `0001` → `0033`. All multi-step table rebuilds use
 `PRAGMA defer_foreign_keys=on` + drop children before parents (see `0010`, `0014`, `0018`).
 
 | Table | Key columns |
@@ -109,7 +111,7 @@ Response convention everywhere: `{ success: boolean, ..., error?: string }`.
 | `users` | `id`, `name`, `email` UNIQUE, `password_hash`, `role CHECK(USER\|ADMIN)`, timestamps |
 | `user_profiles` | 1:1 via `user_id`; `institution/department/country/phone`; `clerk_id` (Clerk link) |
 | `submissions` | see below — this is "the paper" |
-| `submission_files` | `submission_id` CASCADE, `file_type CHECK(MANUSCRIPT\|SUPPORTING\|PLAGIARISM\|AI_PLAGIARISM)`, `storage_key`, `mime_type`, `file_size` |
+| `submission_files` | `submission_id` CASCADE, `file_type CHECK(MANUSCRIPT\|SUPPORTING\|PLAGIARISM\|AI_PLAGIARISM\|COPYRIGHT_FORM\|CAMERA_READY)`, `storage_key`, `mime_type`, `file_size` |
 | `authors` | `submission_id` CASCADE, `is_primary`, `first_name`, `last_name`, `phone`, `email`, `college` |
 | `reviewers` | separate from `users`; `username` UNIQUE, `password_hash` |
 | `reviews` | `UNIQUE(submission_id, reviewer_id)` ← **the upsert target**; `decision`, `feedback`, `resubmitted` |
@@ -121,7 +123,8 @@ Response convention everywhere: `{ success: boolean, ..., error?: string }`.
 `user_id` → users CASCADE, `status` CHECK, `created_at`, `updated_at`, `track`, `author_name`, `author_email`,
 `paper_id` (CMT), `deleted_at`, `enquired`, `no_corrections`, `registration_type`, `payment_proof_url`
 (**an R2 key, not a URL**), `utr_transaction_id`, `payment_status`, `payment_approved_at`,
-`payment_submitted_at`, `author_type`.
+`payment_submitted_at`, `author_type`, `acceptance_mail_sent_at` (exactly-once latch for the
+automatic acceptance mail, `0032`).
 
 **There is no `payments` table** — all payment/registration state is denormalized onto `submissions`.
 
@@ -133,6 +136,9 @@ Response convention everywhere: `{ success: boolean, ..., error?: string }`.
   `admin-portal/src/App.tsx:77`).
 - `reviews.decision`: `ACCEPTED, ACCEPTED_WITH_MINOR_CHANGES, ACCEPTED_WITH_MAJOR_CHANGES, NOT_ACCEPTED`.
 - Frontends display all 7 statuses but can only set 4 — that asymmetry is intentional, not a bug.
+- `ACCEPTED_STATUSES` (`index.ts:55`) = `{ACCEPTED, READY_FOR_REGISTRATION, READY_FOR_CAMERA_READY}`.
+  Entering this set **from outside it** fires the automatic acceptance mail (W12), and it is the
+  gate for the two final-file upload routes.
 
 ### D1 gotchas already handled
 - **100-bound-parameter limit** → `chunkArray(ids, 50)` (`:125`) used for every `IN (...)`
@@ -350,6 +356,45 @@ portal-wide outage. `0028` gives acceptance its own key.
   matching a real Google sign-in.
 - The list has its **own save button and own request**, so editing it can never roll the
   other switches back to whatever that browser last fetched.
+
+---
+
+**W12 Final-phase files + automatic acceptance mail (2026-10-18, migrations `0032`, `0033`).**
+Accepted papers must deliver two more files — the signed Copyright Form and the Camera-Ready
+manuscript — and from now on the acceptance mail sends itself instead of being enqueued
+manually by the admin.
+
+- `0033` widens the `submission_files` CHECK with `COPYRIGHT_FORM` + `CAMERA_READY` (same
+  rebuild pattern as `0007`/`0014`; recreates both indexes the `DROP TABLE` removes, including
+  `idx_submission_files_sub_type` from `0026`).
+- Two author routes, one shared gate: `POST /api/submissions/:id/copyright-form` and
+  `.../camera-ready` (Clerk auth, PDF ≤10MB via `validateFile`, `final-files` rate limit
+  10/min). Gate = `userPortalGate('edit')` + ownership + `ACCEPTED_STATUSES` — deliberately
+  **not** `fileEditsAllowed`: "Allow File Edits" closes the revision window long before the
+  camera-ready phase opens, so final files are their own phase with their own deadline.
+  Re-upload replaces the `submission_files` row in place and best-effort deletes the superseded
+  R2 object.
+- Read surface: admin `GET /api/admin/submissions/:id/file?type=COPYRIGHT_FORM|CAMERA_READY`,
+  plus `copyright_form_file` / `camera_ready_file` subqueries and `acceptance_mail_sent_at` on
+  both admin list endpoints and `/api/submissions/mine`.
+- `sendAcceptanceMail` (`index.ts:606`) fires from the only two status writers — reviewer
+  `POST .../review` with decision `ACCEPTED`, and admin `POST .../status` — and only on a
+  transition INTO `ACCEPTED_STATUSES` (re-saving an already-accepted paper sends nothing).
+  `submissions.acceptance_mail_sent_at` (added in `0032`, deliberately **not backfilled**) is
+  claimed first with `UPDATE ... WHERE acceptance_mail_sent_at IS NULL`, so the send is
+  exactly-once even if two triggers race, and papers accepted before this feature went live are
+  never mailed retroactively.
+- Wording comes from the admin's own `mail_templates` row whose name matches (trimmed,
+  case-insensitive) `acceptance` / `acceptence` / `acceptance letter` — the live template is
+  literally "Acceptence" (sic), which the `acceptence` entry exists to catch. It can be renamed
+  freely; with no match a built-in default letter is sent instead, so an acceptance can never
+  silently produce no mail.
+- Sent inline via `sendViaResend` inside `waitUntil` (not through the shared queue), so it goes
+  out immediately: the `mail_logs` row is inserted as `sending`, then `delivered`; a 429 goes
+  back to `queued` for the cron/admin process drains, any other failure → `failed`.
+- `sendViaResend`'s param was retyped `{ env: AppEnv }` → `{ env: Bindings }` — a type-only
+  fix that cleared the 4 long-standing `tsc` errors and lets callers pass `{ env }` without a
+  cast. `npx tsc --noEmit` is now clean.
 
 ---
 

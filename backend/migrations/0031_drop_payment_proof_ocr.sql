@@ -1,0 +1,12 @@
+-- Drops the payment-proof OCR table.
+--
+-- Migration 0029 created `payment_proof_ocr` to store text read from uploaded
+-- payment screenshots by OCR.space, so the admin could spot a reused screenshot
+-- across submissions. The whole OCR feature has since been removed from the
+-- Worker (module src/paymentOcr.ts, the /api/admin/duplicate-payments report,
+-- the /payment-ocr rescan, the scan-missing sweep, and the background scan on
+-- proof upload), so the table is dead data.
+--
+-- 0029 is kept in the migrations directory as schema history; this migration is
+-- the one that actually removes the table from databases where it was applied.
+DROP TABLE IF EXISTS payment_proof_ocr;

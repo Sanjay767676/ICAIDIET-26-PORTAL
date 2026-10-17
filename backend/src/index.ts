@@ -1,13 +1,6 @@
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { verifyToken as clerkVerifyToken } from '@clerk/backend';
-import {
-  findDuplicatePaymentGroups,
-  findProofsNeedingScan,
-  proofNeedsScan,
-  scanProofOcr,
-  stuckScanCutoff,
-} from './paymentOcr';
 
 type Bindings = {
   DB: D1Database;
@@ -18,10 +11,6 @@ type Bindings = {
   RESEND_API_KEY?: string;
   MAIL_FROM_EMAIL?: string;
   MAIL_FROM_NAME?: string;
-  // OCR.space key used to read text out of uploaded payment proofs so the
-  // duplicate-payment check can spot a reused screenshot. Falls back to
-  // OCR.space's public demo key when unset, so local dev needs no secret.
-  OCR_SPACE_API_KEY?: string;
 };
 
 type Variables = {
@@ -54,6 +43,17 @@ const DEFAULT_ALLOWED_ORIGINS = [
 const ALLOWED_SUBMISSION_STATUSES = new Set([
   'SUBMITTED',
   'UNDER_REVIEW',
+  'READY_FOR_REGISTRATION',
+  'READY_FOR_CAMERA_READY',
+]);
+
+// Statuses that mean "this paper has been accepted". A paper ENTERING this
+// set (from outside it) is what fires the automatic acceptance mail, and it
+// is also the gate for the final-phase uploads (copyright form +
+// camera-ready manuscript). 'ACCEPTED' is kept in the set even though no
+// current code path writes it, because it exists in the DB CHECK vocabulary.
+const ACCEPTED_STATUSES = new Set([
+  'ACCEPTED',
   'READY_FOR_REGISTRATION',
   'READY_FOR_CAMERA_READY',
 ]);
@@ -517,7 +517,7 @@ function mailHtmlBody(text: string): string {
 }
 
 async function sendViaResend(
-  c: { env: AppEnv },
+  c: { env: Bindings },
   to: string,
   subject: string,
   body: string
@@ -561,6 +561,142 @@ async function sendViaResend(
     return { ok: false, rateLimited: res.status === 429, error: msg };
   }
   return { ok: true, id: data.id };
+}
+
+// ------------------------------------------------------------------
+// Automatic acceptance mail
+//
+// From now on the acceptance mail goes out BY ITSELF the moment a paper
+// enters an accepted state (a reviewer saves decision ACCEPTED, or an admin
+// sets READY_FOR_REGISTRATION / READY_FOR_CAMERA_READY from outside the
+// accepted set). The admin no longer needs to enqueue it manually — that
+// manual bulk-mail flow stays for every other kind of mail.
+//
+// Exactly-once: `submissions.acceptance_mail_sent_at` is claimed with a
+// conditional UPDATE before anything is sent, so two triggers racing (or a
+// double-click) can never produce two mails. Papers accepted BEFORE this
+// feature existed are never mailed retroactively: they never pass through an
+// into-accepted transition again, and nothing iterates old rows.
+//
+// Wording comes from the admin's own mail template: whichever template
+// matches one of the reserved names below (case-insensitive, trimmed) is
+// used, so the acceptance wording stays editable from the existing Mail
+// Templates UI. With no match, the built-in default is sent instead, so an
+// acceptance can never silently produce no mail at all.
+// ------------------------------------------------------------------
+const ACCEPTANCE_TEMPLATE_NAMES = ['acceptance', 'acceptence', 'acceptance letter'];
+
+const DEFAULT_ACCEPTANCE_SUBJECT = "ICAIDIET'26: Acceptance of your paper {submission_code}";
+
+const DEFAULT_ACCEPTANCE_BODY = `Dear {name},
+
+We are pleased to inform you that your paper "{paper_title}" (Submission ID: {submission_code}) has been ACCEPTED for ICAIDIET'26.
+
+Track: {track}
+
+Next steps:
+1. Complete your registration and upload your payment proof from the author portal.
+2. Once your payment is approved, upload the signed Copyright Form and the Camera-Ready manuscript from the author portal.
+
+Congratulations on the acceptance of your paper!
+
+Best regards,
+ICAIDIET'26 Team`;
+
+async function sendAcceptanceMail(env: Bindings, submissionId: string): Promise<void> {
+  // Claim first: the conditional UPDATE only matches while the latch is still
+  // NULL, so exactly one caller can ever win this race.
+  const now = new Date().toISOString();
+  const claim = await env.DB.prepare(
+    `UPDATE submissions SET acceptance_mail_sent_at = ?
+     WHERE id = ? AND acceptance_mail_sent_at IS NULL`
+  ).bind(now, submissionId).run();
+  if (!claim.meta.changes) return;
+
+  let recorded = false;
+  try {
+    const sub = await env.DB.prepare(
+      `SELECT id, submission_code, paper_id, title, track, author_name, author_email,
+              (SELECT decision FROM reviews r WHERE r.submission_id = submissions.id
+               ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
+              (SELECT feedback FROM reviews r WHERE r.submission_id = submissions.id
+               ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback
+       FROM submissions
+       WHERE id = ? AND deleted_at IS NULL`
+    ).bind(submissionId).first() as any;
+    if (!sub) return;
+
+    // Same recipient rules as the admin's bulk enqueue: the primary author,
+    // falling back to the address the submission was made with.
+    const primary = await env.DB.prepare(
+      `SELECT first_name, last_name, email FROM authors
+       WHERE submission_id = ? AND is_primary = 1 LIMIT 1`
+    ).bind(submissionId).first() as any;
+    const recipientEmail = ((primary?.email || '') as string).trim() || ((sub.author_email || '') as string).trim();
+    if (!recipientEmail) return;
+
+    const recipientName =
+      [(primary?.first_name || '').trim(), (primary?.last_name || '').trim()].filter(Boolean).join(' ') ||
+      sub.author_name ||
+      'Author';
+
+    const template = await env.DB.prepare(
+      `SELECT id, subject, body FROM mail_templates
+       WHERE LOWER(TRIM(name)) IN (?, ?, ?)
+       ORDER BY updated_at DESC LIMIT 1`
+    ).bind(ACCEPTANCE_TEMPLATE_NAMES[0], ACCEPTANCE_TEMPLATE_NAMES[1], ACCEPTANCE_TEMPLATE_NAMES[2]).first() as any;
+
+    const placeholders = {
+      recipient_name: recipientName,
+      title: sub.title,
+      track: sub.track,
+      paper_id: sub.paper_id,
+      submission_code: sub.submission_code,
+      review_decision: sub.review_decision,
+      review_feedback: sub.review_feedback,
+    };
+    const subject = renderMailBody(template?.subject || DEFAULT_ACCEPTANCE_SUBJECT, placeholders);
+    const body = renderMailBody(template?.body || DEFAULT_ACCEPTANCE_BODY, placeholders);
+
+    const mailId = crypto.randomUUID();
+    await env.DB.prepare(
+      `INSERT INTO mail_logs
+        (id, submission_id, template_id, recipient_name, recipient_email, paper_title, subject, body, status, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'sending', ?, ?)`
+    ).bind(mailId, sub.id, template?.id || null, recipientName, recipientEmail, sub.title, subject, body, now, now).run();
+    recorded = true;
+
+    // Sent inline rather than through the shared queue so the acceptance mail
+    // goes out immediately instead of waiting for the admin's next paced
+    // process call or the hourly cron. A rate-limited send goes back to
+    // 'queued' and is retried by those same drains.
+    const result = await sendViaResend({ env }, recipientEmail, subject, body);
+    const ts = new Date().toISOString();
+    if (result.ok) {
+      await env.DB.prepare(
+        `UPDATE mail_logs SET status = 'delivered', resend_id = ?, error = NULL, updated_at = ? WHERE id = ?`
+      ).bind(result.id || null, ts, mailId).run();
+    } else if (result.rateLimited) {
+      await env.DB.prepare(
+        `UPDATE mail_logs SET status = 'queued', error = ?, updated_at = ? WHERE id = ?`
+      ).bind(result.error || 'Rate Limit Exceeded', ts, mailId).run();
+    } else {
+      await env.DB.prepare(
+        `UPDATE mail_logs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
+      ).bind(result.error || 'Send failed.', ts, mailId).run();
+    }
+  } catch (err) {
+    console.error('Automatic acceptance mail error:', err);
+  } finally {
+    if (!recorded) {
+      // Nothing reached the mail log (deleted paper, no recipient address, or
+      // a failed insert), so release the latch and let a later transition
+      // retry instead of losing the mail forever.
+      await env.DB.prepare(
+        `UPDATE submissions SET acceptance_mail_sent_at = NULL WHERE id = ?`
+      ).bind(submissionId).run().catch(() => {});
+    }
+  }
 }
 
 // ------------------------------------------------------------------
@@ -1435,7 +1571,7 @@ app.get('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) =
 app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) => {
   try {
     const reviewerId = c.get('reviewerId') as string;
-    const submissionId = c.req.param('id');
+    const submissionId = c.req.param('id') as string;
     const body = await c.req.json().catch(() => null);
     const decision = ((body?.decision || '').toString()).trim().toUpperCase();
     const feedback = ((body?.feedback || '') as string).trim();
@@ -1449,7 +1585,7 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
     }
 
     const existing = await c.env.DB.prepare(
-      `SELECT id FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, status FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!existing) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
@@ -1481,6 +1617,15 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
       ).bind(nextStatus, now, submissionId),
     ];
     await c.env.DB.batch(statements);
+
+    // Automatic acceptance mail: the moment the paper enters an accepted
+    // state, the acceptance mail goes out to the primary author on its own.
+    // Only a transition INTO the accepted set fires it — re-saving an
+    // already-accepted paper does not — and sendAcceptanceMail's latch makes
+    // the send exactly-once even if an admin status change races this save.
+    if (decision === 'ACCEPTED' && !ACCEPTED_STATUSES.has(existing.status)) {
+      c.executionCtx.waitUntil(sendAcceptanceMail(c.env, submissionId));
+    }
 
     return c.json({
       success: true,
@@ -1956,13 +2101,17 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
@@ -2074,8 +2223,9 @@ app.get('/api/admin/submissions/deleted', async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Admin: Stream a submission file (paper or plagiarism report)
-// Requires admin Bearer token. Use ?type=MANUSCRIPT (default) or ?type=PLAGIARISM.
+// Admin: Stream a submission file (paper, plagiarism report or a final-phase file)
+// Requires admin Bearer token. Use ?type=MANUSCRIPT (default), PLAGIARISM,
+// AI_PLAGIARISM, COPYRIGHT_FORM or CAMERA_READY.
 // ------------------------------------------------------------------
 app.get('/api/admin/submissions/:id/file', async (c) => {
   try {
@@ -2091,7 +2241,13 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
     const submissionId = c.req.param('id');
     let docType = (c.req.query('type') || '').toUpperCase();
     if (!docType) docType = 'MANUSCRIPT';
-    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') {
+    if (
+      docType !== 'MANUSCRIPT' &&
+      docType !== 'PLAGIARISM' &&
+      docType !== 'AI_PLAGIARISM' &&
+      docType !== 'COPYRIGHT_FORM' &&
+      docType !== 'CAMERA_READY'
+    ) {
       return c.json({ success: false, error: 'Unsupported file type requested.' }, 400);
     }
 
@@ -2108,6 +2264,10 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
             ? 'No plagiarism report found for this submission.'
             : docType === 'AI_PLAGIARISM'
             ? 'No AI plagiarism report found for this submission.'
+            : docType === 'COPYRIGHT_FORM'
+            ? 'No copyright form found for this submission.'
+            : docType === 'CAMERA_READY'
+            ? 'No camera-ready manuscript found for this submission.'
             : 'No manuscript file found for this submission.',
       }, 404);
     }
@@ -2183,6 +2343,10 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file,
               (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
@@ -2413,6 +2577,181 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
 });
 
 // ------------------------------------------------------------------
+// Author: Final-phase deliverables for accepted papers.
+//
+// Every accepted paper must submit exactly two files: the signed Copyright
+// Form and the Camera-Ready manuscript. Each has its own upload route below;
+// both share the gate + storage helpers here.
+//
+// Deliberately NOT gated on fileEditsAllowed: the "Allow File Edits" switch
+// closes the revision window, which shuts long before the camera-ready phase
+// opens — final files are their own phase with their own deadline. The
+// portal-wide maintenance + approved-email gate (userPortalGate 'edit') does
+// apply, same as every other user-facing write.
+// ------------------------------------------------------------------
+type FinalFileType = 'COPYRIGHT_FORM' | 'CAMERA_READY';
+
+const FINAL_FILE_LABELS: Record<FinalFileType, string> = {
+  COPYRIGHT_FORM: 'copyright form',
+  CAMERA_READY: 'camera-ready manuscript',
+};
+
+// Shared gate for both final-file routes: maintenance + approved list (via
+// userPortalGate 'edit'), ownership of the submission, and "the paper is
+// actually in an accepted state". Returns either the refusal response or ok.
+async function prepareFinalFileUpload(
+  c: Context<AppEnv>,
+  submissionId: string
+): Promise<{ ok: false; res: Response } | { ok: true }> {
+  const settings = await loadSettingsRecord(c.env);
+  const editGate = userPortalGate(settings, c.get('clerkEmail') || '', 'edit');
+  if (editGate) return { ok: false, res: c.json(editGate.body, editGate.status) };
+
+  const clerkUserId = c.get('clerkUserId') as string;
+  const clerkEmail = (c.get('clerkEmail') || '').trim();
+
+  const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+  const submission = await c.env.DB.prepare(
+    `SELECT id, user_id, author_email, status FROM submissions WHERE id = ? AND deleted_at IS NULL`
+  ).bind(submissionId).first() as { id: string; user_id: string; author_email: string; status: string } | null;
+  if (!submission) {
+    return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
+  }
+  const authorized = await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail);
+  if (!authorized) {
+    return { ok: false, res: c.json({ success: false, error: 'You can only upload files for your own submission.' }, 403) };
+  }
+  if (submission.user_id !== userId) {
+    c.executionCtx.waitUntil(
+      c.env.DB.prepare(`UPDATE submissions SET user_id = ? WHERE id = ?`)
+        .bind(userId, submissionId)
+        .run()
+        .catch(() => {})
+    );
+  }
+  if (!ACCEPTED_STATUSES.has(submission.status)) {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error:
+            'Your paper must be in an accepted state before the copyright form and camera-ready manuscript can be uploaded.',
+        },
+        403
+      ),
+    };
+  }
+  return { ok: true };
+}
+
+// Validate + write one final-phase file to R2 and upsert its submission_files
+// row (one row per type per submission, replaced in place on re-upload). A
+// superseded R2 object is deleted best-effort — leaking the old object is
+// preferable to failing the author's upload after the row is committed.
+async function storeFinalFile(
+  c: Context<AppEnv>,
+  submissionId: string,
+  fileType: FinalFileType,
+  file: File | undefined
+): Promise<Response> {
+  const label = FINAL_FILE_LABELS[fileType];
+  if (!file) {
+    return c.json({ success: false, error: `Please attach the ${label} as a PDF file.` }, 400);
+  }
+  const check = validateFile(file);
+  if (!check.ok) {
+    return c.json({ success: false, error: check.reason || 'Invalid file.' }, 400);
+  }
+
+  const prefix = fileType === 'COPYRIGHT_FORM' ? 'COPYRIGHT' : 'CAMERA-READY';
+  const newKey = `submissions/${submissionId}-${prefix}-${sanitizeFilename(file.name)}-${Date.now().toString(36)}`;
+  const now = new Date().toISOString();
+  const mime = file.type || 'application/octet-stream';
+
+  try {
+    const existing = await c.env.DB.prepare(
+      `SELECT id, storage_key FROM submission_files WHERE submission_id = ? AND file_type = ? LIMIT 1`
+    ).bind(submissionId, fileType).first() as { id: string; storage_key: string } | null;
+
+    await c.env.BUCKET.put(newKey, file.stream(), {
+      httpMetadata: { contentType: mime },
+    });
+
+    const statements = existing?.id
+      ? [
+          c.env.DB.prepare(
+            `UPDATE submission_files
+             SET original_filename = ?, storage_key = ?, mime_type = ?, file_size = ?, uploaded_at = ?
+             WHERE id = ?`
+          ).bind(file.name, newKey, mime, file.size, now, existing.id),
+          c.env.DB.prepare(`UPDATE submissions SET updated_at = ? WHERE id = ?`).bind(now, submissionId),
+        ]
+      : [
+          c.env.DB.prepare(
+            `INSERT INTO submission_files
+             (id, submission_id, file_type, original_filename, storage_key, mime_type, file_size, uploaded_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+          ).bind(crypto.randomUUID(), submissionId, fileType, file.name, newKey, mime, file.size, now),
+          c.env.DB.prepare(`UPDATE submissions SET updated_at = ? WHERE id = ?`).bind(now, submissionId),
+        ];
+    await c.env.DB.batch(statements);
+
+    if (existing?.storage_key && existing.storage_key !== newKey) {
+      await c.env.BUCKET.delete(existing.storage_key).catch(() => {});
+    }
+
+    return c.json({
+      success: true,
+      message: `Your ${label} has been uploaded.`,
+      file: { type: fileType, original_filename: file.name, file_size: file.size, uploaded_at: now },
+    });
+  } catch (err) {
+    // The row write never committed, so the previously submitted file (if any)
+    // is still the live one — remove only the object added a moment ago.
+    await c.env.BUCKET.delete(newKey).catch(() => {});
+    console.error('Store final file error:', err);
+    return c.json({ success: false, error: 'Could not save your file. Please try again.' }, 500);
+  }
+}
+
+// Author: Submit the signed Copyright Form (accepted papers only, PDF <=10MB).
+app.post('/api/submissions/:id/copyright-form', requireClerkAuth, async (c) => {
+  try {
+    if (!rateLimit(c, 'final-files', 10, 60000)) {
+      return c.json({ success: false, error: 'Too many upload attempts. Please try again later.' }, 429);
+    }
+    const submissionId = c.req.param('id') as string;
+    const gate = await prepareFinalFileUpload(c, submissionId);
+    if (!gate.ok) return gate.res;
+
+    const formData = await c.req.parseBody();
+    return await storeFinalFile(c, submissionId, 'COPYRIGHT_FORM', formData['file'] as File | undefined);
+  } catch (error) {
+    console.error('Copyright form upload error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// Author: Submit the Camera-Ready manuscript (accepted papers only, PDF <=10MB).
+app.post('/api/submissions/:id/camera-ready', requireClerkAuth, async (c) => {
+  try {
+    if (!rateLimit(c, 'final-files', 10, 60000)) {
+      return c.json({ success: false, error: 'Too many upload attempts. Please try again later.' }, 429);
+    }
+    const submissionId = c.req.param('id') as string;
+    const gate = await prepareFinalFileUpload(c, submissionId);
+    if (!gate.ok) return gate.res;
+
+    const formData = await c.req.parseBody();
+    return await storeFinalFile(c, submissionId, 'CAMERA_READY', formData['file'] as File | undefined);
+  } catch (error) {
+    console.error('Camera-ready upload error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
 // Admin: Soft-delete a submission (requires admin Bearer token)
 // Marks the record as deleted so it moves to the "Deleted Files"
 // tab. It can be recovered or is permanently purged after 30 days
@@ -2516,8 +2855,8 @@ app.post('/api/admin/submissions/:id/status', async (c) => {
       return c.json({ success: false, error: 'Invalid status value.' }, 400);
     }
 
-    const existing = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
-      .bind(submissionId).first();
+    const existing = await c.env.DB.prepare(`SELECT id, status FROM submissions WHERE id = ?`)
+      .bind(submissionId).first() as { id: string; status: string } | null;
     if (!existing) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
     }
@@ -2528,6 +2867,16 @@ app.post('/api/admin/submissions/:id/status', async (c) => {
     ).bind(status, now, submissionId).run();
 
     const updated = result.meta.changes > 0;
+
+    // Automatic acceptance mail, same rule as the reviewer path: only a
+    // transition INTO the accepted set from outside it counts. Moving a
+    // paper between two accepted statuses (or re-saving the same one) does
+    // not send anything, and the latch covers papers whose acceptance mail
+    // already went out.
+    if (updated && ACCEPTED_STATUSES.has(status) && !ACCEPTED_STATUSES.has(existing.status)) {
+      c.executionCtx.waitUntil(sendAcceptanceMail(c.env, submissionId));
+    }
+
     return c.json({
       success: updated,
       message: updated ? 'Submission status updated.' : 'Submission status could not be updated.',
@@ -2999,12 +3348,17 @@ app.post('/api/admin/export', async (c) => {
               s.author_name, s.author_email, s.created_at AS submitted_at, s.updated_at, s.enquired, s.no_corrections,
               s.registration_type, s.author_type, s.fee_amount, s.fee_tier,
               s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.payment_proof_url,
+              s.acceptance_mail_sent_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT status FROM mail_logs l WHERE l.submission_id = s.id ORDER BY l.created_at DESC LIMIT 1) AS mail_status
@@ -4000,7 +4354,7 @@ async function purgeExpiredDeleted(env: Bindings) {
 // ------------------------------------------------------------------
 // Payment proofs are capped tighter than manuscripts: they are phone
 // screenshots, so anything near 10 MB is a camera photo rather than a receipt
-// screenshot, and a smaller ceiling keeps each proof cheap to store and to scan.
+// screenshot, and a smaller ceiling keeps each proof cheap to store.
 const PAYMENT_PROOF_MAX_BYTES = 4 * 1024 * 1024; // 4MB
 const PAYMENT_PROOF_ALLOWED = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf'];
 const PAYMENT_PROOF_EXT = new Set(['.jpg', '.jpeg', '.png', '.webp', '.pdf']);
@@ -4068,17 +4422,6 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
        SET payment_proof_url = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ?
        WHERE id = ?`
     ).bind(storageKey, now, now, submissionId).run();
-
-    // Read the text out of the proof in the background, so the author is not
-    // held waiting on OCR and a slow or failed scan cannot block registration.
-    // The admin's duplicate-payment tab picks the result up when it lands.
-    c.executionCtx.waitUntil(
-      scanProofOcr(c.env, {
-        submissionId: submissionId as string,
-        storageKey,
-        originalFilename: file.name || name,
-      })
-    );
 
     return c.json({ success: true, payment_proof_url: storageKey, payment_status: 'PENDING' });
   } catch (err: any) {
@@ -4240,260 +4583,6 @@ app.get('/api/admin/submissions/:id/payment-proof', async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Admin: Duplicate payment report
-//
-// A declared UTR is self-reported and trivially faked, so the check pairs it
-// with the text OCR read out of the uploaded proof. Two submissions are grouped
-// when they share a UTR, share byte-identical OCR text (the same file uploaded
-// twice), or their OCR texts overlap enough to be the same screenshot after a
-// crop/resize/recompression -- see src/paymentOcr.ts for the thresholds.
-//
-// Only rows that actually have a payment are read: a submission with neither a
-// UTR nor a proof cannot collide with anything.
-// ------------------------------------------------------------------
-const PROOF_OCR_EXCERPT_CHARS = 400;
-
-const truncateExcerpt = (text: string | null | undefined) => {
-  const trimmed = (text || '').replace(/\s+/g, ' ').trim();
-  if (trimmed.length <= PROOF_OCR_EXCERPT_CHARS) return trimmed;
-  return `${trimmed.slice(0, PROOF_OCR_EXCERPT_CHARS)}…`;
-};
-
-app.get('/api/admin/duplicate-payments', async (c) => {
-  try {
-    const token = getBearer(c);
-    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
-    const verified = await verifyToken(c, token);
-    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
-
-    const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.author_name, s.author_email,
-              s.registration_type, s.author_type, s.payment_status, s.utr_transaction_id,
-              s.fee_amount, s.fee_tier, s.payment_submitted_at, s.payment_approved_at,
-              s.payment_proof_url, s.created_at,
-              o.original_filename AS proof_filename,
-              o.ocr_text        AS proof_ocr_text,
-              o.ocr_norm        AS proof_ocr_norm,
-              o.ocr_hash        AS proof_ocr_hash,
-              o.token_count     AS proof_ocr_token_count,
-              o.status          AS proof_ocr_status,
-              o.error           AS proof_ocr_error,
-              o.scanned_at      AS proof_ocr_scanned_at,
-              o.updated_at      AS proof_ocr_updated_at
-       FROM submissions s
-       LEFT JOIN payment_proof_ocr o ON o.submission_id = s.id
-       WHERE s.deleted_at IS NULL
-         AND (s.utr_transaction_id IS NOT NULL AND TRIM(s.utr_transaction_id) <> ''
-              OR s.payment_proof_url IS NOT NULL)
-       ORDER BY s.payment_submitted_at DESC, s.created_at DESC`
-    ).all() as any;
-
-    const rows = (results || []) as any[];
-
-    const groups = findDuplicatePaymentGroups(
-      rows.map((r) => ({
-        id: r.id as string,
-        utr: r.utr_transaction_id as string | null,
-        hash: r.proof_ocr_hash as string | null,
-        normalized: r.proof_ocr_norm as string | null,
-        tokenCount: r.proof_ocr_token_count as number | null,
-      }))
-    );
-
-    // A group can join several submissions; keep them in report order.
-    const order = new Map(rows.map((r, i) => [r.id as string, i]));
-    const groupIds = new Set<string>();
-    groups.forEach((g) => g.submissionIds.forEach((id) => groupIds.add(id)));
-
-    const toEntry = (r: any) => ({
-      id: r.id,
-      paper_id: r.paper_id,
-      submission_code: r.submission_code,
-      title: r.title,
-      author_name: r.author_name,
-      author_email: r.author_email,
-      registration_type: r.registration_type,
-      author_type: r.author_type,
-      payment_status: r.payment_status,
-      utr_transaction_id: r.utr_transaction_id,
-      fee_amount: r.fee_amount,
-      fee_tier: r.fee_tier,
-      payment_submitted_at: r.payment_submitted_at,
-      payment_approved_at: r.payment_approved_at,
-      has_proof: !!r.payment_proof_url,
-      proof_filename: r.proof_filename || null,
-      ocr_status: r.proof_ocr_status || (r.payment_proof_url ? 'PENDING' : 'NONE'),
-      ocr_error: r.proof_ocr_error || null,
-      ocr_scanned_at: r.proof_ocr_scanned_at || null,
-      ocr_excerpt: truncateExcerpt(r.proof_ocr_text),
-    });
-
-    // Proofs the admin still has to act on, surfaced as counts so the tab can
-    // say "3 scans failed" instead of silently under-reporting duplicates.
-    const needsScan = findProofsNeedingScan(rows, groupIds);
-    const needsScanTotal = rows.filter((r) => proofNeedsScan(r)).length;
-
-    return c.json({
-      success: true,
-      summary: {
-        payments_with_reference: rows.length,
-        flagged: groupIds.size,
-        groups: groups.length,
-        ocr_done: rows.filter((r) => r.proof_ocr_status === 'DONE').length,
-        ocr_pending: rows.filter((r) => r.payment_proof_url && !r.proof_ocr_status).length,
-        ocr_failed: rows.filter((r) => r.proof_ocr_status === 'FAILED').length,
-        ocr_empty: rows.filter((r) => r.proof_ocr_status === 'EMPTY').length,
-        needs_scan: needsScanTotal,
-      },
-      // Proofs that still have to be read, minus the ones already rendered
-      // inside a duplicate group. Anything still waiting here is invisible to
-      // the group list by definition -- a payment nobody has scanned cannot be
-      // known to duplicate anything yet -- so it needs its own section or the
-      // admin is never offered the button that would clear it.
-      needs_scan: needsScan.slice(0, 200).map(toEntry),
-      groups: groups.map((g) => ({
-        id: g.id,
-        reasons: g.reasons,
-        entries: g.submissionIds
-          .map((id) => rows.find((r) => r.id === id))
-          .filter(Boolean)
-          .sort((a: any, b: any) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
-          .map(toEntry),
-      })),
-    });
-  } catch (err: any) {
-    console.error('Duplicate payments report error:', err);
-    return c.json({ success: false, error: 'Failed to build the duplicate payment report.' }, 500);
-  }
-});
-
-// ------------------------------------------------------------------
-// Admin: Re-run OCR on a payment proof
-//
-// Used for proofs uploaded before OCR existed, for scans that failed (a
-// transient OCR.space error, or a proof that was too large for the free key),
-// and to pick up a proof whose filename changed.
-// ------------------------------------------------------------------
-app.post('/api/admin/submissions/:id/payment-ocr', async (c) => {
-  try {
-    const token = getBearer(c);
-    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
-    const verified = await verifyToken(c, token);
-    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
-
-    const submissionId = c.req.param('id') as string;
-    const sub = await c.env.DB.prepare(
-      `SELECT id, payment_proof_url FROM submissions WHERE id = ?`
-    ).bind(submissionId).first() as any;
-    if (!sub) return c.json({ success: false, error: 'Submission not found.' }, 404);
-    if (!sub.payment_proof_url) {
-      return c.json({ success: false, error: 'This submission has no payment proof to scan.' }, 400);
-    }
-
-    // Reuse the filename from the previous scan so a rescan reports the same
-    // file the admin clicked on.
-    const prev = await c.env.DB.prepare(
-      `SELECT original_filename FROM payment_proof_ocr WHERE submission_id = ?`
-    ).bind(submissionId).first() as any;
-
-    c.executionCtx.waitUntil(
-      scanProofOcr(c.env, {
-        submissionId,
-        storageKey: sub.payment_proof_url as string,
-        originalFilename: prev?.original_filename || null,
-      })
-    );
-
-    return c.json({ success: true, status: 'PENDING' });
-  } catch (err: any) {
-    console.error('Payment OCR rescan error:', err);
-    return c.json({ success: false, error: 'Failed to start the OCR scan.' }, 500);
-  }
-});
-
-// ------------------------------------------------------------------
-// Admin: Sweep proofs that have never been scanned
-//
-// Migration 0029 starts with an empty table, so every proof uploaded before it
-// has no OCR text and therefore cannot appear in any duplicate group. Those are
-// precisely the established registrations, i.e. the most likely place a reused
-// screenshot is sitting unnoticed. This starts a bounded batch of them.
-//
-// Deliberately NOT limited to the rows the report's `needs_scan` list returns:
-// that list drops proofs already shown in a duplicate group, but a group formed
-// only from a matching UTR still has un-scanned screenshots that the screenshot
-// comparison needs to see.
-//
-// Bounded on purpose. OCR.space's free key allows 500 requests/day per IP, so
-// this fires a small batch per call and the admin sweeps repeatedly rather than
-// launching hundreds of concurrent requests that would exhaust the quota and
-// fail. The caller paces itself between batches.
-// ------------------------------------------------------------------
-app.post('/api/admin/duplicate-payments/scan-missing', async (c) => {
-  try {
-    const token = getBearer(c);
-    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
-    const verified = await verifyToken(c, token);
-    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
-
-    const requested = Number(c.req.query('limit'));
-    const limit = Number.isFinite(requested) ? Math.min(25, Math.max(1, Math.trunc(requested))) : 8;
-    const cutoff = stuckScanCutoff();
-
-    // Same predicate as `proofNeedsScan`, expressed in SQL because the sweep
-    // must not trust the rows it was handed by the client.
-    const NEEDS_SCAN_SQL = `
-      FROM submissions s
-      LEFT JOIN payment_proof_ocr o ON o.submission_id = s.id
-      WHERE s.deleted_at IS NULL
-        AND s.payment_proof_url IS NOT NULL
-        AND (
-              o.submission_id IS NULL
-           OR o.status = 'FAILED'
-           OR (o.status = 'PENDING' AND o.updated_at < ?)
-        )`;
-
-    const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.payment_proof_url, o.original_filename ${NEEDS_SCAN_SQL}
-       ORDER BY s.payment_submitted_at DESC, s.created_at DESC
-       LIMIT ?`
-    )
-      .bind(cutoff, limit)
-      .all() as any;
-
-    const batch = (results || []) as any[];
-
-    const remaining = await c.env.DB.prepare(
-      `SELECT COUNT(*) AS n ${NEEDS_SCAN_SQL}`
-    )
-      .bind(cutoff)
-      .first<{ n: number }>();
-    const outstanding = (remaining?.n ?? 0) - batch.length;
-
-    for (const row of batch) {
-      c.executionCtx.waitUntil(
-        scanProofOcr(c.env, {
-          submissionId: row.id as string,
-          storageKey: row.payment_proof_url as string,
-          originalFilename: row.original_filename || null,
-        })
-      );
-    }
-
-    return c.json({
-      success: true,
-      started: batch.length,
-      // What is still queued after this batch, so the UI can show real progress
-      // instead of guessing how many clicks are left.
-      remaining: Math.max(0, outstanding),
-    });
-  } catch (err: any) {
-    console.error('Duplicate payments sweep error:', err);
-    return c.json({ success: false, error: 'Failed to start the scan sweep.' }, 500);
-  }
-});
-
-// ------------------------------------------------------------------
 // Admin: Approve / Update payment status
 // ------------------------------------------------------------------
 app.post('/api/admin/submissions/:id/payment-status', async (c) => {
@@ -4537,7 +4626,7 @@ async function processMailQueue(env: Bindings) {
 
       if (!queued) break;
 
-      const result = await sendViaResend({ env } as any, queued.recipient_email, queued.subject, queued.body);
+      const result = await sendViaResend({ env }, queued.recipient_email, queued.subject, queued.body);
       
       if (result.ok) {
         await env.DB.prepare(
