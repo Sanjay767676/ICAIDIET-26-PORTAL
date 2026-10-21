@@ -61,6 +61,13 @@ interface Submission {
   payment_status?: string | null;
   payment_approved_at?: string | null;
   payment_submitted_at?: string | null;
+  // Phase 2 (camera-ready + copyright). phase2_submitted_at is what moves the
+  // paper out of the Payments tab and into the Camera Ready tab.
+  camera_ready_file?: string | null;
+  copyright_form_file?: string | null;
+  phase2_submitted_at?: string | null;
+  attendance_mode?: string | null;
+  declaration_confirmed?: number;
 }
 
 interface MailTemplate {
@@ -76,7 +83,7 @@ interface FileView {
   open: boolean;
   url?: string;
   filename?: string;
-  kind?: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment';
+  kind?: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment' | 'camera_ready' | 'copyright';
   error?: string;
 }
 
@@ -88,6 +95,15 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   ACCEPTED: { label: 'Accepted', cls: 'bg-green-100 text-green-800' },
   REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800' },
   REVISION_REQUIRED: { label: 'Revision Required', cls: 'bg-purple-100 text-purple-800' },
+};
+
+// Reviewer-side decisions, shown in the Status column of the Camera Ready tab
+// (per the requirement, that column carries the review status, not payment).
+const PHASE2_REVIEW_META: Record<string, { label: string; cls: string }> = {
+  ACCEPTED: { label: 'Accepted', cls: 'bg-green-100 text-green-800 border-green-300' },
+  ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+  ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+  REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800 border-red-300' },
 };
 
 const STATUS_OPTIONS = ['SUBMITTED', 'UNDER_REVIEW', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
@@ -499,7 +515,11 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
           ? 'ai-plagiarism-report.pdf'
           : file.kind === 'payment'
             ? 'payment-proof.pdf'
-            : 'manuscript.pdf');
+            : file.kind === 'camera_ready'
+              ? 'camera-ready.pdf'
+              : file.kind === 'copyright'
+                ? 'copyright-form.pdf'
+                : 'manuscript.pdf');
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -524,7 +544,11 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
                     ? 'AI Plagiarism Report'
                     : file.kind === 'payment'
                       ? 'Payment Proof'
-                      : 'Manuscript')}
+                      : file.kind === 'camera_ready'
+                        ? 'Camera-Ready Manuscript'
+                        : file.kind === 'copyright'
+                          ? 'Copyright Form'
+                          : 'Manuscript')}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -2248,7 +2272,7 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'cameraReady' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [paymentViewMode, setPaymentViewMode] = useState<'list' | 'dashboard'>('list');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
@@ -2289,6 +2313,9 @@ export default function App() {
   const [mtReviewEnabled, setMtReviewEnabled] = useState<boolean>(false);
   const [mtReviewUntil, setMtReviewUntil] = useState<string>('');
   const [fileEditsEnabled, setFileEditsEnabled] = useState<boolean>(true);
+  // Phase 2 (camera-ready + copyright) open switch. Defaults to OFF; an absent
+  // setting key also reads as OFF everywhere (see phase2 gate in the backend).
+  const [phase2Enabled, setPhase2Enabled] = useState<boolean>(false);
   // Addresses allowed to submit/edit while paper acceptance is OFF. Only
   // meaningful in that state -- see userPortalGate in backend/src/index.ts.
   const [approvedMailEnabled, setApprovedMailEnabled] = useState<boolean>(false);
@@ -2406,6 +2433,8 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setMtReviewUntil(s.maintenance_review_until || '');
         // Absent key means allowed; see fileEditsAllowed in backend/src/index.ts.
         setFileEditsEnabled(s.file_edits_enabled !== 'false');
+        // Absent key means OFF — Phase 2 stays closed until switched on.
+        setPhase2Enabled(s.phase2_enabled === 'true');
 setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
           setApprovedMailIds(s.approved_mail_ids || '');
           // The server's canonical copy, kept apart from the textarea so the
@@ -2440,6 +2469,7 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
           maintenance_review_enabled: mtReviewEnabled,
           maintenance_review_until: mtReviewUntil,
           file_edits_enabled: fileEditsEnabled,
+          phase2_enabled: phase2Enabled,
           registration_config: registrationConfig,
         })
       });
@@ -2813,7 +2843,7 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
   // poll effect below re-creates it whenever activeTab changes, and this
   // component already opts out of exhaustive-deps for these fetches.
   const refreshActiveTab = async (opts?: { silent?: boolean }) => {
-    if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates', 'payments'].includes(activeTab)) {
+    if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates', 'payments', 'cameraReady'].includes(activeTab)) {
       await fetchSubmissions(opts);
     } else if (activeTab === 'deleted') {
       await fetchDeletedSubmissions(opts);
@@ -2881,9 +2911,17 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeTab]);
 
-  const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => {
+  const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment' | 'camera_ready' | 'copyright', filename: string) => {
     const type =
-      kind === 'plagiarism' ? 'PLAGIARISM' : kind === 'ai_plagiarism' ? 'AI_PLAGIARISM' : 'MANUSCRIPT';
+      kind === 'plagiarism'
+        ? 'PLAGIARISM'
+        : kind === 'ai_plagiarism'
+        ? 'AI_PLAGIARISM'
+        : kind === 'camera_ready'
+        ? 'CAMERA_READY'
+        : kind === 'copyright'
+        ? 'COPYRIGHT_FORM'
+        : 'MANUSCRIPT';
     setPdfView({
       open: true,
       url:
@@ -2990,6 +3028,10 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
     const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES' && s.payment_status !== 'APPROVED');
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
     const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED');
+    // The Camera Ready tab holds exactly the papers that have submitted the
+    // Phase 2 package — once phase2_submitted_at is set the paper leaves the
+    // Payments tab (above) and appears here.
+    const cameraReadySubmissionsList = submissions.filter(s => !!s.phase2_submitted_at);
     const acceptedSubmissionsList = submissions.filter(s => (s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY') && s.payment_status !== 'APPROVED');
 
     const applyFilters = (list: Submission[]) =>
@@ -3022,6 +3064,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     const filteredMinor = masterApply(minorSubmissionsList, submissions);
     const filteredMajor = masterApply(majorSubmissionsList, submissions);
     const filteredPayments = masterApply(paymentsSubmissionsList);
+    const filteredCameraReady = masterApply(cameraReadySubmissionsList);
     
     const paymentDates = Array.from(new Set(paymentsSubmissionsList.map(s => {
       if (!s.payment_submitted_at) return '';
@@ -3178,6 +3221,17 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   {paymentsSubmissionsList.length > 0 && (
                     <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'payments' ? 'bg-green-500 text-white' : 'bg-green-600 text-white'}`}>
                       {paymentsSubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => changeTab('cameraReady')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'cameraReady' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Camera Ready
+                  {cameraReadySubmissionsList.length > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'cameraReady' ? 'bg-purple-500 text-white' : 'bg-purple-600 text-white'}`}>
+                      {cameraReadySubmissionsList.length}
                     </span>
                   )}
                 </button>
@@ -3394,6 +3448,199 @@ Duplicates
                 mailSending={mailSending}
               />
             )}
+          </div>
+        )}
+
+        {/* Camera Ready tab: papers whose authors submitted the Phase 2
+            package (camera-ready + copyright + attendance + declaration).
+            Columns per spec: paper title | primary author with phone+email |
+            submitted on | actions (view camera ready / view copyright) |
+            Status (reviewer-side decision) | view info. */}
+        {activeTab === 'cameraReady' && (
+          <div className="space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="min-w-0">
+                <h3 className="font-serif text-xl font-bold">Camera Ready</h3>
+                <p className="text-xs text-brand-text/60 mt-1">
+                  Papers that submitted the Phase 2 package. A paper leaves the Payments tab and appears
+                  here once its author submits.
+                </p>
+              </div>
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Search title, author, paper ID..."
+                className="w-full sm:w-72 px-3 py-2 rounded-lg border border-brand-text/20 text-sm focus:outline-none focus:ring-2 focus:ring-brand-accent"
+              />
+            </div>
+
+            {error && (
+              <div className="bg-red-50 text-red-600 p-4 rounded-xl border border-red-200 text-sm flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" /> Error loading submissions: {error}
+              </div>
+            )}
+
+            {/* Desktop table */}
+            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent overflow-hidden">
+              <table className="w-full">
+                <thead>
+                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[26%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[22%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[12%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[17%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[13%]">Status</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Info</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-text/10">
+                  {loading && (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-sm text-brand-text/60 flex items-center justify-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" /> Loading submissions...
+                      </td>
+                    </tr>
+                  )}
+                  {!loading && filteredCameraReady.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="py-10 text-center text-sm text-brand-text/60">
+                        {cameraReadySubmissionsList.length === 0
+                          ? 'No Phase 2 submissions yet. Papers appear here once their authors submit the camera-ready package.'
+                          : 'No submissions match your search.'}
+                      </td>
+                    </tr>
+                  )}
+                  {!loading &&
+                    filteredCameraReady.map((s) => {
+                      const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
+                      const decision = s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null;
+                      const statusFallback = STATUS_META[s.status];
+                      return (
+                        <tr key={s.id} className="hover:bg-brand-bg/30">
+                          <td className="py-4 px-5 text-sm align-top">
+                            <div className="font-semibold text-brand-text line-clamp-2">{s.title}</div>
+                            <div className="text-xs text-brand-text/50 mt-0.5 font-mono">{s.paper_id || s.submission_code}</div>
+                          </td>
+                          <td className="py-4 px-5 text-sm align-top">
+                            <div className="font-medium text-brand-text">
+                              {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : '—')}
+                            </div>
+                            {primary?.phone && <div className="text-xs text-brand-text/60">{primary.phone}</div>}
+                            <div className="text-xs text-brand-text/60">{primary?.email || s.author_email}</div>
+                          </td>
+                          <td className="py-4 px-5 text-sm text-brand-text/70 align-top">
+                            {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
+                          </td>
+                          <td className="py-4 px-5 align-top">
+                            <div className="flex flex-wrap gap-1.5">
+                              <button
+                                onClick={() => openPdf(s.id, 'camera_ready', s.camera_ready_file || 'camera-ready.pdf')}
+                                disabled={!s.camera_ready_file}
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-brand-text text-white hover:bg-brand-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              >
+                                View Camera Ready
+                              </button>
+                              <button
+                                onClick={() => openPdf(s.id, 'copyright', s.copyright_form_file || 'copyright-form.pdf')}
+                                disabled={!s.copyright_form_file}
+                                className="px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-brand-text text-white hover:bg-brand-accent disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                              >
+                                View Copyright
+                              </button>
+                            </div>
+                          </td>
+                          <td className="py-4 px-5 align-top">
+                            {decision ? (
+                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${decision.cls}`}>
+                                {decision.label}
+                              </span>
+                            ) : statusFallback ? (
+                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold ${statusFallback.cls}`}>
+                                {statusFallback.label}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-brand-text/50">—</span>
+                            )}
+                          </td>
+                          <td className="py-4 px-5 align-top">
+                            <button
+                              onClick={() => setMoreInfoTarget(s)}
+                              className="px-2.5 py-1.5 rounded-lg text-xs font-semibold border border-brand-text/20 text-brand-text hover:bg-brand-bg transition-colors"
+                            >
+                              View Info
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="lg:hidden space-y-3">
+              {loading && (
+                <div className="bg-white rounded-xl p-6 text-center text-sm text-brand-text/60 flex items-center justify-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading submissions...
+                </div>
+              )}
+              {!loading && filteredCameraReady.length === 0 && (
+                <div className="bg-white rounded-xl p-6 text-center text-sm text-brand-text/60">
+                  {cameraReadySubmissionsList.length === 0
+                    ? 'No Phase 2 submissions yet.'
+                    : 'No submissions match your search.'}
+                </div>
+              )}
+              {!loading &&
+                filteredCameraReady.map((s) => {
+                  const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
+                  const decision = s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null;
+                  const statusFallback = STATUS_META[s.status];
+                  return (
+                    <div key={s.id} className="bg-white rounded-xl p-4 shadow-sm border border-brand-text/10 space-y-2">
+                      <div className="font-semibold text-brand-text">{s.title}</div>
+                      <div className="text-sm">
+                        <span className="text-brand-text/60">Primary Author: </span>
+                        {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : '—')}
+                        <div className="text-xs text-brand-text/60">
+                          {[primary?.phone, primary?.email || s.author_email].filter(Boolean).join(' • ')}
+                        </div>
+                      </div>
+                      <div className="text-xs text-brand-text/60">
+                        Submitted: {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <button
+                          onClick={() => openPdf(s.id, 'camera_ready', s.camera_ready_file || 'camera-ready.pdf')}
+                          disabled={!s.camera_ready_file}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-text text-white disabled:opacity-40"
+                        >
+                          Camera Ready
+                        </button>
+                        <button
+                          onClick={() => openPdf(s.id, 'copyright', s.copyright_form_file || 'copyright-form.pdf')}
+                          disabled={!s.copyright_form_file}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-text text-white disabled:opacity-40"
+                        >
+                          Copyright
+                        </button>
+                        <button
+                          onClick={() => setMoreInfoTarget(s)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-brand-text/20 text-brand-text"
+                        >
+                          View Info
+                        </button>
+                        {decision && (
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${decision.cls}`}>
+                            {decision.label}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
           </div>
         )}
 
@@ -3805,6 +4052,49 @@ Duplicates
                   </div>
                 </div>
 
+                {/* 3b. Phase 2 (Camera Ready & Copyright) — OFF by default */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="flex items-center justify-between gap-4 px-5 py-4">
+                    <div>
+                      <h4 className="font-semibold text-brand-text">Phase 2 &mdash; Camera Ready &amp; Copyright</h4>
+                      <p className="text-sm text-brand-text/60 mt-1">
+                        When on, authors of accepted papers whose payment is approved see a
+                        &quot;Move to Phase 2&quot; button and can submit their camera-ready manuscript, the
+                        signed copyright form, their mode of attending, and the declaration. Submitted papers
+                        move from the Payments tab to the Camera Ready tab. Off by default.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setPhase2Enabled(!phase2Enabled)}
+                      disabled={savingSettings}
+                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${phase2Enabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
+                      role="switch"
+                      aria-checked={phase2Enabled}
+                    >
+                      <span className="sr-only">Toggle Phase 2 submissions</span>
+                      <span
+                        aria-hidden="true"
+                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${phase2Enabled ? 'translate-x-5' : 'translate-x-0'}`}
+                      />
+                    </button>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
+                    <span
+                      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
+                        phase2Enabled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}
+                    >
+                      <span className={`w-1.5 h-1.5 rounded-full ${phase2Enabled ? 'bg-green-600' : 'bg-red-600'}`} />
+                      {phase2Enabled ? 'Phase 2 open' : 'Phase 2 closed'}
+                    </span>
+                    <span className="text-xs text-brand-text/50">
+                      {phase2Enabled
+                        ? 'Eligible authors see the "Move to Phase 2" button in the user portal.'
+                        : 'The "Move to Phase 2" button is hidden and the Phase 2 submit endpoint refuses requests.'}
+                    </span>
+                  </div>
+                </div>
+
                 {/* 4. User Portal Maintenance */}
                 <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
                   <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
@@ -3959,7 +4249,7 @@ Duplicates
                           value={templateDraft.body}
                           onChange={(v) => setTemplateDraft(d => (d ? { ...d, body: v } : d))}
                           placeholder={'Dear {name},\n\nYour paper "{paper_title}" has been...'}
-                          help="Formatting buttons and Ctrl+B / Ctrl+I / Ctrl+U insert HTML tags, so emails arrive bold and underlined without typing any markup."
+                          help="Formatting buttons and Ctrl+B / Ctrl+I / Ctrl+U / Ctrl+K insert tags like <b> and <link> (e.g. <link>https://icaidiet.tech</link>), which automatically render as bold text, italics, or clickable links."
                         />
                         <div className="flex items-center gap-2">
                           <button

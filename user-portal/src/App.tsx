@@ -5,8 +5,9 @@ import { MainLayout } from './components/layout/MainLayout';
 import { HeroSection } from './components/portal/HeroSection';
 import { SubmissionWizard } from './components/portal/SubmissionWizard';
 import { MySubmissions, RegistrationConfig } from './components/portal/MySubmissions';
+import { Phase2Page } from './components/portal/Phase2Page';
 
-type ViewState = 'home' | 'wizard' | 'submissions';
+type ViewState = 'home' | 'wizard' | 'submissions' | 'phase2';
 
 function SignInRequired({ title, message }: { title: string; message: string }) {
   return (
@@ -81,6 +82,14 @@ export default function App() {
   // Admins can close file replacement independently of maintenance. Absent key
   // means allowed, matching fileEditsAllowed in backend/src/index.ts.
   const [fileEditsEnabled, setFileEditsEnabled] = useState<boolean>(true);
+  // Admin "Phase 2" switch. Absent setting reads as OFF, so the Move to Phase 2
+  // button stays hidden until it is explicitly turned on.
+  const [phase2Enabled, setPhase2Enabled] = useState<boolean>(false);
+  // Which submission the Phase 2 page is opened for. The portal has no URL
+  // routing — views are in-memory state — so this can only be set by clicking
+  // Move to Phase 2 on one of the author's own submissions; the backend
+  // status endpoint re-checks ownership regardless.
+  const [phase2SubmissionId, setPhase2SubmissionId] = useState<string>('');
   // Whether this signed-in author may create a submission, as decided by the
   // same gate that POST /api/submissions runs. The approved-email list is
   // redacted from /api/settings, so this cannot be worked out client-side.
@@ -113,6 +122,7 @@ export default function App() {
           // request itself failed.
           if (data.registration) setRegistration(data.registration);
           setFileEditsEnabled(s.file_edits_enabled !== 'false');
+          setPhase2Enabled(s.phase2_enabled === 'true');
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -182,7 +192,7 @@ export default function App() {
 
   return (
     <>
-      <MainLayout view={currentView} onNavigate={navigate} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil}>
+      <MainLayout view={currentView === 'phase2' ? 'submissions' : currentView} onNavigate={navigate} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil}>
         {currentView === 'home' && (
           <HeroSection onStart={() => navigate('wizard')} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil} />
         )}
@@ -237,6 +247,33 @@ export default function App() {
               maintenanceUntil={maintenanceUntil}               registrationOpen={registrationOpen}
               registration={registration}
               fileEditsEnabled={fileEditsEnabled}
+              phase2Enabled={phase2Enabled}
+              onPhase2={(id) => {
+                setPhase2SubmissionId(id);
+                navigate('phase2');
+              }}
+            />
+          </Show>
+        )}
+
+        {/* Phase 2 (camera-ready + copyright) page. Signed-in guard here; the
+            server-side ownership + eligibility check on the status endpoint is
+            the real protection — a foreign or tampered submission id renders
+            the Not Available state, never another author's data. */}
+        {currentView === 'phase2' && (
+          <Show
+            when="signed-in"
+            fallback={
+              <SignInRequired
+                title="Sign In Required"
+                message="Please sign in to access the Phase 2 submission page."
+              />
+            }
+          >
+            <Phase2Page
+              submissionId={phase2SubmissionId}
+              getToken={getToken}
+              onBack={() => navigate('submissions')}
             />
           </Show>
         )}

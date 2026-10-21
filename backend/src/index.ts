@@ -6,6 +6,7 @@ type Bindings = {
   DB: D1Database;
   BUCKET: R2Bucket;
   PROOF_BUCKET: R2Bucket;
+  PHASE2_BUCKET: R2Bucket;
   AUTH_SECRET: string;
   CLERK_SECRET_KEY: string;
   RESEND_API_KEY?: string;
@@ -498,10 +499,51 @@ function renderMailBody(text: string, sub: any): string {
   return out;
 }
 
-// Convert a template body written with simple HTML (e.g. <b>, <br>, <p>)
+// Convert <link>...</link> or <link href="...">...</link> custom tags into
+// clickable HTML anchor tags. Automatically adds https:// if protocol is missing.
+function convertLinksToAnchor(text: string): string {
+  // 1. Handle <link href="url">label</link>
+  let converted = (text || '').replace(
+    /<link\s+href=["']([^"']+)["']\s*>([\s\S]*?)<\/link>/gi,
+    (_, href, label) => {
+      let target = (href || '').trim();
+      const inner = (label || '').trim();
+      if (!target) return inner;
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target)) {
+        target = `https://${target}`;
+      }
+      return `<a href="${target}" style="color:#2563eb;text-decoration:underline;" target="_blank" rel="noopener noreferrer">${inner || target}</a>`;
+    }
+  );
+
+  // 2. Handle <link>url_or_label</link>
+  converted = converted.replace(
+    /<link>([\s\S]*?)<\/link>/gi,
+    (_, raw) => {
+      const trimmed = (raw || '').trim();
+      if (!trimmed) return '';
+      let target = trimmed;
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(target)) {
+        target = `https://${target}`;
+      }
+      return `<a href="${target}" style="color:#2563eb;text-decoration:underline;" target="_blank" rel="noopener noreferrer">${trimmed}</a>`;
+    }
+  );
+
+  return converted;
+}
+
+// Convert a template body written with simple HTML (e.g. <b>, <br>, <p>, <link>)
 // into readable plain text so non-HTML clients still get sensible content.
 function mailHtmlToText(html: string): string {
   return (html || '')
+    .replace(/<link\s+href=["']([^"']+)["']\s*>([\s\S]*?)<\/link>/gi, (_match, href, label) => {
+      const h = (href || '').trim();
+      const l = (label || '').trim();
+      return l === h ? l : `${l} (${h})`;
+    })
+    .replace(/<link>([\s\S]*?)<\/link>/gi, '$1')
+    .replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, '$2 ($1)')
     .replace(/<br\s*\/?\s*>/gi, '\n')
     .replace(/<\/p>/gi, '\n\n')
     .replace(/<[^>]+>/g, '')
@@ -510,9 +552,10 @@ function mailHtmlToText(html: string): string {
 }
 
 // Wrap a template body into a minimal HTML document for Resend. Templates
-// may use tags like <b>, <i>, <u>, <br>, <p>; bare line breaks are kept.
+// may use tags like <b>, <i>, <u>, <link>, <br>, <p>; bare line breaks are kept.
 function mailHtmlBody(text: string): string {
-  const content = (text || '').replace(/\n/g, '<br/>');
+  const withLinks = convertLinksToAnchor(text || '');
+  const content = withLinks.replace(/\n/g, '<br/>');
   return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.6;color:#1a1a1a">${content}</div>`;
 }
 
@@ -1413,13 +1456,17 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
     const reviewerId = c.get('reviewerId') as string;
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.phase2_submitted_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
               (SELECT original_filename FROM submission_files
-               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file
        FROM submissions s
        WHERE s.deleted_at IS NULL
        ORDER BY s.created_at DESC`
@@ -1485,7 +1532,8 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Reviewer: Stream a submission file (paper or plagiarism report).
+// Reviewer: Stream a submission file (paper, plagiarism report, or the
+// Phase 2 camera-ready / copyright deliverables).
 // Requires reviewer Bearer token.
 // ------------------------------------------------------------------
 app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => {
@@ -1493,7 +1541,13 @@ app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => 
     const submissionId = c.req.param('id');
     let docType = (c.req.query('type') || '').toUpperCase();
     if (!docType) docType = 'MANUSCRIPT';
-    if (docType !== 'PLAGIARISM' && docType !== 'AI_PLAGIARISM' && docType !== 'MANUSCRIPT') {
+    if (
+      docType !== 'PLAGIARISM' &&
+      docType !== 'AI_PLAGIARISM' &&
+      docType !== 'MANUSCRIPT' &&
+      docType !== 'CAMERA_READY' &&
+      docType !== 'COPYRIGHT_FORM'
+    ) {
       return c.json({ success: false, error: 'Unsupported file type requested.' }, 400);
     }
 
@@ -1510,6 +1564,10 @@ app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => 
             ? 'No plagiarism report found for this submission.'
             : docType === 'AI_PLAGIARISM'
             ? 'No AI plagiarism report found for this submission.'
+            : docType === 'CAMERA_READY'
+            ? 'No camera-ready file found for this submission.'
+            : docType === 'COPYRIGHT_FORM'
+            ? 'No copyright form found for this submission.'
             : 'No manuscript file found for this submission.',
       }, 404);
     }
@@ -2102,6 +2160,7 @@ app.get('/api/admin/submissions', async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at,
+              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2337,6 +2396,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
+              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2577,17 +2637,23 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
 });
 
 // ------------------------------------------------------------------
-// Author: Final-phase deliverables for accepted papers.
+// Author: Phase 2 — camera-ready + copyright submission.
 //
-// Every accepted paper must submit exactly two files: the signed Copyright
-// Form and the Camera-Ready manuscript. Each has its own upload route below;
-// both share the gate + storage helpers here.
+// Once a paper is accepted AND its registration payment is approved, the
+// author submits everything in ONE request on the Phase 2 page: Mode of
+// Attending, the Camera-Ready manuscript, the signed Copyright Form, and the
+// compulsory declaration. phase2_submitted_at is what moves the paper into
+// the admin's Camera Ready tab (out of Payments).
 //
-// Deliberately NOT gated on fileEditsAllowed: the "Allow File Edits" switch
-// closes the revision window, which shuts long before the camera-ready phase
-// opens — final files are their own phase with their own deadline. The
-// portal-wide maintenance + approved-email gate (userPortalGate 'edit') does
-// apply, same as every other user-facing write.
+// Open/closed is controlled by the admin "phase2_enabled" setting (absent ==
+// OFF), so the whole flow ships inert. Deliberately NOT gated on
+// fileEditsAllowed: the "Allow File Edits" switch closes the revision window,
+// which shuts long before the camera-ready phase opens — Phase 2 is its own
+// phase with its own deadline. The portal-wide maintenance + approved-email
+// gate (userPortalGate 'edit') does apply, same as every other user write.
+//
+// The downloadable template PDFs (camera-ready template + copyright form)
+// live in their own R2 bucket (PHASE2_BUCKET, bucket "Phase2").
 // ------------------------------------------------------------------
 type FinalFileType = 'COPYRIGHT_FORM' | 'CAMERA_READY';
 
@@ -2596,14 +2662,33 @@ const FINAL_FILE_LABELS: Record<FinalFileType, string> = {
   CAMERA_READY: 'camera-ready manuscript',
 };
 
-// Shared gate for both final-file routes: maintenance + approved list (via
-// userPortalGate 'edit'), ownership of the submission, and "the paper is
-// actually in an accepted state". Returns either the refusal response or ok.
-async function prepareFinalFileUpload(
+// Template kinds served from PHASE2_BUCKET -> object keys inside the bucket.
+const PHASE2_TEMPLATE_KEYS: Record<string, string> = {
+  'camera-ready': 'templates/camera-ready-template.pdf',
+  copyright: 'templates/copyright-form-template.pdf',
+};
+
+// Attendance modes for the Phase 2 form (both compulsory to record).
+const PHASE2_ATTENDANCE_MODES = new Set(['ONLINE', 'OFFLINE']);
+
+// Shared gate for the Phase 2 submit: maintenance + approved list (via
+// userPortalGate 'edit'), the phase2_enabled switch, ownership of the
+// submission, "the paper is actually in an accepted state", and an approved
+// registration payment. Returns either the refusal response or ok.
+async function preparePhase2Submission(
   c: Context<AppEnv>,
   submissionId: string
 ): Promise<{ ok: false; res: Response } | { ok: true }> {
   const settings = await loadSettingsRecord(c.env);
+  if (settings['phase2_enabled'] !== 'true') {
+    return {
+      ok: false,
+      res: c.json(
+        { success: false, error: 'The Phase 2 (camera-ready) window is not open yet.', phase2_open: false },
+        403
+      ),
+    };
+  }
   const editGate = userPortalGate(settings, c.get('clerkEmail') || '', 'edit');
   if (editGate) return { ok: false, res: c.json(editGate.body, editGate.status) };
 
@@ -2612,8 +2697,8 @@ async function prepareFinalFileUpload(
 
   const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
   const submission = await c.env.DB.prepare(
-    `SELECT id, user_id, author_email, status FROM submissions WHERE id = ? AND deleted_at IS NULL`
-  ).bind(submissionId).first() as { id: string; user_id: string; author_email: string; status: string } | null;
+    `SELECT id, user_id, author_email, status, payment_status FROM submissions WHERE id = ? AND deleted_at IS NULL`
+  ).bind(submissionId).first() as { id: string; user_id: string; author_email: string; status: string; payment_status: string | null } | null;
   if (!submission) {
     return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
   }
@@ -2636,7 +2721,20 @@ async function prepareFinalFileUpload(
         {
           success: false,
           error:
-            'Your paper must be in an accepted state before the copyright form and camera-ready manuscript can be uploaded.',
+            'Your paper must be in an accepted state before Phase 2 (camera-ready + copyright) can be submitted.',
+        },
+        403
+      ),
+    };
+  }
+  if (submission.payment_status !== 'APPROVED') {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error: 'Your registration payment must be approved before Phase 2 can be submitted.',
+          payment_approved: false,
         },
         403
       ),
@@ -2645,23 +2743,28 @@ async function prepareFinalFileUpload(
   return { ok: true };
 }
 
-// Validate + write one final-phase file to R2 and upsert its submission_files
+// Validate + write one Phase 2 file to R2 and upsert its submission_files
 // row (one row per type per submission, replaced in place on re-upload). A
 // superseded R2 object is deleted best-effort — leaking the old object is
 // preferable to failing the author's upload after the row is committed.
+// Returns a result object (not a Response) so the combined Phase 2 submit
+// route can store both files before answering.
 async function storeFinalFile(
   c: Context<AppEnv>,
   submissionId: string,
   fileType: FinalFileType,
   file: File | undefined
-): Promise<Response> {
+): Promise<
+  | { ok: true; file: { type: FinalFileType; original_filename: string; file_size: number; uploaded_at: string } }
+  | { ok: false; res: Response }
+> {
   const label = FINAL_FILE_LABELS[fileType];
   if (!file) {
-    return c.json({ success: false, error: `Please attach the ${label} as a PDF file.` }, 400);
+    return { ok: false, res: c.json({ success: false, error: `Please attach the ${label} as a PDF file.` }, 400) };
   }
   const check = validateFile(file);
   if (!check.ok) {
-    return c.json({ success: false, error: check.reason || 'Invalid file.' }, 400);
+    return { ok: false, res: c.json({ success: false, error: check.reason || 'Invalid file.' }, 400) };
   }
 
   const prefix = fileType === 'COPYRIGHT_FORM' ? 'COPYRIGHT' : 'CAMERA-READY';
@@ -2701,53 +2804,200 @@ async function storeFinalFile(
       await c.env.BUCKET.delete(existing.storage_key).catch(() => {});
     }
 
-    return c.json({
-      success: true,
-      message: `Your ${label} has been uploaded.`,
+    return {
+      ok: true,
       file: { type: fileType, original_filename: file.name, file_size: file.size, uploaded_at: now },
-    });
+    };
   } catch (err) {
     // The row write never committed, so the previously submitted file (if any)
     // is still the live one — remove only the object added a moment ago.
     await c.env.BUCKET.delete(newKey).catch(() => {});
     console.error('Store final file error:', err);
-    return c.json({ success: false, error: 'Could not save your file. Please try again.' }, 500);
+    return { ok: false, res: c.json({ success: false, error: 'Could not save your file. Please try again.' }, 500) };
   }
 }
 
-// Author: Submit the signed Copyright Form (accepted papers only, PDF <=10MB).
-app.post('/api/submissions/:id/copyright-form', requireClerkAuth, async (c) => {
+// Author: Phase 2 status for one submission — eligibility + what has been
+// submitted so far. Ownership-gated: a hand-edited submission id must not
+// expose another author's Phase 2 state (this is what protects the Phase 2
+// page itself, since the portal renders it from this data).
+app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
   try {
-    if (!rateLimit(c, 'final-files', 10, 60000)) {
-      return c.json({ success: false, error: 'Too many upload attempts. Please try again later.' }, 429);
-    }
     const submissionId = c.req.param('id') as string;
-    const gate = await prepareFinalFileUpload(c, submissionId);
-    if (!gate.ok) return gate.res;
+    const clerkUserId = c.get('clerkUserId') as string;
+    const clerkEmail = (c.get('clerkEmail') || '').trim();
 
-    const formData = await c.req.parseBody();
-    return await storeFinalFile(c, submissionId, 'COPYRIGHT_FORM', formData['file'] as File | undefined);
+    const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+    const submission = await c.env.DB.prepare(
+      `SELECT s.id, s.user_id, s.author_email, s.status, s.payment_status,
+              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file
+       FROM submissions s WHERE s.id = ? AND s.deleted_at IS NULL`
+    ).bind(submissionId).first() as {
+      id: string; user_id: string; author_email: string; status: string; payment_status: string | null;
+      phase2_submitted_at: string | null; attendance_mode: string | null; declaration_confirmed: number;
+      camera_ready_file: string | null; copyright_form_file: string | null;
+    } | null;
+    if (!submission) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+    const authorized = await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail);
+    if (!authorized) {
+      return c.json({ success: false, error: 'You can only view Phase 2 for your own submission.' }, 403);
+    }
+
+    const settings = await loadSettingsRecord(c.env);
+    const phase2Open = settings['phase2_enabled'] === 'true';
+    const accepted = ACCEPTED_STATUSES.has(submission.status);
+    const paymentApproved = submission.payment_status === 'APPROVED';
+    const eligible = phase2Open && accepted && paymentApproved;
+    const reason = !phase2Open
+      ? 'The Phase 2 (camera-ready) window is not open yet.'
+      : !accepted
+      ? 'Your paper must be in an accepted state before Phase 2 can be submitted.'
+      : !paymentApproved
+      ? 'Your registration payment must be approved before Phase 2 can be submitted.'
+      : null;
+
+    return c.json({
+      success: true,
+      phase2_open: phase2Open,
+      eligible,
+      reason,
+      submitted: !!submission.phase2_submitted_at,
+      phase2: submission.phase2_submitted_at
+        ? {
+            submitted_at: submission.phase2_submitted_at,
+            attendance_mode: submission.attendance_mode,
+            declaration_confirmed: !!submission.declaration_confirmed,
+            camera_ready_file: submission.camera_ready_file || null,
+            copyright_form_file: submission.copyright_form_file || null,
+          }
+        : null,
+    });
   } catch (error) {
-    console.error('Copyright form upload error:', error);
+    console.error('Phase 2 status error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
 
-// Author: Submit the Camera-Ready manuscript (accepted papers only, PDF <=10MB).
-app.post('/api/submissions/:id/camera-ready', requireClerkAuth, async (c) => {
+// Author: Submit the whole Phase 2 package in one request — Mode of
+// Attending, Camera-Ready manuscript, signed Copyright Form, and the
+// compulsory declaration. Everything is validated before anything is stored,
+// and phase2_submitted_at (which moves the paper into the admin's Camera
+// Ready tab) is only set once both files AND the attendance/declaration
+// record are saved. Re-submitting later replaces both files in place and
+// refreshes the submitted timestamp.
+app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
   try {
-    if (!rateLimit(c, 'final-files', 10, 60000)) {
+    if (!rateLimit(c, 'phase2-submit', 5, 60000)) {
       return c.json({ success: false, error: 'Too many upload attempts. Please try again later.' }, 429);
     }
     const submissionId = c.req.param('id') as string;
-    const gate = await prepareFinalFileUpload(c, submissionId);
+    const gate = await preparePhase2Submission(c, submissionId);
     if (!gate.ok) return gate.res;
 
     const formData = await c.req.parseBody();
-    return await storeFinalFile(c, submissionId, 'CAMERA_READY', formData['file'] as File | undefined);
+
+    const attendance = String(formData['attendance_mode'] || '').trim().toUpperCase();
+    if (!PHASE2_ATTENDANCE_MODES.has(attendance)) {
+      return c.json({ success: false, error: 'Please select whether you will attend Online or Offline.' }, 400);
+    }
+
+    const declared = formData['declaration'];
+    if (declared !== 'true' && declared !== '1' && declared !== 'on') {
+      return c.json(
+        {
+          success: false,
+          error:
+            'Please tick the declaration confirming your documents are verified, plagiarism-checked, and not copied from other sources.',
+        },
+        400
+      );
+    }
+
+    // Validate both PDFs before storing either, so a bad second file cannot
+    // leave a half-submitted package behind.
+    const cameraReady = formData['camera_ready'] as File | undefined;
+    if (!cameraReady) {
+      return c.json({ success: false, error: `Please attach the ${FINAL_FILE_LABELS.CAMERA_READY} as a PDF file.` }, 400);
+    }
+    const cameraCheck = validateFile(cameraReady);
+    if (!cameraCheck.ok) {
+      return c.json({ success: false, error: cameraCheck.reason || 'Invalid camera-ready file.' }, 400);
+    }
+    const copyrightForm = formData['copyright_form'] as File | undefined;
+    if (!copyrightForm) {
+      return c.json({ success: false, error: `Please attach the ${FINAL_FILE_LABELS.COPYRIGHT_FORM} as a PDF file.` }, 400);
+    }
+    const copyrightCheck = validateFile(copyrightForm);
+    if (!copyrightCheck.ok) {
+      return c.json({ success: false, error: copyrightCheck.reason || 'Invalid copyright form file.' }, 400);
+    }
+
+    const cameraStored = await storeFinalFile(c, submissionId, 'CAMERA_READY', cameraReady);
+    if (!cameraStored.ok) return cameraStored.res;
+
+    const copyrightStored = await storeFinalFile(c, submissionId, 'COPYRIGHT_FORM', copyrightForm);
+    // If the second file fails after the first was stored, the submission is
+    // still NOT marked submitted (phase2_submitted_at stays NULL), so nothing
+    // appears in the admin tab and the author simply retries — the stored
+    // file is then replaced in place.
+    if (!copyrightStored.ok) return copyrightStored.res;
+
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `UPDATE submissions SET attendance_mode = ?, declaration_confirmed = 1, phase2_submitted_at = ?, updated_at = ? WHERE id = ?`
+    ).bind(attendance, now, now, submissionId).run();
+
+    return c.json({
+      success: true,
+      message: 'Your Phase 2 submission is complete.',
+      phase2: {
+        submitted_at: now,
+        attendance_mode: attendance,
+        declaration_confirmed: true,
+        camera_ready_file: cameraStored.file.original_filename,
+        copyright_form_file: copyrightStored.file.original_filename,
+      },
+    });
   } catch (error) {
-    console.error('Camera-ready upload error:', error);
+    console.error('Phase 2 submit error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// Author: Download a Phase 2 template document (camera-ready template or
+// copyright form) from the Phase2 R2 bucket. Signed-in users only; the
+// buttons themselves live on the eligibility-gated Phase 2 page.
+app.get('/api/phase2/templates/:kind', requireClerkAuth, async (c) => {
+  try {
+    const kind = (c.req.param('kind') || '').toLowerCase();
+    const key = PHASE2_TEMPLATE_KEYS[kind];
+    if (!key) {
+      return c.json({ success: false, error: 'Unknown template.' }, 400);
+    }
+
+    const object = await c.env.PHASE2_BUCKET.get(key);
+    if (!object) {
+      return c.json({ success: false, error: 'That template is not available yet. Please contact the organizers.' }, 404);
+    }
+
+    const filename = kind === 'copyright' ? 'Copyright_Form_Template.pdf' : 'Camera_Ready_Template.pdf';
+    return new Response(object.body, {
+      headers: {
+        'Content-Type': object.httpMetadata?.contentType || 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': String(object.size),
+        'Cache-Control': 'private, no-store',
+      },
+    });
+  } catch (error) {
+    console.error('Phase 2 template download error:', error);
+    return c.json({ success: false, error: 'Could not download the template.' }, 500);
   }
 });
 
@@ -4233,6 +4483,18 @@ app.post('/api/admin/settings', async (c) => {
           `INSERT INTO settings (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
         ).bind('file_edits_enabled', body.file_edits_enabled.toString())
+      );
+    }
+
+    // Phase 2 (camera-ready + copyright) open switch. The key is absent by
+    // default, which reads as OFF everywhere — the flow stays closed until
+    // this is explicitly turned on from the admin settings.
+    if (typeof body.phase2_enabled === 'boolean') {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('phase2_enabled', body.phase2_enabled.toString())
       );
     }
 

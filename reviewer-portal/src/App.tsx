@@ -46,6 +46,12 @@ interface Submission {
   manuscript_file?: string | null;
   plagiarism_file?: string | null;
   ai_plagiarism_file?: string | null;
+  // Phase 2 (camera-ready + copyright) deliverables. phase2_submitted_at is
+  // set once the author submits the Phase 2 package, which is what surfaces
+  // the paper in this portal's "View Camera Ready" tab.
+  camera_ready_file?: string | null;
+  copyright_form_file?: string | null;
+  phase2_submitted_at?: string | null;
   authors?: Author[];
   review?: Review | null;
 }
@@ -54,7 +60,7 @@ interface FileView {
   open: boolean;
   url?: string;
   filename?: string;
-  kind?: 'paper' | 'plagiarism' | 'ai_plagiarism';
+  kind?: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'camera_ready' | 'copyright';
   error?: string;
 }
 
@@ -388,7 +394,11 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
         ? 'plagiarism-report.pdf'
         : file.kind === 'ai_plagiarism'
           ? 'ai-plagiarism-report.pdf'
-          : 'manuscript.pdf');
+          : file.kind === 'camera_ready'
+            ? 'camera-ready.pdf'
+            : file.kind === 'copyright'
+              ? 'copyright-form.pdf'
+              : 'manuscript.pdf');
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -408,7 +418,11 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
                   ? 'Plagiarism Report'
                   : file.kind === 'ai_plagiarism'
                     ? 'AI Plagiarism Report'
-                    : 'Manuscript')}
+                    : file.kind === 'camera_ready'
+                      ? 'Camera-Ready Manuscript'
+                      : file.kind === 'copyright'
+                        ? 'Copyright Form'
+                        : 'Manuscript')}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -567,7 +581,9 @@ function ReviewEditor({
 
   useEffect(() => {
     const incoming = {
-      decision: sub.review?.decision || '',
+      // Cast: the API returns ReviewDecision or null; coalescing to '' widens
+      // the literal union to plain string, which setDecision rejects.
+      decision: (sub.review?.decision || '') as ReviewDecision | '',
       feedback: sub.review?.feedback || '',
       updatedAt: sub.review?.updated_at || null,
     };
@@ -721,7 +737,7 @@ function ReviewEditor({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_reviewer_token') || '');
   const [reviewerName, setReviewerName] = useState<string>(() => sessionStorage.getItem('icaidiet_reviewer_user') || '');
-  const [activeTab, setActiveTab] = useState<'pending' | 'reviewed' | 'notAccepted'>('pending');
+  const [activeTab, setActiveTab] = useState<'pending' | 'reviewed' | 'notAccepted' | 'cameraReady'>('pending');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, accepted: 0, notAccepted: 0 });
   const [loading, setLoading] = useState(false);
@@ -856,9 +872,17 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism', filename: string) => {
+  const openPdf = (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'camera_ready' | 'copyright', filename: string) => {
     const type =
-      kind === 'plagiarism' ? 'PLAGIARISM' : kind === 'ai_plagiarism' ? 'AI_PLAGIARISM' : 'MANUSCRIPT';
+      kind === 'plagiarism'
+        ? 'PLAGIARISM'
+        : kind === 'ai_plagiarism'
+        ? 'AI_PLAGIARISM'
+        : kind === 'camera_ready'
+        ? 'CAMERA_READY'
+        : kind === 'copyright'
+        ? 'COPYRIGHT_FORM'
+        : 'MANUSCRIPT';
     setPdfView({
       open: true,
       url: `${API_URL}/api/reviewer/submissions/${id}/file?type=${type}`,
@@ -874,6 +898,9 @@ export default function App() {
   const pendingCount = submissions.filter((s) => !s.review).length;
   const reviewedCount = submissions.filter((s) => s.review && s.review.decision === 'ACCEPTED').length;
   const notAcceptedCount = submissions.filter((s) => s.review && s.review.decision !== 'ACCEPTED').length;
+  // Papers whose authors submitted the Phase 2 (camera-ready + copyright)
+  // package — what the "View Camera Ready" tab lists.
+  const cameraReadyCount = submissions.filter((s) => !!s.phase2_submitted_at).length;
 
   const tracksList = Array.from(new Set(submissions.map((s) => s.track).filter(Boolean) as string[])).sort((a, b) =>
     a.localeCompare(b)
@@ -896,16 +923,26 @@ export default function App() {
     ? submissions.filter((s) => !s.review)
     : activeTab === 'notAccepted'
       ? submissions.filter((s) => s.review && s.review.decision !== 'ACCEPTED')
-      : submissions.filter((s) => s.review && s.review.decision === 'ACCEPTED'))
+      : activeTab === 'cameraReady'
+        ? submissions.filter((s) => !!s.phase2_submitted_at)
+        : submissions.filter((s) => s.review && s.review.decision === 'ACCEPTED'))
     .slice()
-    .sort((a, b) => Number(!!b.review?.resubmitted) - Number(!!a.review?.resubmitted));
+    .sort((a, b) =>
+      activeTab === 'cameraReady'
+        ? (b.phase2_submitted_at || '').localeCompare(a.phase2_submitted_at || '')
+        : Number(!!b.review?.resubmitted) - Number(!!a.review?.resubmitted)
+    );
   const visible = applyFilters(baseVisible);
 
   const emptyMessage = activeTab === 'pending'
     ? filtersActive
       ? 'No papers match your search or filters.'
       : 'No papers pending review.'
-    : activeTab === 'notAccepted'
+    : activeTab === 'cameraReady'
+      ? filtersActive
+        ? 'No papers match your search or filters.'
+        : 'No Phase 2 submissions yet. Papers appear here once their authors submit the camera-ready package.'
+      : activeTab === 'notAccepted'
       ? filtersActive
         ? 'No papers match your search or filters.'
         : 'No papers awaiting revision yet. Papers you marked with changes or as not accepted will appear here.'
@@ -1095,6 +1132,17 @@ export default function App() {
               {notAcceptedCount}
             </span>
           </button>
+          <button
+            onClick={() => setActiveTab('cameraReady')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'cameraReady' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'
+              }`}
+          >
+            View Camera Ready
+            <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'cameraReady' ? 'bg-purple-500 text-white' : 'bg-purple-600 text-white'
+              }`}>
+              {cameraReadyCount}
+            </span>
+          </button>
         </div>
 
         <FilterPanel
@@ -1111,6 +1159,142 @@ export default function App() {
           onClear={clearFilters}
         />
 
+        {/* View Camera Ready tab: papers whose authors submitted the Phase 2
+            package — paper title | primary author | submitted on | actions
+            (view camera ready / view copyright). Deliberately no review
+            editor here: the review decision is recorded on the other tabs. */}
+        {activeTab === 'cameraReady' && (
+          <>
+            {/* Desktop table */}
+            <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
+              <table className="w-full text-left border-collapse table-fixed">
+                <thead>
+                  <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[30%] rounded-tl-xl">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[24%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[28%] rounded-tr-xl">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-brand-accent/40">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                    </tr>
+                  ) : visible.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="py-8 text-center text-brand-text/60">
+                        {emptyMessage}
+                      </td>
+                    </tr>
+                  ) : (
+                    visible.map((sub, idx) => {
+                      const primary = (sub.authors || []).find((a) => a.is_primary) || (sub.authors || [])[0];
+                      return (
+                        <tr key={sub.id} className="bg-white hover:bg-brand-bg/40">
+                          <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-bl-xl' : ''}`}>
+                            <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                            <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words font-mono">
+                              {sub.paper_id || sub.submission_code}
+                            </div>
+                          </td>
+                          <td className="py-4 px-5 align-top">
+                            <div className="font-medium text-brand-text break-words">
+                              {primary ? `${primary.first_name} ${primary.last_name}` : sub.author_name || '—'}
+                            </div>
+                          </td>
+                          <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
+                            {sub.phase2_submitted_at ? formatDateTime(sub.phase2_submitted_at) : '—'}
+                          </td>
+                          <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-br-xl' : ''}`}>
+                            <div className="flex flex-col items-start gap-2">
+                              <button
+                                onClick={() => openPdf(sub.id, 'camera_ready', sub.camera_ready_file || `${sub.title} — Camera Ready`)}
+                                title={sub.camera_ready_file || 'Camera-ready manuscript'}
+                                disabled={!sub.camera_ready_file}
+                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                              >
+                                <Eye className="w-4 h-4" /> View Camera Ready
+                              </button>
+                              <button
+                                onClick={() => openPdf(sub.id, 'copyright', sub.copyright_form_file || `${sub.title} — Copyright Form`)}
+                                title={sub.copyright_form_file || 'Copyright form'}
+                                disabled={!sub.copyright_form_file}
+                                className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                              >
+                                <Eye className="w-4 h-4" /> View Copyright
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="space-y-4 lg:hidden">
+              {loading ? (
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  Loading submissions...
+                </div>
+              ) : visible.length === 0 ? (
+                <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
+                  {emptyMessage}
+                </div>
+              ) : (
+                visible.map((sub) => {
+                  const primary = (sub.authors || []).find((a) => a.is_primary) || (sub.authors || [])[0];
+                  return (
+                    <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
+                      <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
+                      <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mt-1">
+                        {sub.paper_id || sub.submission_code}
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
+                        <div className="font-medium text-brand-text break-words">
+                          {primary ? `${primary.first_name} ${primary.last_name}` : sub.author_name || '—'}
+                        </div>
+                      </div>
+
+                      <div className="mt-3">
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
+                        <div className="text-brand-text/90 break-words">
+                          {sub.phase2_submitted_at ? formatDateTime(sub.phase2_submitted_at) : '—'}
+                        </div>
+                      </div>
+
+                      <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
+                        <button
+                          onClick={() => openPdf(sub.id, 'camera_ready', sub.camera_ready_file || `${sub.title} — Camera Ready`)}
+                          disabled={!sub.camera_ready_file}
+                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline disabled:opacity-40 disabled:no-underline"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View Camera Ready
+                        </button>
+                        <button
+                          onClick={() => openPdf(sub.id, 'copyright', sub.copyright_form_file || `${sub.title} — Copyright Form`)}
+                          disabled={!sub.copyright_form_file}
+                          className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline disabled:opacity-40 disabled:no-underline"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> View Copyright
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </>
+        )}
+
+        {activeTab !== 'cameraReady' && (
+          <>
         {/* Desktop table */}
         <div className="hidden lg:block bg-white rounded-xl shadow-sm border-2 border-brand-accent">
           <table className="w-full text-left border-collapse table-fixed">
@@ -1291,6 +1475,8 @@ export default function App() {
             ))
           )}
         </div>
+          </>
+        )}
       </main>
 
       <footer className="bg-brand-footer text-white py-6 mt-auto">
