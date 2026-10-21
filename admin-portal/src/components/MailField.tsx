@@ -1,5 +1,5 @@
 import React, { useCallback, useRef } from 'react';
-import { Bold, Italic, Underline } from 'lucide-react';
+import { Bold, Italic, Underline, Link as LinkIcon } from 'lucide-react';
 
 // Kept in step with MAIL_PLACEHOLDERS in backend/src/index.ts, which does the
 // actual substitution when a queued mail is rendered.
@@ -13,7 +13,7 @@ export const MAIL_PLACEHOLDERS: { token: string; label: string }[] = [
   { token: '{review_feedback}', label: 'Reviewer comments' },
 ];
 
-type Tag = 'b' | 'i' | 'u';
+type Tag = 'b' | 'i' | 'u' | 'link';
 type FieldEl = HTMLInputElement | HTMLTextAreaElement;
 
 // Wrap the current selection in <tag>, or unwrap it when the selection is
@@ -109,9 +109,9 @@ export default function MailField({
     (e: React.KeyboardEvent<FieldEl>) => {
       if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
       const key = e.key.toLowerCase();
-      if (key === 'b' || key === 'i' || key === 'u') {
+      if (key === 'b' || key === 'i' || key === 'u' || key === 'k') {
         e.preventDefault();
-        tag(key);
+        tag(key === 'k' ? 'link' : (key as Tag));
       }
     },
     [tag]
@@ -153,8 +153,12 @@ export default function MailField({
           <button type="button" title="Underline (Ctrl+U)" onClick={() => tag('u')} className={activeTagBtn}>
             <Underline className="w-3.5 h-3.5" />
           </button>
+          <button type="button" title="Insert Link (Ctrl+K)" onClick={() => tag('link')} className={activeTagBtn + ' inline-flex items-center gap-1'}>
+            <LinkIcon className="w-3.5 h-3.5" />
+            <span>Link</span>
+          </button>
           <span className="text-[11px] text-brand-text/40 ml-1">
-            Select text, then press Ctrl+B / Ctrl+I / Ctrl+U
+            Select text, then press Ctrl+B / Ctrl+I / Ctrl+U / Ctrl+K
           </span>
         </div>
       )}
