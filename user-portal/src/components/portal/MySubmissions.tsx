@@ -57,6 +57,11 @@ interface MySubmission {
   copyright_form_file?: string | null;
   phase2_submitted_at?: string | null;
   attendance_mode?: string | null;
+  // Reviewer's decision on the camera-ready package: ACCEPTED (green) or
+  // MINOR_CHANGES (amber + the reviewer's comments, author must update files).
+  camera_ready_status?: string | null;
+  camera_ready_comments?: string | null;
+  camera_ready_reviewed_at?: string | null;
 }
 
 export interface BankAccount {
@@ -1382,10 +1387,15 @@ export function MySubmissions({
         <div className="space-y-8">
           {subs.map((sub) => {
             const isSubAccepted = isPayablePaper(sub);
+            const isPaymentDone =
+              sub.payment_status === 'APPROVED' ||
+              (sub.payment_status !== 'REJECTED' &&
+                (sub.payment_status === 'PENDING' ||
+                  !!(sub.payment_proof_url && sub.utr_transaction_id)));
             const isPaymentOpen =
               expandedPaymentIds[sub.id] ||
-              !!sub.payment_proof_url ||
-              sub.payment_status === 'APPROVED';
+              isPaymentDone ||
+              !!sub.payment_proof_url;
 
             return (
               <div key={sub.id} className="space-y-4">
@@ -1568,6 +1578,58 @@ export function MySubmissions({
                     <p className="mt-3 text-xs text-black/60">
                       Submitted on {new Date(sub.phase2_submitted_at).toLocaleString()}.
                     </p>
+
+                    {/* Reviewer's camera-ready decision. ACCEPTED shows green;
+                        MINOR_CHANGES shows the reviewer's comments and asks the
+                        author to update the files. No decision yet = awaiting. */}
+                    {sub.camera_ready_status === 'ACCEPTED' && (
+                      <div className="mt-3 flex items-start gap-2.5 rounded-xl border border-green-300 bg-green-50 p-3">
+                        <CheckCircle2 className="w-4 h-4 text-green-700 shrink-0 mt-0.5" />
+                        <div>
+                          <div className="text-xs font-bold text-green-900">Camera-Ready Accepted</div>
+                          <div className="text-[11px] text-green-800 mt-0.5">
+                            Your Phase 2 submission has been reviewed and accepted.
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    {sub.camera_ready_status === 'MINOR_CHANGES' && (
+                      <div className="mt-3 rounded-xl border border-amber-400 bg-amber-50 p-3">
+                        <div className="text-xs font-bold text-amber-900">Minor Changes Requested</div>
+                        <div className="text-[11px] text-amber-800 mt-0.5">
+                          Please update your files as per the reviewer's comments below and submit
+                          again. Editing is reopened for this paper until you re-submit.
+                        </div>
+                        {sub.camera_ready_comments && (
+                          <div className="mt-2 text-xs text-amber-900 bg-white border border-amber-200 rounded-lg p-2.5 whitespace-pre-wrap">
+                            {sub.camera_ready_comments}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {sub.camera_ready_status === 'MAJOR_CHANGES' && (
+                      <div className="mt-3 rounded-xl border border-orange-400 bg-orange-50 p-3">
+                        <div className="text-xs font-bold text-orange-900">Major Changes Requested</div>
+                        <div className="text-[11px] text-orange-800 mt-0.5">
+                          Please update your files as per the reviewer's comments below and submit
+                          again. Editing is reopened for this paper until you re-submit.
+                        </div>
+                        {sub.camera_ready_comments && (
+                          <div className="mt-2 text-xs text-orange-900 bg-white border border-orange-200 rounded-lg p-2.5 whitespace-pre-wrap">
+                            {sub.camera_ready_comments}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {!sub.camera_ready_status && (
+                      <div className="mt-3 rounded-xl border border-stone-300 bg-stone-50 p-3">
+                        <div className="text-xs font-bold text-stone-800">Awaiting Review</div>
+                        <div className="text-[11px] text-stone-600 mt-0.5">
+                          Your Phase 2 files are waiting for the reviewer's decision.
+                        </div>
+                      </div>
+                    )}
+
                     {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && (
                       <div className="mt-4 text-center">
                         <button
@@ -1575,7 +1637,13 @@ export function MySubmissions({
                           onClick={() => onPhase2?.(sub.id)}
                           className="inline-flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-all shadow-md"
                         >
-                          View / Update Phase 2 <ChevronRight className="w-4 h-4" />
+                          {sub.camera_ready_status === 'MINOR_CHANGES' ||
+                          sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES' ||
+                          sub.camera_ready_status === 'MAJOR_CHANGES' ||
+                          sub.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES'
+                            ? 'Update Files'
+                            : 'View Phase 2'}{' '}
+                          <ChevronRight className="w-4 h-4" />
                         </button>
                       </div>
                     )}
@@ -1587,28 +1655,30 @@ export function MySubmissions({
                   <div className="space-y-4">
                     {sub.can_pay ? (
                       <>
-                        <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
-                          <h4 className="text-xl sm:text-2xl font-bold font-serif text-brand-text mb-2">
-                            Congratulations Your Paper is Accepted
-                          </h4>
-                          <p className="text-sm sm:text-base text-black/80 max-w-2xl mx-auto leading-relaxed mb-6 font-normal">
-                            Please complete the payment as soon as possible because we accept a limited number of papers. Registration operates on a first-come, first-served basis.
-                          </p>
-                          {!isPaymentOpen ? (
-                            <button
-                              type="button"
-                              onClick={() => togglePayment(sub.id)}
-                              className="inline-flex items-center gap-2 px-8 py-3.5 bg-brand-text text-white rounded-xl font-bold text-sm sm:text-base hover:bg-brand-accent transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5"
-                            >
-                              <CreditCard className="w-4 h-4" /> Complete Your payment <ChevronRight className="w-4 h-4" />
-                            </button>
-                          ) : null}
-                        </div>
+                        {!isPaymentDone && (
+                          <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
+                            <h4 className="text-xl sm:text-2xl font-bold font-serif text-brand-text mb-2">
+                              Congratulations Your Paper is Accepted
+                            </h4>
+                            <p className="text-sm sm:text-base text-black/80 max-w-2xl mx-auto leading-relaxed mb-6 font-normal">
+                              Please complete the payment as soon as possible because we accept a limited number of papers. Registration operates on a first-come, first-served basis.
+                            </p>
+                            {!isPaymentOpen ? (
+                              <button
+                                type="button"
+                                onClick={() => togglePayment(sub.id)}
+                                className="inline-flex items-center gap-2 px-8 py-3.5 bg-brand-text text-white rounded-xl font-bold text-sm sm:text-base hover:bg-brand-accent transition-all shadow-md hover:shadow-lg hover:-translate-y-0.5"
+                              >
+                                <CreditCard className="w-4 h-4" /> Complete Your payment <ChevronRight className="w-4 h-4" />
+                              </button>
+                            ) : null}
+                          </div>
+                        )}
 
                         {/* Payment Form (Progressive Disclosure) */}
                         {isPaymentOpen && (
                           <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border-2 border-yellow-400 text-black animate-fadeIn">
-                            {registrationOpen || sub.payment_status === 'APPROVED' ? (
+                            {registrationOpen || isPaymentDone ? (
                               <RegistrationForm
                                 sub={sub}
                                 payable={payableSubs}
@@ -1631,11 +1701,18 @@ export function MySubmissions({
                           Paper Accepted
                         </h4>
                         <p className="text-sm text-gray-600 max-w-xl mx-auto leading-relaxed">
-                          Your paper has been accepted. Only the primary author or the original submitter can make the payment for this submission.
+                          {isPaymentDone
+                            ? 'Your paper has been accepted and registration payment has been completed.'
+                            : 'Your paper has been accepted. Only the primary author or the original submitter can make the payment for this submission.'}
                         </p>
                         {sub.payment_status === 'APPROVED' && (
                           <div className="mt-4 px-4 py-2 bg-green-100 text-green-800 border border-green-300 rounded-lg text-sm font-semibold">
                             Payment Confirmed
+                          </div>
+                        )}
+                        {sub.payment_status === 'PENDING' && (
+                          <div className="mt-4 px-4 py-2 bg-blue-100 text-blue-800 border border-blue-300 rounded-lg text-sm font-semibold">
+                            Payment Submitted (Under Verification)
                           </div>
                         )}
                       </div>

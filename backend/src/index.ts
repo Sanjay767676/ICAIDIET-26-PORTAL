@@ -1457,6 +1457,7 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.phase2_submitted_at,
+              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1615,6 +1616,70 @@ app.get('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) =
     return c.json({ success: true, review });
   } catch (error) {
     console.error('Reviewer fetch review error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Reviewer: Save camera-ready review decision for a Phase 2 submission.
+// Requires reviewer Bearer token.
+// ACCEPTED finalises the package (editing is closed); ACCEPTED_WITH_MINOR_
+// CHANGES / ACCEPTED_WITH_MAJOR_CHANGES require comments and reopen editing
+// for the author. Status is shown in the user portal.
+// ------------------------------------------------------------------
+app.post('/api/reviewer/submissions/:id/camera-ready-review', requireReviewerAuth, async (c) => {
+  try {
+    const reviewerId = c.get('reviewerId') as string;
+    const submissionId = c.req.param('id') as string;
+    const body = await c.req.json().catch(() => null);
+    const decision = ((body?.decision || '').toString()).trim().toUpperCase();
+    const comments = ((body?.comments || '') as string).trim();
+    const wantsChanges = decision !== 'ACCEPTED';
+    const isMajor = decision.includes('MAJOR');
+
+    const VALID = [
+      'ACCEPTED',
+      'ACCEPTED_WITH_MINOR_CHANGES',
+      'ACCEPTED_WITH_MAJOR_CHANGES',
+      'MINOR_CHANGES',
+      'MAJOR_CHANGES',
+    ];
+    if (!VALID.includes(decision)) {
+      return c.json(
+        { success: false, error: 'Please choose Accepted, Accepted With Minor Changes or Accepted With Major Changes.' },
+        400
+      );
+    }
+    if (wantsChanges && !comments) {
+      return c.json({ success: false, error: 'Please add comments explaining the changes required.' }, 400);
+    }
+
+    const submission = await c.env.DB.prepare(
+      `SELECT id, phase2_submitted_at, deleted_at FROM submissions WHERE id = ?`
+    ).bind(submissionId).first() as any;
+    if (!submission || submission.deleted_at) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+    if (!submission.phase2_submitted_at) {
+      return c.json({ success: false, error: 'This paper has not submitted the Phase 2 package yet.' }, 400);
+    }
+
+    const status = decision === 'ACCEPTED' ? 'ACCEPTED' : isMajor ? 'MAJOR_CHANGES' : 'MINOR_CHANGES';
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `UPDATE submissions SET camera_ready_status = ?, camera_ready_comments = ?, camera_ready_reviewed_at = ?, camera_ready_reviewed_by = ?, updated_at = ? WHERE id = ?`
+    ).bind(status, wantsChanges ? comments : null, now, reviewerId, now, submissionId).run();
+
+    return c.json({
+      success: true,
+      camera_ready_review: {
+        status,
+        comments: wantsChanges ? comments : null,
+        reviewed_at: now,
+      },
+    });
+  } catch (error) {
+    console.error('Camera ready review error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -2160,7 +2225,7 @@ app.get('/api/admin/submissions', async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at,
-              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
+              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed, s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2396,7 +2461,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
-              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
+              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed, s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2662,14 +2727,33 @@ const FINAL_FILE_LABELS: Record<FinalFileType, string> = {
   CAMERA_READY: 'camera-ready manuscript',
 };
 
-// Template kinds served from PHASE2_BUCKET -> object keys inside the bucket.
-const PHASE2_TEMPLATE_KEYS: Record<string, string> = {
-  'camera-ready': 'templates/camera-ready-template.pdf',
-  copyright: 'templates/copyright-form-template.pdf',
+// Template kinds served from PHASE2_BUCKET. Both templates are Word documents
+// (authors fill them in and export a PDF to upload).
+const PHASE2_TEMPLATES: Record<string, { key: string; filename: string; contentType: string }> = {
+  'camera-ready': {
+    key: 'templates/camera-ready-template.docx',
+    filename: 'Camera_Ready_Template.docx',
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  },
+  copyright: {
+    key: 'templates/copyright-form-template.docx',
+    filename: 'Copyright_Form_Template.docx',
+    contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  },
 };
 
 // Attendance modes for the Phase 2 form (both compulsory to record).
 const PHASE2_ATTENDANCE_MODES = new Set(['ONLINE', 'OFFLINE']);
+
+// A submitted Phase 2 package is final UNLESS a reviewer sent it back for
+// changes. These camera-ready decisions re-open editing for the author
+// (re-submitting locks it again and clears the decision).
+const PHASE2_EDITABLE_REVIEW_STATUSES = new Set([
+  'MINOR_CHANGES',
+  'MAJOR_CHANGES',
+  'ACCEPTED_WITH_MINOR_CHANGES',
+  'ACCEPTED_WITH_MAJOR_CHANGES',
+]);
 
 // Shared gate for the Phase 2 submit: maintenance + approved list (via
 // userPortalGate 'edit'), the phase2_enabled switch, ownership of the
@@ -2697,14 +2781,42 @@ async function preparePhase2Submission(
 
   const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
   const submission = await c.env.DB.prepare(
-    `SELECT id, user_id, author_email, status, payment_status FROM submissions WHERE id = ? AND deleted_at IS NULL`
-  ).bind(submissionId).first() as { id: string; user_id: string; author_email: string; status: string; payment_status: string | null } | null;
+    `SELECT id, user_id, author_email, status, payment_status, phase2_submitted_at, camera_ready_status FROM submissions WHERE id = ? AND deleted_at IS NULL`
+  ).bind(submissionId).first() as {
+    id: string;
+    user_id: string;
+    author_email: string;
+    status: string;
+    payment_status: string | null;
+    phase2_submitted_at: string | null;
+    camera_ready_status: string | null;
+  } | null;
   if (!submission) {
     return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
   }
   const authorized = await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail);
   if (!authorized) {
     return { ok: false, res: c.json({ success: false, error: 'You can only upload files for your own submission.' }, 403) };
+  }
+  // Phase 2 is final once submitted, with one exception: if a reviewer asked
+  // for minor/major changes the author may upload corrected files again.
+  // Re-submitting clears the decision and locks the package until the next
+  // camera-ready review.
+  const reviewStatus = submission.camera_ready_status || '';
+  const editingReopened = PHASE2_EDITABLE_REVIEW_STATUSES.has(reviewStatus);
+  if (submission.phase2_submitted_at && !editingReopened) {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error:
+            'Your Phase 2 submission has already been submitted and can no longer be edited. Please contact the organizers if a change is required.',
+          locked: true,
+        },
+        409
+      ),
+    };
   }
   if (submission.user_id !== userId) {
     c.executionCtx.waitUntil(
@@ -2829,16 +2941,18 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
     const submission = await c.env.DB.prepare(
-      `SELECT s.id, s.user_id, s.author_email, s.status, s.payment_status,
+      `SELECT s.id, s.user_id, s.author_email, s.title, s.submission_code, s.status, s.payment_status,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
+              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file
        FROM submissions s WHERE s.id = ? AND s.deleted_at IS NULL`
     ).bind(submissionId).first() as {
-      id: string; user_id: string; author_email: string; status: string; payment_status: string | null;
+      id: string; user_id: string; author_email: string; title: string | null; submission_code: string | null; status: string; payment_status: string | null;
       phase2_submitted_at: string | null; attendance_mode: string | null; declaration_confirmed: number;
+      camera_ready_status: string | null; camera_ready_comments: string | null; camera_ready_reviewed_at: string | null;
       camera_ready_file: string | null; copyright_form_file: string | null;
     } | null;
     if (!submission) {
@@ -2854,6 +2968,9 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     const accepted = ACCEPTED_STATUSES.has(submission.status);
     const paymentApproved = submission.payment_status === 'APPROVED';
     const eligible = phase2Open && accepted && paymentApproved;
+    // Re-opened only while the reviewer's camera-ready decision asks for
+    // minor/major changes; re-submitting clears it and locks the package.
+    const editableAfterReview = PHASE2_EDITABLE_REVIEW_STATUSES.has(submission.camera_ready_status || '');
     const reason = !phase2Open
       ? 'The Phase 2 (camera-ready) window is not open yet.'
       : !accepted
@@ -2864,10 +2981,17 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 
     return c.json({
       success: true,
+      submission_id: submission.id,
+      submission_code: submission.submission_code,
+      title: submission.title,
       phase2_open: phase2Open,
       eligible,
       reason,
       submitted: !!submission.phase2_submitted_at,
+      // Editing is allowed before the first submit, and afterwards only when
+      // the reviewer sent the package back for changes.
+      can_edit: !submission.phase2_submitted_at || editableAfterReview,
+      locked: !!submission.phase2_submitted_at && !editableAfterReview,
       phase2: submission.phase2_submitted_at
         ? {
             submitted_at: submission.phase2_submitted_at,
@@ -2877,6 +3001,11 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
             copyright_form_file: submission.copyright_form_file || null,
           }
         : null,
+      camera_ready_review: {
+        status: submission.camera_ready_status || null,
+        comments: submission.camera_ready_comments || null,
+        reviewed_at: submission.camera_ready_reviewed_at || null,
+      },
     });
   } catch (error) {
     console.error('Phase 2 status error:', error);
@@ -2889,8 +3018,9 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 // compulsory declaration. Everything is validated before anything is stored,
 // and phase2_submitted_at (which moves the paper into the admin's Camera
 // Ready tab) is only set once both files AND the attendance/declaration
-// record are saved. Re-submitting later replaces both files in place and
-// refreshes the submitted timestamp.
+// record are saved. The package is final once submitted; the only way back in
+// is a reviewer's "Accepted With Minor/Major Changes" decision, which reopens
+// editing until the author re-submits (the decision is then cleared).
 app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
   try {
     if (!rateLimit(c, 'phase2-submit', 5, 60000)) {
@@ -2950,7 +3080,7 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      `UPDATE submissions SET attendance_mode = ?, declaration_confirmed = 1, phase2_submitted_at = ?, updated_at = ? WHERE id = ?`
+      `UPDATE submissions SET attendance_mode = ?, declaration_confirmed = 1, phase2_submitted_at = ?, camera_ready_status = NULL, camera_ready_comments = NULL, camera_ready_reviewed_at = NULL, camera_ready_reviewed_by = NULL, updated_at = ? WHERE id = ?`
     ).bind(attendance, now, now, submissionId).run();
 
     return c.json({
@@ -2962,6 +3092,11 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
         declaration_confirmed: true,
         camera_ready_file: cameraStored.file.original_filename,
         copyright_form_file: copyrightStored.file.original_filename,
+      },
+      camera_ready_review: {
+        status: null,
+        comments: null,
+        reviewed_at: null,
       },
     });
   } catch (error) {
@@ -2976,21 +3111,20 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 app.get('/api/phase2/templates/:kind', requireClerkAuth, async (c) => {
   try {
     const kind = (c.req.param('kind') || '').toLowerCase();
-    const key = PHASE2_TEMPLATE_KEYS[kind];
-    if (!key) {
+    const template = PHASE2_TEMPLATES[kind];
+    if (!template) {
       return c.json({ success: false, error: 'Unknown template.' }, 400);
     }
 
-    const object = await c.env.PHASE2_BUCKET.get(key);
+    const object = await c.env.PHASE2_BUCKET.get(template.key);
     if (!object) {
       return c.json({ success: false, error: 'That template is not available yet. Please contact the organizers.' }, 404);
     }
 
-    const filename = kind === 'copyright' ? 'Copyright_Form_Template.pdf' : 'Camera_Ready_Template.pdf';
     return new Response(object.body, {
       headers: {
-        'Content-Type': object.httpMetadata?.contentType || 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Type': object.httpMetadata?.contentType || template.contentType,
+        'Content-Disposition': `attachment; filename="${template.filename}"`,
         'Content-Length': String(object.size),
         'Cache-Control': 'private, no-store',
       },

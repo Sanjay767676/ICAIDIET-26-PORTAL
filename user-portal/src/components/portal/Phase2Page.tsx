@@ -16,16 +16,29 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 type AttendanceMode = 'ONLINE' | 'OFFLINE';
 
 interface Phase2Status {
+  submission_code: string | null;
+  title: string | null;
   phase2_open: boolean;
   eligible: boolean;
   reason: string | null;
   submitted: boolean;
+  // Editing rules: allowed before the first submit, and after a reviewer asks
+  // for changes. Locked otherwise (including while awaiting review).
+  can_edit: boolean;
+  locked: boolean;
   phase2: {
     submitted_at: string;
     attendance_mode: string | null;
     declaration_confirmed: boolean;
     camera_ready_file: string | null;
     copyright_form_file: string | null;
+  } | null;
+  // Set by a reviewer from the reviewer portal's "View Camera Ready" tab.
+  // ACCEPTED = approved; MINOR_CHANGES = comments explain what to fix.
+  camera_ready_review: {
+    status: 'ACCEPTED' | 'MINOR_CHANGES' | 'MAJOR_CHANGES' | null;
+    comments: string | null;
+    reviewed_at: string | null;
   } | null;
 }
 
@@ -55,6 +68,9 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
   const [submitting, setSubmitting] = useState(false);
   const [downloading, setDownloading] = useState<'camera-ready' | 'copyright' | null>(null);
   const [popup, setPopup] = useState<PopupInfo | null>(null);
+  // After a successful submit the page closes (returns to My Submissions)
+  // once the success popup is dismissed — submitting is a one-shot action.
+  const [closeAfterPopup, setCloseAfterPopup] = useState(false);
 
   const loadStatus = useCallback(async () => {
     if (!submissionId) {
@@ -104,12 +120,17 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
         const data = await res.json().catch(() => null);
         throw new Error(data?.error || 'Could not download the template.');
       }
+      // Use the filename the server sends (the camera-ready template is a
+      // .docx, the copyright form a .pdf) so the saved file opens correctly.
+      const disposition = res.headers.get('Content-Disposition') || '';
+      const match = /filename="?([^";]+)"?/i.exec(disposition);
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
       a.download =
-        kind === 'copyright' ? 'Copyright_Form_Template.pdf' : 'Camera_Ready_Template.pdf';
+        match?.[1]?.trim() ||
+        (kind === 'copyright' ? 'Copyright_Form_Template.docx' : 'Camera_Ready_Template.docx');
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -180,6 +201,7 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
         title: 'Phase 2 Submitted',
         message: data.message || 'Your Phase 2 submission is complete.',
       });
+      setCloseAfterPopup(true);
       setAttendance(null);
       setCameraReady(null);
       setCopyrightForm(null);
@@ -249,9 +271,19 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
         <h2 className="font-serif text-2xl sm:text-3xl font-bold text-brand-text">
           Phase 2 — Camera Ready & Copyright
         </h2>
+        {status?.title && (
+          <div className="mt-2 rounded-xl bg-stone-50 border border-stone-200 px-3.5 py-2.5">
+            <div className="text-[10px] uppercase tracking-wide font-semibold text-black/45">
+              Paper{status.submission_code ? ` · ${status.submission_code}` : ''}
+            </div>
+            <div className="text-sm font-semibold text-brand-text break-words">{status.title}</div>
+          </div>
+        )}
         <p className="text-sm text-black/70 mt-2 leading-relaxed">
           Download the templates below, then upload your camera-ready manuscript and signed
-          copyright form to complete the final phase for your accepted paper.
+          copyright form to complete the final phase for your accepted paper. Once submitted,
+          Phase 2 is final and cannot be edited — unless the reviewer asks for changes, which
+          reopens editing for that paper.
         </p>
 
         {/* Template downloads — black buttons matching the site's download style,
@@ -283,6 +315,19 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
             )}
             Copyright Form
           </button>
+        </div>
+
+        {/* Sample copyright form shipped with the portal (public folder).
+            A plain anchor with `download` so one tap/click saves the file. */}
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs sm:text-sm">
+          <span className="text-black/60">Need a filled example?</span>
+          <a
+            href={`${import.meta.env.BASE_URL}sample_copyright.docx`}
+            download="Sample_Copyright_Form.docx"
+            className="inline-flex items-center gap-1.5 font-semibold text-brand-text underline underline-offset-2 hover:text-brand-accent transition-colors"
+          >
+            <FileDown className="w-4 h-4 shrink-0" /> Download Sample Copyright Form
+          </a>
         </div>
       </div>
 
@@ -320,8 +365,76 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
             </div>
           )}
 
+          {/* Reviewer's camera-ready decision: green when accepted, amber with
+              the comments when minor changes were requested (the author is
+              prompted to update the files using the form below). */}
+          {status.submitted && (
+            <div className="mt-8">
+              {status.camera_ready_review?.status === 'ACCEPTED' ? (
+                <div className="rounded-2xl border-2 border-green-300 bg-green-50 p-4 flex items-start gap-3">
+                  <CheckCircle2 className="w-5 h-5 text-green-700 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-bold text-green-900 text-sm">Camera-Ready Accepted</div>
+                    <p className="text-xs text-green-800 mt-0.5 leading-relaxed">
+                      Your Phase 2 submission has been reviewed and accepted. No further action is needed.
+                    </p>
+                  </div>
+                </div>
+              ) : status.camera_ready_review?.status === 'MINOR_CHANGES' ||
+                status.camera_ready_review?.status === 'MAJOR_CHANGES' ? (
+                <div
+                  className={`rounded-2xl border-2 p-4 ${
+                    status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                      ? 'border-orange-400 bg-orange-50'
+                      : 'border-amber-400 bg-amber-50'
+                  }`}
+                >
+                  <div
+                    className={`font-bold text-sm ${
+                      status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                        ? 'text-orange-900'
+                        : 'text-amber-900'
+                    }`}
+                  >
+                    {status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                      ? 'Major Changes Requested'
+                      : 'Minor Changes Requested'}
+                  </div>
+                  <p
+                    className={`text-xs mt-0.5 leading-relaxed ${
+                      status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                        ? 'text-orange-800'
+                        : 'text-amber-800'
+                    }`}
+                  >
+                    Please update your files as per the reviewer's comments below, then submit the
+                    Phase 2 form again. Editing is reopened for this paper until you re-submit.
+                  </p>
+                  {status.camera_ready_review.comments && (
+                    <div
+                      className={`mt-2.5 text-sm bg-white border rounded-xl p-3 whitespace-pre-wrap ${
+                        status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                          ? 'text-orange-900 border-orange-200'
+                          : 'text-amber-900 border-amber-200'
+                      }`}
+                    >
+                      {status.camera_ready_review.comments}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-2xl border-2 border-stone-300 bg-stone-50 p-4">
+                  <div className="font-bold text-stone-800 text-sm">Awaiting Review</div>
+                  <p className="text-xs text-stone-600 mt-0.5 leading-relaxed">
+                    Your Phase 2 files have been submitted and are waiting for the reviewer's decision.
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {status.submitted && status.phase2 && (
-            <div className="mt-8 bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400">
+            <div className="mt-4 bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400">
               <div className="flex items-center justify-between gap-3 flex-wrap pb-3 border-b border-stone-200">
                 <h3 className="text-lg sm:text-xl font-bold font-serif text-brand-text">
                   Your Phase 2 Submission
@@ -371,17 +484,30 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
               <p className="mt-3 text-xs text-black/60">
                 Submitted on {new Date(status.phase2.submitted_at).toLocaleString()}.
               </p>
+              {status.locked ? (
+                <div className="mt-3 rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-xs text-black/70">
+                  <span className="font-semibold text-black/80">Locked.</span> Your Phase 2 package
+                  has been accepted/finalised — editing is not allowed. Contact the organizers if a
+                  change is required.
+                </div>
+              ) : (
+                <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
+                  <span className="font-semibold">Editing available.</span> The reviewer requested
+                  changes, so you can upload corrected files below. Re-submitting locks the package
+                  again.
+                </div>
+              )}
             </div>
           )}
 
-          {status.eligible && (
+          {status.eligible && status.can_edit && (
             <div className="mt-8 bg-white rounded-2xl p-6 sm:p-8 shadow-xl border-2 border-yellow-400 text-black">
               <h3 className="text-lg sm:text-xl font-bold font-serif text-brand-text mb-1">
                 {status.submitted ? 'Update Your Submission' : 'Submit for Phase 2'}
               </h3>
               <p className="text-xs text-black/60 mb-5">
                 {status.submitted
-                  ? 'Submitting again replaces your previously uploaded Phase 2 files.'
+                  ? 'Submitting again replaces your previously uploaded Phase 2 files and locks them until the next review.'
                   : 'All fields below are compulsory.'}
               </p>
 
@@ -471,6 +597,10 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
           info={popup}
           onClose={() => {
             setPopup(null);
+            if (closeAfterPopup) {
+              setCloseAfterPopup(false);
+              onBack();
+            }
           }}
         />
       )}

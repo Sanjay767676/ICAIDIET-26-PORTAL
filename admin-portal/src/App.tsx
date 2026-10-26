@@ -68,6 +68,11 @@ interface Submission {
   phase2_submitted_at?: string | null;
   attendance_mode?: string | null;
   declaration_confirmed?: number;
+  // Reviewer's decision on the camera-ready package (set from the reviewer
+  // portal's View Camera Ready tab): ACCEPTED or MINOR_CHANGES.
+  camera_ready_status?: string | null;
+  camera_ready_comments?: string | null;
+  camera_ready_reviewed_at?: string | null;
 }
 
 interface MailTemplate {
@@ -104,6 +109,9 @@ const PHASE2_REVIEW_META: Record<string, { label: string; cls: string }> = {
   ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
   ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
   REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800 border-red-300' },
+  // The reviewer's camera-ready decision (separate from the paper decision).
+  MINOR_CHANGES: { label: 'Camera Ready: Minor Changes', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
+  MAJOR_CHANGES: { label: 'Camera Ready: Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
 };
 
 const STATUS_OPTIONS = ['SUBMITTED', 'UNDER_REVIEW', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
@@ -1913,6 +1921,9 @@ function ReviewSection({
   reviewDateFilter,
   onReviewDateFilterChange,
   reviewDates,
+  showEnquired,
+  enquiredSaving,
+  onToggleEnquired,
 }: {
   title: string;
   subtitle: string;
@@ -1938,6 +1949,10 @@ function ReviewSection({
   reviewDateFilter: string;
   onReviewDateFilterChange: (v: string) => void;
   reviewDates: string[];
+  // Only the Accepted tab shows the "Enquired" tracking checkbox.
+  showEnquired?: boolean;
+  enquiredSaving: string | null;
+  onToggleEnquired: (sub: Submission) => void;
 }) {
   const allSelected = rows.length > 0 && rows.every((s) => mailSelected.includes(s.id));
   return (
@@ -2140,6 +2155,23 @@ function ReviewSection({
                       >
                         <Trash2 className="w-4 h-4" /> Delete
                       </button>
+                      {showEnquired && (
+                        <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
+                          <label
+                            className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                            title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={!!sub.enquired}
+                              disabled={enquiredSaving === sub.id}
+                              onChange={() => onToggleEnquired(sub)}
+                              className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                            />
+                            Enquired
+                          </label>
+                        </div>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -2257,6 +2289,21 @@ function ReviewSection({
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Delete
                 </button>
+                {showEnquired && (
+                  <label
+                    className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
+                    title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={!!sub.enquired}
+                      disabled={enquiredSaving === sub.id}
+                      onChange={() => onToggleEnquired(sub)}
+                      className="w-4 h-4 rounded accent-brand-accent cursor-pointer disabled:cursor-wait"
+                    />
+                    Enquired
+                  </label>
+                )}
               </div>
             </div>
           ))
@@ -3374,6 +3421,9 @@ Duplicates
               reviewDateFilter={reviewDateFilter}
               onReviewDateFilterChange={setReviewDateFilter}
               reviewDates={reviewDates}
+              showEnquired={activeTab === 'accepted'}
+              enquiredSaving={enquiredSaving}
+              onToggleEnquired={handleEnquiredToggle}
             />
           </>
         )}
@@ -3514,8 +3564,13 @@ Duplicates
                   {!loading &&
                     filteredCameraReady.map((s) => {
                       const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
-                      const decision = s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null;
-                      const statusFallback = STATUS_META[s.status];
+                      // Prefer the camera-ready review decision (the current
+                      // Phase 2 state); fall back to the original paper decision.
+                      const cameraDecision = s.camera_ready_status
+                        ? PHASE2_REVIEW_META[s.camera_ready_status]
+                        : null;
+                      const decision = cameraDecision || (s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null);
+                      const statusFallback = cameraDecision ? null : STATUS_META[s.status];
                       return (
                         <tr key={s.id} className="hover:bg-brand-bg/30">
                           <td className="py-4 px-5 text-sm align-top">
@@ -3595,8 +3650,11 @@ Duplicates
               {!loading &&
                 filteredCameraReady.map((s) => {
                   const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
-                  const decision = s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null;
-                  const statusFallback = STATUS_META[s.status];
+                  const cameraDecision = s.camera_ready_status
+                    ? PHASE2_REVIEW_META[s.camera_ready_status]
+                    : null;
+                  const decision = cameraDecision || (s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null);
+                  const statusFallback = cameraDecision ? null : STATUS_META[s.status];
                   return (
                     <div key={s.id} className="bg-white rounded-xl p-4 shadow-sm border border-brand-text/10 space-y-2">
                       <div className="font-semibold text-brand-text">{s.title}</div>
