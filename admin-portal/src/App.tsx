@@ -61,6 +61,8 @@ interface Submission {
   payment_status?: string | null;
   payment_approved_at?: string | null;
   payment_submitted_at?: string | null;
+  payment_mail_status?: string | null;
+  payment_mail_sent_at?: string | null;
   // Phase 2 (camera-ready + copyright). phase2_submitted_at is what moves the
   // paper out of the Payments tab and into the Camera Ready tab.
   camera_ready_file?: string | null;
@@ -1766,7 +1768,10 @@ function SubmissionListing({
                   </td>
                   {showMailStatus && (
                     <td className="py-4 px-3 align-top">
-                      {mailStatusBadge(sub.mail_status, sub.mail_sent_at)}
+                      {mailStatusBadge(
+                        sub.payment_status === 'APPROVED' ? sub.payment_mail_status : sub.mail_status,
+                        sub.payment_status === 'APPROVED' ? sub.payment_mail_sent_at : sub.mail_sent_at
+                      )}
                     </td>
                   )}
                   <td className="py-4 px-5 align-top">
@@ -1895,7 +1900,12 @@ function SubmissionListing({
                 {showMailStatus && (
                   <div>
                     <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Mail Status</div>
-                    <div className="mt-0.5">{mailStatusBadge(sub.mail_status, sub.mail_sent_at)}</div>
+                    <div className="mt-0.5">
+                      {mailStatusBadge(
+                        sub.payment_status === 'APPROVED' ? sub.payment_mail_status : sub.mail_status,
+                        sub.payment_status === 'APPROVED' ? sub.payment_mail_sent_at : sub.mail_sent_at
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
@@ -2519,11 +2529,12 @@ export default function App() {
 
   
 const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt: string | null) => {
+    const paymentMailUpdate = newStatus === 'APPROVED' ? { payment_mail_status: null, payment_mail_sent_at: null } : {};
     setSubmissions((prev) =>
-      prev.map((s) => (s.id === subId ? { ...s, payment_status: newStatus, payment_approved_at: approvedAt } : s))
+      prev.map((s) => (s.id === subId ? { ...s, payment_status: newStatus, payment_approved_at: approvedAt, ...paymentMailUpdate } : s))
     );
-    setPaymentTarget((prev) => (prev && prev.id === subId ? { ...prev, payment_status: newStatus, payment_approved_at: approvedAt } : prev));
-    setMoreInfoTarget((prev) => (prev && prev.id === subId ? { ...prev, payment_status: newStatus, payment_approved_at: approvedAt } : prev));
+    setPaymentTarget((prev) => (prev && prev.id === subId ? { ...prev, payment_status: newStatus, payment_approved_at: approvedAt, ...paymentMailUpdate } : prev));
+    setMoreInfoTarget((prev) => (prev && prev.id === subId ? { ...prev, payment_status: newStatus, payment_approved_at: approvedAt, ...paymentMailUpdate } : prev));
   };
 
   const handlePaymentStatusAction = async (sub: Submission, newStatus: 'APPROVED' | 'REJECTED') => {
@@ -2961,6 +2972,7 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
     setMailSendError(null);
     setMailSendMessage(null);
     setMailSending(true);
+    const isPaymentTab = activeTab === 'payments';
     try {
       const res = await fetch(`${API_URL}/api/admin/mail/enqueue`, {
         method: 'POST',
@@ -2968,7 +2980,11 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ submission_ids: mailSelected, template_id: selectedTemplateId }),
+        body: JSON.stringify({
+          submission_ids: mailSelected,
+          template_id: selectedTemplateId,
+          mail_type: isPaymentTab ? 'payment' : 'general',
+        }),
       });
       if (res.status === 401) {
         handleLogout();
@@ -2977,6 +2993,11 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
       const data = await res.json().catch(() => null);
       if (!res.ok || !data?.success) {
         throw new Error(data?.error || 'Failed to queue the mails.');
+      }
+      if (isPaymentTab) {
+        setSubmissions((prev) =>
+          prev.map((s) => (mailSelected.includes(s.id) ? { ...s, payment_mail_status: 'queued' } : s))
+        );
       }
       setMailSelected([]);
       setMailSendMessage(data.message || 'Mails queued.');
@@ -3200,12 +3221,13 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
         const matchDate = !dateFilter || (s.payment_submitted_at && s.payment_submitted_at.startsWith(dateFilter));
         
         let matchMailStatus = true;
+        const currentMailStatus = activeTab === 'payments' ? s.payment_mail_status : s.mail_status;
         if (mailStatusFilter === 'sent') {
-          matchMailStatus = s.mail_status === 'delivered';
+          matchMailStatus = currentMailStatus === 'delivered';
         } else if (mailStatusFilter === 'not_sent') {
-          matchMailStatus = !s.mail_status || s.mail_status === 'failed';
+          matchMailStatus = !currentMailStatus || currentMailStatus === 'failed';
         } else if (mailStatusFilter === 'sending' || mailStatusFilter === 'queued') {
-          matchMailStatus = s.mail_status === 'queued' || s.mail_status === 'sending';
+          matchMailStatus = currentMailStatus === 'queued' || currentMailStatus === 'sending';
         }
         
         const matchReviewDate = !reviewDateFilter || (s.review_updated_at && s.review_updated_at.startsWith(reviewDateFilter));

@@ -868,6 +868,7 @@ app.post('/api/admin/mail/enqueue', async (c) => {
     const logStatements: D1PreparedStatement[] = [];
     let enqueued = 0;
 
+    const isPaymentMail = body?.mail_type === 'payment';
     for (const s of subs) {
       const email = ((s.author_email || '') as string).trim();
       const primary = await c.env.DB.prepare(
@@ -908,6 +909,11 @@ app.post('/api/admin/mail/enqueue', async (c) => {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)`
         ).bind(crypto.randomUUID(), s.id, templateId, recipientName, recipientEmail, s.title, subject, text, now, now)
       );
+      if (isPaymentMail) {
+        logStatements.push(
+          c.env.DB.prepare(`UPDATE submissions SET payment_mail_status = 'queued' WHERE id = ?`).bind(s.id)
+        );
+      }
       enqueued++;
     }
 
@@ -942,7 +948,7 @@ app.post('/api/admin/mail/process', async (c) => {
     const queued = await c.env.DB.prepare(
       `UPDATE mail_logs SET status = 'sending', updated_at = ?
        WHERE id = (SELECT id FROM mail_logs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1)
-       RETURNING id, recipient_email, subject, body`
+       RETURNING id, submission_id, recipient_email, subject, body`
     ).bind(now).first() as any;
 
     if (!queued) {
@@ -952,9 +958,17 @@ app.post('/api/admin/mail/process', async (c) => {
     const result = await sendViaResend(c, queued.recipient_email, queued.subject, queued.body);
 
     if (result.ok) {
+      const sentTime = new Date().toISOString();
       await c.env.DB.prepare(
         `UPDATE mail_logs SET status = 'delivered', resend_id = ?, error = NULL, updated_at = ? WHERE id = ?`
-      ).bind(result.id || null, new Date().toISOString(), queued.id).run();
+      ).bind(result.id || null, sentTime, queued.id).run();
+
+      if (queued.submission_id) {
+        await c.env.DB.prepare(
+          `UPDATE submissions SET payment_mail_status = 'delivered', payment_mail_sent_at = ?
+           WHERE id = ? AND payment_mail_status IN ('queued', 'sending')`
+        ).bind(sentTime, queued.submission_id).run();
+      }
     } else if (result.rateLimited) {
       await c.env.DB.prepare(
         `UPDATE mail_logs SET status = 'queued', error = ?, updated_at = ? WHERE id = ?`
@@ -975,6 +989,13 @@ app.post('/api/admin/mail/process', async (c) => {
       await c.env.DB.prepare(
         `UPDATE mail_logs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
       ).bind(result.error || 'Send failed.', new Date().toISOString(), queued.id).run();
+
+      if (queued.submission_id) {
+        await c.env.DB.prepare(
+          `UPDATE submissions SET payment_mail_status = 'failed'
+           WHERE id = ? AND payment_mail_status IN ('queued', 'sending')`
+        ).bind(queued.submission_id).run();
+      }
     }
 
     const remaining = await c.env.DB.prepare(
@@ -2229,7 +2250,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at, s.payment_mail_status, s.payment_mail_sent_at,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
               s.phase2_track, s.phase2_head_count,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at, s.camera_ready_resubmitted,
@@ -2296,7 +2317,7 @@ app.get('/api/admin/submissions/deleted', async (c) => {
     const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.enquired, s.no_corrections,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.enquired, s.no_corrections, s.payment_mail_status, s.payment_mail_sent_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -3799,7 +3820,7 @@ app.post('/api/admin/export', async (c) => {
               s.attendance_mode, s.phase2_track, s.phase2_head_count,
               s.registration_type, s.author_type, s.fee_amount, s.fee_tier,
               s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.payment_proof_url,
-              s.acceptance_mail_sent_at,
+              s.acceptance_mail_sent_at, s.payment_mail_status, s.payment_mail_sent_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -5077,11 +5098,27 @@ app.post('/api/admin/submissions/:id/payment-status', async (c) => {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
     }
 
-    await c.env.DB.prepare(
-      `UPDATE submissions SET payment_status = ?, payment_approved_at = ?, updated_at = ? WHERE id = ?`
-    ).bind(status, approvedAt, new Date().toISOString(), submissionId).run();
+    if (status === 'APPROVED') {
+      await c.env.DB.prepare(
+        `UPDATE submissions
+         SET payment_status = ?, payment_approved_at = ?, payment_mail_status = NULL, payment_mail_sent_at = NULL, updated_at = ?
+         WHERE id = ?`
+      ).bind(status, approvedAt, new Date().toISOString(), submissionId).run();
+    } else {
+      await c.env.DB.prepare(
+        `UPDATE submissions
+         SET payment_status = ?, payment_approved_at = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(status, approvedAt, new Date().toISOString(), submissionId).run();
+    }
 
-    return c.json({ success: true, payment_status: status, payment_approved_at: approvedAt });
+    return c.json({
+      success: true,
+      payment_status: status,
+      payment_approved_at: approvedAt,
+      payment_mail_status: status === 'APPROVED' ? null : undefined,
+      payment_mail_sent_at: status === 'APPROVED' ? null : undefined,
+    });
   } catch (err: any) {
     console.error('Update payment status error:', err);
     return c.json({ success: false, error: 'Failed to update payment status.' }, 500);
@@ -5095,7 +5132,7 @@ async function processMailQueue(env: Bindings) {
       const queued = await env.DB.prepare(
         `UPDATE mail_logs SET status = 'sending', updated_at = ?
          WHERE id = (SELECT id FROM mail_logs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1)
-         RETURNING id, recipient_email, subject, body`
+         RETURNING id, submission_id, recipient_email, subject, body`
       ).bind(now).first() as any;
 
       if (!queued) break;
@@ -5103,9 +5140,17 @@ async function processMailQueue(env: Bindings) {
       const result = await sendViaResend({ env }, queued.recipient_email, queued.subject, queued.body);
       
       if (result.ok) {
+        const sentTime = new Date().toISOString();
         await env.DB.prepare(
           `UPDATE mail_logs SET status = 'delivered', resend_id = ?, error = NULL, updated_at = ? WHERE id = ?`
-        ).bind(result.id || null, new Date().toISOString(), queued.id).run();
+        ).bind(result.id || null, sentTime, queued.id).run();
+
+        if (queued.submission_id) {
+          await env.DB.prepare(
+            `UPDATE submissions SET payment_mail_status = 'delivered', payment_mail_sent_at = ?
+             WHERE id = ? AND payment_mail_status IN ('queued', 'sending')`
+          ).bind(sentTime, queued.submission_id).run();
+        }
       } else if (result.rateLimited) {
         await env.DB.prepare(
           `UPDATE mail_logs SET status = 'queued', error = ?, updated_at = ? WHERE id = ?`
@@ -5115,6 +5160,13 @@ async function processMailQueue(env: Bindings) {
         await env.DB.prepare(
           `UPDATE mail_logs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
         ).bind(result.error || 'Send failed.', new Date().toISOString(), queued.id).run();
+
+        if (queued.submission_id) {
+          await env.DB.prepare(
+            `UPDATE submissions SET payment_mail_status = 'failed'
+             WHERE id = ? AND payment_mail_status IN ('queued', 'sending')`
+          ).bind(queued.submission_id).run();
+        }
       }
     }
   } catch (err) {
