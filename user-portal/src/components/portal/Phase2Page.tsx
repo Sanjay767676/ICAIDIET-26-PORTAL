@@ -10,10 +10,14 @@ import {
   MapPin,
 } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
+import { CONFERENCE_TRACKS } from '../../data/conferenceTracks';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
 type AttendanceMode = 'ONLINE' | 'OFFLINE';
+
+// Head-count options for offline attendees (compulsory for offline).
+const HEAD_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6];
 
 interface Phase2Status {
   submission_code: string | null;
@@ -29,6 +33,8 @@ interface Phase2Status {
   phase2: {
     submitted_at: string;
     attendance_mode: string | null;
+    head_count: number | null;
+    track: string | null;
     declaration_confirmed: boolean;
     camera_ready_file: string | null;
     copyright_form_file: string | null;
@@ -61,6 +67,8 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
   const [accessDenied, setAccessDenied] = useState(false);
 
   const [attendance, setAttendance] = useState<AttendanceMode | null>(null);
+  const [track, setTrack] = useState('');
+  const [headCount, setHeadCount] = useState('');
   const [cameraReady, setCameraReady] = useState<File | null>(null);
   const [copyrightForm, setCopyrightForm] = useState<File | null>(null);
   const [declared, setDeclared] = useState(false);
@@ -108,6 +116,19 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
     loadStatus();
   }, [loadStatus]);
 
+  // When a submitted package is reopened (reviewer asked for changes), keep the
+  // author's previous attendance/track/head count selected instead of resetting
+  // the whole form.
+  useEffect(() => {
+    const p = status?.phase2;
+    if (!p || !status?.can_edit) return;
+    setAttendance((prev) =>
+      prev ?? (p.attendance_mode === 'ONLINE' || p.attendance_mode === 'OFFLINE' ? p.attendance_mode : null)
+    );
+    setTrack((prev) => prev || p.track || '');
+    setHeadCount((prev) => prev || (p.head_count ? String(p.head_count) : ''));
+  }, [status]);
+
   const downloadTemplate = async (kind: 'camera-ready' | 'copyright') => {
     setDownloading(kind);
     try {
@@ -152,6 +173,14 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
       setFormError('Please select whether you will attend Online or Offline.');
       return;
     }
+    if (attendance === 'OFFLINE' && !headCount) {
+      setFormError('Please select how many people will be attending (1 to 6).');
+      return;
+    }
+    if (!track) {
+      setFormError('Please select the track you will be attending for.');
+      return;
+    }
     if (!cameraReady) {
       setFormError('Please attach the camera-ready manuscript as a PDF file.');
       return;
@@ -184,6 +213,8 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
       if (!token) throw new Error('Please sign in again.');
       const fd = new FormData();
       fd.append('attendance_mode', attendance);
+      fd.append('track', track);
+      if (attendance === 'OFFLINE') fd.append('head_count', headCount);
       fd.append('declaration', 'true');
       fd.append('camera_ready', cameraReady);
       fd.append('copyright_form', copyrightForm);
@@ -203,6 +234,8 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
       });
       setCloseAfterPopup(true);
       setAttendance(null);
+      setTrack('');
+      setHeadCount('');
       setCameraReady(null);
       setCopyrightForm(null);
       setDeclared(false);
@@ -465,6 +498,22 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
                         ? 'Offline'
                         : status.phase2.attendance_mode,
                   },
+                  ...(status.phase2.attendance_mode === 'OFFLINE'
+                    ? [
+                        {
+                          label: 'Head Count Attending',
+                          ok: !!status.phase2.head_count,
+                          name: status.phase2.head_count ? String(status.phase2.head_count) : null,
+                        },
+                      ]
+                    : []),
+                  {
+                    label: 'Track',
+                    ok: !!status.phase2.track,
+                    name:
+                      CONFERENCE_TRACKS.find((t) => t.value === status.phase2?.track)?.label ||
+                      status.phase2.track,
+                  },
                 ].map((f) => (
                   <div key={f.label} className="flex items-center justify-between gap-2">
                     <span className="flex items-center gap-2 text-black/80 text-xs sm:text-sm">
@@ -513,7 +562,12 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
 
               {/* Mode of Attending (compulsory) */}
               <div className="mb-5">
-                <div className="text-sm font-semibold text-black mb-2">Mode of Attending *</div>
+                <div className="text-sm font-semibold text-black mb-2 flex items-center gap-2">
+                  Mode of Attending <span className="text-red-600">*</span>
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
+                    Important
+                  </span>
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   {(
                     [
@@ -524,7 +578,11 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
                     <button
                       key={opt.value}
                       type="button"
-                      onClick={() => setAttendance(opt.value)}
+                      onClick={() => {
+                        setAttendance(opt.value);
+                        // Head count only applies to offline attendance.
+                        if (opt.value === 'ONLINE') setHeadCount('');
+                      }}
                       className={`inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border-2 transition-all ${
                         attendance === opt.value
                           ? 'bg-black text-white border-black'
@@ -535,7 +593,63 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
                     </button>
                   ))}
                 </div>
+                <p className="mt-1.5 text-[11px] text-black/55">
+                  Please choose carefully — this decides how your paper will be presented.
+                </p>
               </div>
+
+              {/* Offline attendees first tell us how many people are coming. */}
+              {attendance === 'OFFLINE' && (
+                <div className="mb-5">
+                  <label
+                    htmlFor="phase2-head-count"
+                    className="block text-sm font-semibold text-black mb-2"
+                  >
+                    Head Count Attending *
+                  </label>
+                  <select
+                    id="phase2-head-count"
+                    value={headCount}
+                    onChange={(e) => setHeadCount(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-white text-black border-2 border-stone-300 focus:border-black focus:ring-2 focus:ring-black/10 outline-none transition-all"
+                  >
+                    <option value="">Select head count</option>
+                    {HEAD_COUNT_OPTIONS.map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-[11px] text-black/55">
+                    Total number of people attending the conference, including you.
+                  </p>
+                </div>
+              )}
+
+              {/* Track: online asks right away, offline asks after the head count. */}
+              {attendance && (
+                <div className="mb-5">
+                  <label htmlFor="phase2-track" className="block text-sm font-semibold text-black mb-2">
+                    Track *
+                  </label>
+                  <select
+                    id="phase2-track"
+                    value={track}
+                    onChange={(e) => setTrack(e.target.value)}
+                    className="w-full px-4 py-3 rounded-xl bg-white text-black border-2 border-stone-300 focus:border-black focus:ring-2 focus:ring-black/10 outline-none transition-all"
+                  >
+                    <option value="">Select a track</option>
+                    {CONFERENCE_TRACKS.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-[11px] text-black/55">
+                    Select the track you will be attending for.
+                  </p>
+                </div>
+              )}
 
               {/* The two compulsory PDF uploads */}
               <div className="space-y-3 mb-5">
@@ -552,6 +666,11 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
                   'The signed copyright form. PDF only, up to 10MB.'
                 )}
               </div>
+
+              {/* Bold warning: submitting is final. */}
+              <p className="mb-3 text-sm font-bold text-red-800 leading-relaxed">
+                This submission will be considered as final; no changes can be accepted hereafter.
+              </p>
 
               {/* Compulsory declaration */}
               <label className="flex items-start gap-3 rounded-xl border border-stone-300 bg-stone-50/80 p-4 cursor-pointer">

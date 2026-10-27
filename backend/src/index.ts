@@ -1457,6 +1457,7 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.phase2_submitted_at,
+              s.attendance_mode, s.phase2_track, s.phase2_head_count,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
@@ -2225,7 +2226,9 @@ app.get('/api/admin/submissions', async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at,
-              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed, s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
+              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
+              s.phase2_track, s.phase2_head_count,
+              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2461,7 +2464,9 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
 
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
-              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed, s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
+              s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
+              s.phase2_track, s.phase2_head_count,
+              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2745,6 +2750,22 @@ const PHASE2_TEMPLATES: Record<string, { key: string; filename: string; contentT
 // Attendance modes for the Phase 2 form (both compulsory to record).
 const PHASE2_ATTENDANCE_MODES = new Set(['ONLINE', 'OFFLINE']);
 
+// The eight conference tracks an author can attend for in Phase 2. Keys must
+// stay in sync with user-portal/src/data/conferenceTracks.ts.
+const PHASE2_TRACKS = new Set([
+  'ai-intelligent-systems',
+  'ml-advanced-analytics',
+  'data-science-decision-intelligence',
+  'iot-edge-embedded',
+  'communication-network',
+  'cybersecurity',
+  'robotics-automation',
+  'emerging-tech-sustainability',
+]);
+
+// Offline attendees must say how many people are coming (1-6).
+const PHASE2_HEAD_COUNTS = new Set([1, 2, 3, 4, 5, 6]);
+
 // A submitted Phase 2 package is final UNLESS a reviewer sent it back for
 // changes. These camera-ready decisions re-open editing for the author
 // (re-submitting locks it again and clears the decision).
@@ -2943,6 +2964,7 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     const submission = await c.env.DB.prepare(
       `SELECT s.id, s.user_id, s.author_email, s.title, s.submission_code, s.status, s.payment_status,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
+              s.phase2_track, s.phase2_head_count,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file,
@@ -2952,6 +2974,7 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     ).bind(submissionId).first() as {
       id: string; user_id: string; author_email: string; title: string | null; submission_code: string | null; status: string; payment_status: string | null;
       phase2_submitted_at: string | null; attendance_mode: string | null; declaration_confirmed: number;
+      phase2_track: string | null; phase2_head_count: number | null;
       camera_ready_status: string | null; camera_ready_comments: string | null; camera_ready_reviewed_at: string | null;
       camera_ready_file: string | null; copyright_form_file: string | null;
     } | null;
@@ -2996,6 +3019,8 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
         ? {
             submitted_at: submission.phase2_submitted_at,
             attendance_mode: submission.attendance_mode,
+            head_count: submission.phase2_head_count,
+            track: submission.phase2_track,
             declaration_confirmed: !!submission.declaration_confirmed,
             camera_ready_file: submission.camera_ready_file || null,
             copyright_form_file: submission.copyright_form_file || null,
@@ -3035,6 +3060,24 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     const attendance = String(formData['attendance_mode'] || '').trim().toUpperCase();
     if (!PHASE2_ATTENDANCE_MODES.has(attendance)) {
       return c.json({ success: false, error: 'Please select whether you will attend Online or Offline.' }, 400);
+    }
+
+    // Track is compulsory for both modes; offline attendees also give a head
+    // count. Online submissions always store a NULL head count.
+    const phase2Track = String(formData['track'] || '').trim();
+    if (!PHASE2_TRACKS.has(phase2Track)) {
+      return c.json({ success: false, error: 'Please select the track you will be attending for.' }, 400);
+    }
+    let headCount: number | null = null;
+    if (attendance === 'OFFLINE') {
+      const rawHeadCount = Number(String(formData['head_count'] || '').trim());
+      if (!Number.isInteger(rawHeadCount) || !PHASE2_HEAD_COUNTS.has(rawHeadCount)) {
+        return c.json(
+          { success: false, error: 'Please select how many people will be attending (1 to 6).' },
+          400
+        );
+      }
+      headCount = rawHeadCount;
     }
 
     const declared = formData['declaration'];
@@ -3080,8 +3123,8 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      `UPDATE submissions SET attendance_mode = ?, declaration_confirmed = 1, phase2_submitted_at = ?, camera_ready_status = NULL, camera_ready_comments = NULL, camera_ready_reviewed_at = NULL, camera_ready_reviewed_by = NULL, updated_at = ? WHERE id = ?`
-    ).bind(attendance, now, now, submissionId).run();
+      `UPDATE submissions SET attendance_mode = ?, phase2_track = ?, phase2_head_count = ?, declaration_confirmed = 1, phase2_submitted_at = ?, camera_ready_status = NULL, camera_ready_comments = NULL, camera_ready_reviewed_at = NULL, camera_ready_reviewed_by = NULL, updated_at = ? WHERE id = ?`
+    ).bind(attendance, phase2Track, headCount, now, now, submissionId).run();
 
     return c.json({
       success: true,
@@ -3089,6 +3132,8 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
       phase2: {
         submitted_at: now,
         attendance_mode: attendance,
+        head_count: headCount,
+        track: phase2Track,
         declaration_confirmed: true,
         camera_ready_file: cameraStored.file.original_filename,
         copyright_form_file: copyrightStored.file.original_filename,
@@ -3605,6 +3650,10 @@ const EXPORT_COLUMNS: { id: string; label: string; pick: (s: any) => string }[] 
   { id: 'updated_at', label: 'Last Updated', pick: (s) => fmtExportDate(s.updated_at) },
   { id: 'enquired', label: 'Enquired', pick: (s) => (s.enquired ? 'Yes' : 'No') },
   { id: 'no_corrections', label: 'No Corrections', pick: (s) => (s.no_corrections ? 'Yes' : 'No') },
+  // Phase 2 (camera-ready) attendance details, used for venue/head-count planning.
+  { id: 'attendance_mode', label: 'Attending', pick: (s) => (s.attendance_mode === 'ONLINE' ? 'Online' : s.attendance_mode === 'OFFLINE' ? 'Offline' : '') },
+  { id: 'phase2_track', label: 'Phase 2 Track', pick: (s) => (s.phase2_track || '').replace(/-/g, ' ') },
+  { id: 'phase2_head_count', label: 'Head Count Attending', pick: (s) => (s.phase2_head_count ? String(s.phase2_head_count) : '') },
   { id: 'manuscript_file', label: 'Manuscript Filename', pick: (s) => s.manuscript_file || '' },
   { id: 'plagiarism_file', label: 'Plagiarism Filename', pick: (s) => s.plagiarism_file || '' },
   { id: 'ai_plagiarism_file', label: 'AI Plagiarism Filename', pick: (s) => s.ai_plagiarism_file || '' },
@@ -3730,6 +3779,7 @@ app.post('/api/admin/export', async (c) => {
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.keywords, s.track, s.status,
               s.author_name, s.author_email, s.created_at AS submitted_at, s.updated_at, s.enquired, s.no_corrections,
+              s.attendance_mode, s.phase2_track, s.phase2_head_count,
               s.registration_type, s.author_type, s.fee_amount, s.fee_tier,
               s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.payment_proof_url,
               s.acceptance_mail_sent_at,

@@ -13,6 +13,7 @@ import {
 import paperIcon from '../../assets/images/paper.png';
 import infoIcon from '../../assets/images/info.png';
 import { Popup, PopupInfo } from '../Popup';
+import { CONFERENCE_TRACKS } from '../../data/conferenceTracks';
 
 interface SubmissionWizardProps {
   onComplete: () => void;
@@ -487,14 +488,11 @@ export function SubmissionWizard({ onComplete, onBack, getToken, clerkUser }: Su
                   className="w-full px-4 py-3 rounded-xl bg-white border-stone-200 shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
                 >
                   <option value="">Select a track</option>
-                  <option value="ai-intelligent-systems">Artificial Intelligence &amp; Intelligent Systems</option>
-                  <option value="ml-advanced-analytics">Machine Learning &amp; Advanced Analytics</option>
-                  <option value="data-science-decision-intelligence">Data Science &amp; Decision Intelligence</option>
-                  <option value="iot-edge-embedded">IoT, Edge Computing &amp; Embedded Systems</option>
-                  <option value="communication-network">Communication Systems &amp; Network Technologies</option>
-                  <option value="cybersecurity">Cybersecurity &amp; Secure Computing</option>
-                  <option value="robotics-automation">Robotics, Automation &amp; Smart Industry</option>
-                  <option value="emerging-tech-sustainability">Emerging Technologies, Sustainability &amp; AI Management</option>
+                  {CONFERENCE_TRACKS.map((t) => (
+                    <option key={t.value} value={t.value}>
+                      {t.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>

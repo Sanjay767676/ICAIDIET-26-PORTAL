@@ -67,9 +67,12 @@ interface Submission {
   copyright_form_file?: string | null;
   phase2_submitted_at?: string | null;
   attendance_mode?: string | null;
+  // Track chosen on the Phase 2 form and, for offline attendees, the head count.
+  phase2_track?: string | null;
+  phase2_head_count?: number | null;
   declaration_confirmed?: number;
   // Reviewer's decision on the camera-ready package (set from the reviewer
-  // portal's View Camera Ready tab): ACCEPTED or MINOR_CHANGES.
+  // portal's View Camera Ready tab): ACCEPTED, MINOR_CHANGES or MAJOR_CHANGES.
   camera_ready_status?: string | null;
   camera_ready_comments?: string | null;
   camera_ready_reviewed_at?: string | null;
@@ -112,6 +115,18 @@ const PHASE2_REVIEW_META: Record<string, { label: string; cls: string }> = {
   // The reviewer's camera-ready decision (separate from the paper decision).
   MINOR_CHANGES: { label: 'Camera Ready: Minor Changes', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
   MAJOR_CHANGES: { label: 'Camera Ready: Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+};
+
+// The eight conference tracks, keyed exactly as stored in the database.
+const TRACK_LABELS: Record<string, string> = {
+  'ai-intelligent-systems': 'Artificial Intelligence & Intelligent Systems',
+  'ml-advanced-analytics': 'Machine Learning & Advanced Analytics',
+  'data-science-decision-intelligence': 'Data Science & Decision Intelligence',
+  'iot-edge-embedded': 'IoT, Edge Computing & Embedded Systems',
+  'communication-network': 'Communication Systems & Network Technologies',
+  cybersecurity: 'Cybersecurity & Secure Computing',
+  'robotics-automation': 'Robotics, Automation & Smart Industry',
+  'emerging-tech-sustainability': 'Emerging Technologies, Sustainability & AI Management',
 };
 
 const STATUS_OPTIONS = ['SUBMITTED', 'UNDER_REVIEW', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
@@ -3576,6 +3591,20 @@ Duplicates
                           <td className="py-4 px-5 text-sm align-top">
                             <div className="font-semibold text-brand-text line-clamp-2">{s.title}</div>
                             <div className="text-xs text-brand-text/50 mt-0.5 font-mono">{s.paper_id || s.submission_code}</div>
+                            {(s.attendance_mode || s.phase2_track) && (
+                              <div className="mt-1 text-[11px] leading-snug text-brand-text/60">
+                                {s.attendance_mode === 'OFFLINE'
+                                  ? `Offline · ${s.phase2_head_count ?? '—'} attending`
+                                  : s.attendance_mode === 'ONLINE'
+                                  ? 'Online'
+                                  : ''}
+                                {s.phase2_track
+                                  ? `${s.attendance_mode ? ' · ' : ''}${
+                                      TRACK_LABELS[s.phase2_track] || s.phase2_track.replace(/-/g, ' ')
+                                    }`
+                                  : ''}
+                              </div>
+                            )}
                           </td>
                           <td className="py-4 px-5 text-sm align-top">
                             <div className="font-medium text-brand-text">
@@ -3668,6 +3697,20 @@ Duplicates
                       <div className="text-xs text-brand-text/60">
                         Submitted: {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
                       </div>
+                      {(s.attendance_mode || s.phase2_track) && (
+                        <div className="text-xs text-brand-text/60">
+                          {s.attendance_mode === 'OFFLINE'
+                            ? `Offline · ${s.phase2_head_count ?? '—'} attending`
+                            : s.attendance_mode === 'ONLINE'
+                            ? 'Online'
+                            : ''}
+                          {s.phase2_track
+                            ? `${s.attendance_mode ? ' · ' : ''}${
+                                TRACK_LABELS[s.phase2_track] || s.phase2_track.replace(/-/g, ' ')
+                              }`
+                            : ''}
+                        </div>
+                      )}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
                         <button
                           onClick={() => openPdf(s.id, 'camera_ready', s.camera_ready_file || 'camera-ready.pdf')}
