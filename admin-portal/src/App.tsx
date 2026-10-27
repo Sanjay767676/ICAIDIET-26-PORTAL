@@ -503,28 +503,42 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
 // ------------------------------------------------------------------
 // PDF viewer modal (fetches the file with the auth token)
 // ------------------------------------------------------------------
+// In-memory cache for fetched document blob URLs so repeat views within a session are instant (0ms delay)
+const pdfBlobCache = new Map<string, string>();
+
 function PdfViewer({ file, token, onClose }: { file: FileView; token: string; onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const loadPdf = useCallback(async () => {
+  const loadPdf = useCallback(async (force = false) => {
     if (!file.url) return;
     setError(null);
-    setPdfUrl(null);
-    const res = await fetch(file.url, { headers: { Authorization: `Bearer ${token}` } });
-    if (!res.ok) {
-      setError('Could not load this document. It may have been removed.');
+    if (!force && pdfBlobCache.has(file.url)) {
+      setPdfUrl(pdfBlobCache.get(file.url)!);
       return;
     }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    setPdfUrl(url);
+    setLoading(true);
+    setPdfUrl(null);
+    try {
+      const res = await fetch(file.url, { headers: { Authorization: `Bearer ${token}` } });
+      if (!res.ok) {
+        setError('Could not load this document. It may have been removed.');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      pdfBlobCache.set(file.url, url);
+      setPdfUrl(url);
+    } catch {
+      setError('Network error while loading document.');
+    } finally {
+      setLoading(false);
+    }
   }, [file.url, token]);
 
   useEffect(() => {
     loadPdf();
-    // We don't revoke the blob URL immediately on unmount because the browser
-    // might still be rendering it, but we can clean up old ones if needed.
   }, [loadPdf]);
 
   const downloadPdf = async () => {
@@ -594,13 +608,13 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
             </button>
             <button
               onClick={() => {
-                setError(null);
-                loadPdf();
+                if (file.url) pdfBlobCache.delete(file.url);
+                loadPdf(true);
               }}
               className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
               aria-label="Reload"
             >
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
             <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded-lg transition-colors" aria-label="Close">
               &times;
@@ -609,18 +623,21 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
         </div>
         <div className="flex-1 bg-white relative overflow-hidden flex flex-col">
           {error ? (
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-red-600 bg-red-50 border border-red-200 px-5 py-3 rounded-lg text-sm">
+            <div className="absolute inset-0 flex items-center justify-center p-4">
+              <div className="text-red-600 bg-red-50 border border-red-200 px-5 py-3 rounded-lg text-sm max-w-md text-center">
                 {error}
               </div>
             </div>
           ) : pdfUrl ? (
-            <object data={pdfUrl} type="application/pdf" className="w-full h-full flex-1">
-              <iframe src={pdfUrl} title="Manuscript" className="w-full h-full flex-1 border-0" />
-            </object>
+            <iframe
+              src={`${pdfUrl}#toolbar=1&navpanes=0`}
+              title={file.filename || 'Document Viewer'}
+              className="w-full h-full flex-1 border-0 bg-slate-100"
+            />
           ) : (
-            <div className="absolute inset-0 flex items-center justify-center text-brand-text/50">
-              <Loader2 className="w-6 h-6 animate-spin" />
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-brand-text/60">
+              <Loader2 className="w-7 h-7 animate-spin text-brand-primary" />
+              <span className="text-xs font-medium">Loading document...</span>
             </div>
           )}
         </div>
@@ -3002,8 +3019,8 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
 
   React.useEffect(() => {
     if (token) {
+      // Prioritize primary dashboard data and settings first
       fetchSubmissions();
-      fetchDeletedSubmissions();
       fetchSettings();
       fetchMailTemplates({ silent: true });
       const now = Date.now();
@@ -3012,6 +3029,14 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
+
+  // Load deleted submissions on demand only when the admin opens the 'deleted' tab
+  React.useEffect(() => {
+    if (token && activeTab === 'deleted') {
+      fetchDeletedSubmissions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeTab]);
 
   React.useEffect(() => {
     if (!token) return;

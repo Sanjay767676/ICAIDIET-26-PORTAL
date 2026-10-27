@@ -1489,42 +1489,27 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
     let reviewsBySubmission: Record<string, any> = {};
 
     if (submissions.length > 0) {
-      const ids = submissions.map((s: any) => s.id as string);
-      const chunks = chunkArray(ids, 50);
-
-      const [authorResults, reviewResults] = await Promise.all([
-        Promise.all(
-          chunks.map(async (chunk) => {
-            const placeholders = chunk.map(() => '?').join(',');
-            const res = await c.env.DB.prepare(
-              `SELECT id, submission_id, is_primary, first_name, last_name
-               FROM authors
-               WHERE submission_id IN (${placeholders})
-               ORDER BY is_primary DESC, created_at ASC`
-            ).bind(...chunk).all();
-            return (res.results as any[]) || [];
-          })
-        ),
-        Promise.all(
-          chunks.map(async (chunk) => {
-            const placeholders = chunk.map(() => '?').join(',');
-            const res = await c.env.DB.prepare(
-              `SELECT id, submission_id, reviewer_id, decision, feedback, resubmitted, created_at, updated_at
-               FROM reviews
-               WHERE submission_id IN (${placeholders}) AND reviewer_id = ?`
-            ).bind(...chunk, reviewerId).all();
-            return (res.results as any[]) || [];
-          })
-        ),
+      const [authorRes, reviewRes] = await Promise.all([
+        c.env.DB.prepare(
+          `SELECT id, submission_id, is_primary, first_name, last_name
+           FROM authors
+           WHERE submission_id IN (SELECT id FROM submissions WHERE deleted_at IS NULL)
+           ORDER BY is_primary DESC, created_at ASC`
+        ).all(),
+        c.env.DB.prepare(
+          `SELECT id, submission_id, reviewer_id, decision, feedback, resubmitted, created_at, updated_at
+           FROM reviews
+           WHERE reviewer_id = ? AND submission_id IN (SELECT id FROM submissions WHERE deleted_at IS NULL)`
+        ).bind(reviewerId).all(),
       ]);
 
-      authorsBySubmission = authorResults.flat().reduce((acc: any, a: any) => {
+      authorsBySubmission = (((authorRes.results as any[]) || [])).reduce((acc: any, a: any) => {
         const sid = a.submission_id;
         (acc[sid] = acc[sid] || []).push(a);
         return acc;
       }, {});
 
-      reviewsBySubmission = reviewResults.flat().reduce((acc: any, r: any) => {
+      reviewsBySubmission = (((reviewRes.results as any[]) || [])).reduce((acc: any, r: any) => {
         acc[r.submission_id] = r;
         return acc;
       }, {});
@@ -1597,7 +1582,7 @@ app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => 
         'Content-Type': mime,
         'Content-Disposition': `inline; filename*=UTF-8''${safeName}`,
         'Content-Length': String(object.size),
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': 'private, max-age=600, must-revalidate',
       },
     });
   } catch (error) {
@@ -2272,21 +2257,13 @@ app.get('/api/admin/submissions', async (c) => {
     const submissions = results as any[];
     let authorsBySubmission: Record<string, any[]> = {};
     if (submissions.length > 0) {
-      const ids = submissions.map((s: any) => s.id as string);
-      const chunks = chunkArray(ids, 50);
-      const authorResults = await Promise.all(
-        chunks.map(async (chunk) => {
-          const placeholders = chunk.map(() => '?').join(',');
-          const res = await c.env.DB.prepare(
-            `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
-             FROM authors
-             WHERE submission_id IN (${placeholders})
-             ORDER BY is_primary DESC, created_at ASC`
-          ).bind(...chunk).all();
-          return (res.results as any[]) || [];
-        })
-      );
-      authorsBySubmission = authorResults.flat().reduce((acc: any, a: any) => {
+      const { results: allAuthors } = await c.env.DB.prepare(
+        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+         FROM authors
+         WHERE submission_id IN (SELECT id FROM submissions WHERE deleted_at IS NULL)
+         ORDER BY is_primary DESC, created_at ASC`
+      ).all();
+      authorsBySubmission = (((allAuthors as any[]) || [])).reduce((acc: any, a: any) => {
         const sid = a.submission_id;
         (acc[sid] = acc[sid] || []).push(a);
         return acc;
@@ -2338,21 +2315,13 @@ app.get('/api/admin/submissions/deleted', async (c) => {
     const submissions = results as any[];
     let authorsBySubmission: Record<string, any[]> = {};
     if (submissions.length > 0) {
-      const ids = submissions.map((s: any) => s.id as string);
-      const chunks = chunkArray(ids, 50);
-      const authorResults = await Promise.all(
-        chunks.map(async (chunk) => {
-          const placeholders = chunk.map(() => '?').join(',');
-          const res = await c.env.DB.prepare(
-            `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
-             FROM authors
-             WHERE submission_id IN (${placeholders})
-             ORDER BY is_primary DESC, created_at ASC`
-          ).bind(...chunk).all();
-          return (res.results as any[]) || [];
-        })
-      );
-      authorsBySubmission = authorResults.flat().reduce((acc: any, a: any) => {
+      const { results: allAuthors } = await c.env.DB.prepare(
+        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+         FROM authors
+         WHERE submission_id IN (SELECT id FROM submissions WHERE deleted_at IS NOT NULL)
+         ORDER BY is_primary DESC, created_at ASC`
+      ).all();
+      authorsBySubmission = (((allAuthors as any[]) || [])).reduce((acc: any, a: any) => {
         const sid = a.submission_id;
         (acc[sid] = acc[sid] || []).push(a);
         return acc;
@@ -2431,7 +2400,7 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
         'Content-Type': mime,
         'Content-Disposition': `inline; filename*=UTF-8''${safeName}`,
         'Content-Length': String(object.size),
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': 'private, max-age=600, must-revalidate',
       },
     });
   } catch (error) {
@@ -5078,7 +5047,7 @@ app.get('/api/admin/submissions/:id/payment-proof', async (c) => {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': 'inline',
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': 'private, max-age=600, must-revalidate',
       },
     });
   } catch (err: any) {
