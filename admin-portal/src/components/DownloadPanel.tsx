@@ -82,7 +82,8 @@ export default function DownloadPanel({
         throw new Error(data?.error || 'Failed to load export columns.');
       }
       setColumns(data.columns || []);
-      setSelected((data.columns || []).map((c: ExportColumn) => c.id));
+      // Columns start unselected: the admin picks only what they need.
+      setSelected([]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load export columns.');
     } finally {
@@ -222,6 +223,7 @@ export default function DownloadPanel({
     setOption('choose');
     setStep(1);
     setFilter('ALL');
+    setSelected([]);
     setError(null);
     setSuccess(null);
   };
@@ -414,6 +416,13 @@ export default function DownloadPanel({
                   )}
                 </div>
               </div>
+
+              {!loadingColumns && (
+                <p className="mb-3 text-xs text-brand-text/60">
+                  No column is selected by default &mdash; tick only the columns you need.
+                  {selected.length === 0 && ' Select at least one column to enable the download.'}
+                </p>
+              )}
 
               {loadingColumns ? (
                 <div className="py-12 text-center text-sm text-brand-text/50">Loading export columns...</div>
