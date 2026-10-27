@@ -959,6 +959,21 @@ function isStillPayable(sub: MySubmission) {
   return isPayablePaper(sub) && sub.payment_status !== 'APPROVED' && sub.payment_status !== 'PENDING';
 }
 
+// Once the camera-ready package is submitted it is final, so the manuscript and
+// plagiarism PDFs are frozen with it — otherwise the paper an admin sees in the
+// Camera Ready tab can be swapped underneath them. The only way back in is a
+// reviewer asking for minor/major changes, which reopens the Phase 2 package and
+// these files together. Mirrors the 409 lock in POST /api/submissions/:id/files.
+function initialFilesLocked(sub: MySubmission) {
+  if (!sub.phase2_submitted_at) return false;
+  return (
+    sub.camera_ready_status !== 'MINOR_CHANGES' &&
+    sub.camera_ready_status !== 'MAJOR_CHANGES' &&
+    sub.camera_ready_status !== 'ACCEPTED_WITH_MINOR_CHANGES' &&
+    sub.camera_ready_status !== 'ACCEPTED_WITH_MAJOR_CHANGES'
+  );
+}
+
 // Payment form wrapper. Authors with more than one accepted paper pick which
 // one this payment settles, so the amount received always maps to one paper.
 // The inner form is keyed on the chosen id so switching papers resets the
@@ -1428,10 +1443,17 @@ export function MySubmissions({
               (sub.payment_status !== 'REJECTED' &&
                 (sub.payment_status === 'PENDING' ||
                   !!(sub.payment_proof_url && sub.utr_transaction_id)));
+            const isPaymentAwaitingApproval =
+              sub.payment_status !== 'APPROVED' &&
+              sub.payment_status !== 'REJECTED' &&
+              Boolean(sub.payment_submitted_at || (sub.payment_proof_url && sub.utr_transaction_id));
             const isPaymentOpen =
               expandedPaymentIds[sub.id] ||
               isPaymentDone ||
               !!sub.payment_proof_url;
+            const isPhase2Shown =
+              (phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED') ||
+              !!sub.phase2_submitted_at;
 
             return (
               <div key={sub.id} className="space-y-4">
@@ -1506,7 +1528,7 @@ export function MySubmissions({
                       )}
                     </div>
                     <div className="shrink-0">
-                      {!maintenanceMode && fileEditsEnabled && (
+                      {!maintenanceMode && fileEditsEnabled && !initialFilesLocked(sub) && (
                         <button
                           onClick={() => setEditing(sub)}
                           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-brand-text hover:bg-brand-accent transition-all shadow-sm hover:shadow"
@@ -1516,6 +1538,17 @@ export function MySubmissions({
                       )}
                     </div>
                   </div>
+
+                  {/* Camera-ready submitted and not sent back for changes: the
+                      paper files are final, so the Edit Files button is gone and
+                      this explains why. */}
+                  {!maintenanceMode && initialFilesLocked(sub) && (
+                    <div className="mt-3 text-xs text-stone-700 bg-stone-100 border border-stone-300 rounded-lg p-2.5">
+                      Your camera-ready submission is final, so the paper files can no longer be
+                      changed. The organizers will reopen them if the reviewer asks for minor or
+                      major changes.
+                    </div>
+                  )}
 
                   {maintenanceMode && (
                     <div className="mt-3 text-xs text-yellow-800 bg-yellow-50 border border-yellow-300 rounded-lg p-2.5">
@@ -1560,9 +1593,8 @@ export function MySubmissions({
                   </div>
                 )}
 
-                {/* Accepted + phase open but payment not yet approved: a passive
-                    hint instead of the button (the button needs BOTH). */}
-                {phase2Enabled && isSubAccepted && sub.payment_status !== 'APPROVED' && !sub.phase2_submitted_at && (
+                {/* Accepted + phase open + author has made payment and is awaiting admin approval */}
+                {phase2Enabled && isSubAccepted && isPaymentAwaitingApproval && !sub.phase2_submitted_at && (
                   <div className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded-xl p-3.5">
                     The Phase 2 (camera-ready) submission page will unlock for this paper once your
                     registration payment is approved.
@@ -1648,7 +1680,8 @@ export function MySubmissions({
                         </div>
                       </div>
                     )}
-                    {sub.camera_ready_status === 'MINOR_CHANGES' && (
+                    {(sub.camera_ready_status === 'MINOR_CHANGES' ||
+                      sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES') && (
                       <div className="mt-3 rounded-xl border border-amber-400 bg-amber-50 p-3">
                         <div className="text-xs font-bold text-amber-900">Minor Changes Requested</div>
                         <div className="text-[11px] text-amber-800 mt-0.5">
@@ -1662,7 +1695,8 @@ export function MySubmissions({
                         )}
                       </div>
                     )}
-                    {sub.camera_ready_status === 'MAJOR_CHANGES' && (
+                    {(sub.camera_ready_status === 'MAJOR_CHANGES' ||
+                      sub.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES') && (
                       <div className="mt-3 rounded-xl border border-orange-400 bg-orange-50 p-3">
                         <div className="text-xs font-bold text-orange-900">Major Changes Requested</div>
                         <div className="text-[11px] text-orange-800 mt-0.5">
@@ -1705,8 +1739,9 @@ export function MySubmissions({
                   </div>
                 )}
 
-                {/* Bottom Box (Accepted Callout Card & Payment Form matching Excalidraw mockup) */}
-                {isSubAccepted && (
+                {/* Bottom Box (Accepted Callout Card & Payment Form).
+                    When Phase 2 is shown, the payment card is removed. */}
+                {isSubAccepted && !isPhase2Shown && (
                   <div className="space-y-4">
                     {sub.can_pay ? (
                       <>
@@ -1781,8 +1816,8 @@ export function MySubmissions({
       )}
 
       {/* Guarded as well as the button: the endpoint is the real gate (it
-          returns 403), this just avoids opening a form that cannot submit. */}
-      {editing && fileEditsEnabled && (
+          returns 403/409), this just avoids opening a form that cannot submit. */}
+      {editing && fileEditsEnabled && !initialFilesLocked(editing) && (
         <EditFilesModal
           sub={editing}
           getToken={getToken}

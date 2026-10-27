@@ -1654,15 +1654,17 @@ app.post('/api/reviewer/submissions/:id/camera-ready-review', requireReviewerAut
       'ACCEPTED_WITH_MAJOR_CHANGES',
       'MINOR_CHANGES',
       'MAJOR_CHANGES',
+      'NOT_ACCEPTED',
+      'REJECTED',
     ];
     if (!VALID.includes(decision)) {
       return c.json(
-        { success: false, error: 'Please choose Accepted, Accepted With Minor Changes or Accepted With Major Changes.' },
+        { success: false, error: 'Please choose Accepted, Accepted With Minor Changes, Accepted With Major Changes, or Not Accepted.' },
         400
       );
     }
     if (wantsChanges && !comments) {
-      return c.json({ success: false, error: 'Please add comments explaining the changes required.' }, 400);
+      return c.json({ success: false, error: 'Please add comments explaining the decision or changes required.' }, 400);
     }
 
     const submission = await c.env.DB.prepare(
@@ -1675,7 +1677,14 @@ app.post('/api/reviewer/submissions/:id/camera-ready-review', requireReviewerAut
       return c.json({ success: false, error: 'This paper has not submitted the Phase 2 package yet.' }, 400);
     }
 
-    const status = decision === 'ACCEPTED' ? 'ACCEPTED' : isMajor ? 'MAJOR_CHANGES' : 'MINOR_CHANGES';
+    const status =
+      decision === 'ACCEPTED'
+        ? 'ACCEPTED'
+        : decision === 'NOT_ACCEPTED' || decision === 'REJECTED'
+        ? 'NOT_ACCEPTED'
+        : isMajor
+        ? 'MAJOR_CHANGES'
+        : 'MINOR_CHANGES';
     const now = new Date().toISOString();
     await c.env.DB.prepare(
       `UPDATE submissions SET camera_ready_status = ?, camera_ready_comments = ?, camera_ready_reviewed_at = ?, camera_ready_reviewed_by = ?, updated_at = ? WHERE id = ?`
@@ -2525,6 +2534,16 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
   }
 });
 
+// A submitted Phase 2 package is final UNLESS a reviewer sent it back for
+// changes. These camera-ready decisions re-open editing for the author
+// (re-submitting locks it again and clears the decision).
+const PHASE2_EDITABLE_REVIEW_STATUSES = new Set([
+  'MINOR_CHANGES',
+  'MAJOR_CHANGES',
+  'ACCEPTED_WITH_MINOR_CHANGES',
+  'ACCEPTED_WITH_MAJOR_CHANGES',
+]);
+
 // ------------------------------------------------------------------
 // User: Replace the files of the user's own submission.
 // Details (title, abstract, track, authors, paper ID) can never be
@@ -2565,7 +2584,7 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
     const submission = await c.env.DB.prepare(
-      `SELECT id, user_id, author_email, status, created_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id, user_id, author_email, status, created_at, phase2_submitted_at, camera_ready_status FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!submission) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
@@ -2573,6 +2592,27 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
     const authorized = await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail);
     if (!authorized) {
       return c.json({ success: false, error: 'You can only edit files of your own submission.' }, 403);
+    }
+
+    // The camera-ready package is final, so the manuscript / plagiarism PDFs are
+    // frozen with it: replacing them here would silently change the paper an
+    // admin is looking at in the Camera Ready tab. A reviewer's minor/major
+    // change request reopens both the package and these files, and re-submitting
+    // the package locks them again.
+    const phase2Locked =
+      !!submission.phase2_submitted_at &&
+      !PHASE2_EDITABLE_REVIEW_STATUSES.has(submission.camera_ready_status || '');
+    if (phase2Locked) {
+      return c.json(
+        {
+          success: false,
+          locked: true,
+          phase2_locked: true,
+          error:
+            'Your camera-ready submission is final, so the paper files can no longer be changed. Please contact the organizers if a correction is required.',
+        },
+        409
+      );
     }
     if (submission.user_id !== userId) {
       c.executionCtx.waitUntil(
@@ -2773,18 +2813,8 @@ const PHASE2_TRACKS = new Set([
   'emerging-tech-sustainability',
 ]);
 
-// Offline attendees must say how many people are coming (1-6).
-const PHASE2_HEAD_COUNTS = new Set([1, 2, 3, 4, 5, 6]);
-
-// A submitted Phase 2 package is final UNLESS a reviewer sent it back for
-// changes. These camera-ready decisions re-open editing for the author
-// (re-submitting locks it again and clears the decision).
-const PHASE2_EDITABLE_REVIEW_STATUSES = new Set([
-  'MINOR_CHANGES',
-  'MAJOR_CHANGES',
-  'ACCEPTED_WITH_MINOR_CHANGES',
-  'ACCEPTED_WITH_MAJOR_CHANGES',
-]);
+// Offline attendees must say how many people are coming (1-4).
+const PHASE2_HEAD_COUNTS = new Set([1, 2, 3, 4]);
 
 // Shared gate for the Phase 2 submit: maintenance + approved list (via
 // userPortalGate 'edit'), the phase2_enabled switch, ownership of the
@@ -3083,7 +3113,7 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
       const rawHeadCount = Number(String(formData['head_count'] || '').trim());
       if (!Number.isInteger(rawHeadCount) || !PHASE2_HEAD_COUNTS.has(rawHeadCount)) {
         return c.json(
-          { success: false, error: 'Please select how many people will be attending (1 to 6).' },
+          { success: false, error: 'Please select how many people will be attending (1 to 4).' },
           400
         );
       }

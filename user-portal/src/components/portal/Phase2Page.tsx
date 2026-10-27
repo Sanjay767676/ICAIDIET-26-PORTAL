@@ -17,7 +17,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 type AttendanceMode = 'ONLINE' | 'OFFLINE';
 
 // Head-count options for offline attendees (compulsory for offline).
-const HEAD_COUNT_OPTIONS = [1, 2, 3, 4, 5, 6];
+const HEAD_COUNT_OPTIONS = [1, 2, 3, 4];
 
 interface Phase2Status {
   submission_code: string | null;
@@ -42,7 +42,13 @@ interface Phase2Status {
   // Set by a reviewer from the reviewer portal's "View Camera Ready" tab.
   // ACCEPTED = approved; MINOR_CHANGES = comments explain what to fix.
   camera_ready_review: {
-    status: 'ACCEPTED' | 'MINOR_CHANGES' | 'MAJOR_CHANGES' | null;
+    status:
+      | 'ACCEPTED'
+      | 'MINOR_CHANGES'
+      | 'MAJOR_CHANGES'
+      | 'ACCEPTED_WITH_MINOR_CHANGES'
+      | 'ACCEPTED_WITH_MAJOR_CHANGES'
+      | null;
     comments: string | null;
     reviewed_at: string | null;
   } | null;
@@ -52,6 +58,7 @@ interface Phase2PageProps {
   submissionId: string;
   getToken: () => Promise<string | null>;
   onBack: () => void;
+  onGuidelines?: () => void;
 }
 
 const MAX_PDF_SIZE = 10 * 1024 * 1024;
@@ -61,7 +68,7 @@ const MAX_PDF_SIZE = 10 * 1024 * 1024;
 // request. Reachable only for a submission this signed-in author owns AND that
 // is accepted with an approved payment — the backend status endpoint is the
 // real gate (it returns 403); the not-authorised state below just presents it.
-export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) {
+export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Phase2PageProps) {
   const [status, setStatus] = useState<Phase2Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -337,14 +344,13 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
           reopens editing for that paper.
         </p>
 
-        {/* Template downloads — black buttons matching the site's download style,
-            streamed from the Phase2 R2 bucket. */}
+        {/* Template downloads and Guidelines buttons */}
         <div className="mt-5 flex flex-col sm:flex-row gap-3">
           <button
             type="button"
             onClick={() => downloadTemplate('camera-ready')}
             disabled={downloading !== null}
-            className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-black text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-gray-800 transition-all shadow-xl hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0"
+            className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-black text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-gray-800 transition-all shadow-xl hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0 cursor-pointer"
           >
             {downloading === 'camera-ready' ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -357,7 +363,7 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
             type="button"
             onClick={() => downloadTemplate('copyright')}
             disabled={downloading !== null}
-            className="inline-flex items-center justify-center gap-2 px-8 py-4 bg-black text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-gray-800 transition-all shadow-xl hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0"
+            className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-black text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-gray-800 transition-all shadow-xl hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-60 disabled:hover:translate-y-0 cursor-pointer"
           >
             {downloading === 'copyright' ? (
               <Loader2 className="w-5 h-5 animate-spin" />
@@ -366,6 +372,16 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
             )}
             Copyright Form
           </button>
+          {onGuidelines && (
+            <button
+              type="button"
+              onClick={onGuidelines}
+              className="inline-flex items-center justify-center gap-2 px-6 py-4 bg-black text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-gray-800 transition-all shadow-xl hover:shadow-lg hover:-translate-y-0.5 cursor-pointer"
+            >
+              <FileText className="w-5 h-5" />
+              Phase 2 Guidelines
+            </button>
+          )}
         </div>
 
         {/* Sample copyright form shipped with the portal (public folder).
@@ -457,28 +473,34 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
                   </div>
                 </div>
               ) : status.camera_ready_review?.status === 'MINOR_CHANGES' ||
-                status.camera_ready_review?.status === 'MAJOR_CHANGES' ? (
+                status.camera_ready_review?.status === 'ACCEPTED_WITH_MINOR_CHANGES' ||
+                status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES' ? (
                 <div
                   className={`rounded-2xl border-2 p-4 ${
-                    status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                    status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                    status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES'
                       ? 'border-orange-400 bg-orange-50'
                       : 'border-amber-400 bg-amber-50'
                   }`}
                 >
                   <div
                     className={`font-bold text-sm ${
-                      status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                      status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                      status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES'
                         ? 'text-orange-900'
                         : 'text-amber-900'
                     }`}
                   >
-                    {status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                    {status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                    status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES'
                       ? 'Major Changes Requested'
                       : 'Minor Changes Requested'}
                   </div>
                   <p
                     className={`text-xs mt-0.5 leading-relaxed ${
-                      status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                      status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                      status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES'
                         ? 'text-orange-800'
                         : 'text-amber-800'
                     }`}
@@ -489,7 +511,8 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
                   {status.camera_ready_review.comments && (
                     <div
                       className={`mt-2.5 text-sm bg-white border rounded-xl p-3 whitespace-pre-wrap ${
-                        status.camera_ready_review?.status === 'MAJOR_CHANGES'
+                        status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                        status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES'
                           ? 'text-orange-900 border-orange-200'
                           : 'text-amber-900 border-amber-200'
                       }`}

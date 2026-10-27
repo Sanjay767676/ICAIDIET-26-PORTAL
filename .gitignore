@@ -24,3 +24,8 @@ user-portal/assets/
 backup/
 *.sql
 !backend/migrations/*.sql
+__pycache__/
+*.py[cod]
+backend/scripts/*.json
+backend/scripts/*.sqlite
+backend/scripts/*.txt

@@ -6,8 +6,9 @@ import { HeroSection } from './components/portal/HeroSection';
 import { SubmissionWizard } from './components/portal/SubmissionWizard';
 import { MySubmissions, RegistrationConfig } from './components/portal/MySubmissions';
 import { Phase2Page } from './components/portal/Phase2Page';
+import { Phase2GuidelinesPage } from './components/portal/Phase2GuidelinesPage';
 
-type ViewState = 'home' | 'wizard' | 'submissions' | 'phase2';
+type ViewState = 'home' | 'wizard' | 'submissions' | 'phase2' | 'guidelines';
 
 function SignInRequired({ title, message }: { title: string; message: string }) {
   return (
@@ -192,9 +193,13 @@ export default function App() {
 
   return (
     <>
-      <MainLayout view={currentView === 'phase2' ? 'submissions' : currentView} onNavigate={navigate} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil}>
+      <MainLayout view={currentView === 'phase2' || currentView === 'guidelines' ? 'submissions' : currentView} onNavigate={navigate} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil}>
         {currentView === 'home' && (
-          <HeroSection onStart={() => navigate('wizard')} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil} />
+          <HeroSection
+            onStart={() => navigate('wizard')}
+            maintenanceMode={maintenanceMode}
+            maintenanceUntil={maintenanceUntil}
+          />
         )}
 
         {currentView === 'wizard' &&
@@ -274,8 +279,16 @@ export default function App() {
               submissionId={phase2SubmissionId}
               getToken={getToken}
               onBack={() => navigate('submissions')}
+              onGuidelines={() => navigate('guidelines')}
             />
           </Show>
+        )}
+
+        {/* Phase 2 Guidelines page (hidden, accessible from Phase 2) */}
+        {currentView === 'guidelines' && (
+          <Phase2GuidelinesPage
+            onBack={() => navigate(phase2SubmissionId ? 'phase2' : 'submissions')}
+          />
         )}
       </MainLayout>
       <Analytics />

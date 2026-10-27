@@ -735,19 +735,209 @@ function ReviewEditor({
 }
 
 // ------------------------------------------------------------------
+// Decision editor shown in the "More Actions" column for Camera Ready
+// Mirrors ReviewEditor layout and interaction for Phase 2 submissions.
+// ------------------------------------------------------------------
+function CameraReadyReviewEditor({
+  sub,
+  token,
+  onSaved,
+  onError,
+}: {
+  sub: Submission;
+  token: string;
+  onSaved: (subId: string, review: any, fallbackComments?: string) => void;
+  onError: (msg: string) => void;
+}) {
+  const normalizeStatus = (s?: string | null): ReviewDecision | '' => {
+    if (!s) return '';
+    if (s === 'ACCEPTED') return 'ACCEPTED';
+    if (s === 'MINOR_CHANGES' || s === 'ACCEPTED_WITH_MINOR_CHANGES') return 'ACCEPTED_WITH_MINOR_CHANGES';
+    if (s === 'MAJOR_CHANGES' || s === 'ACCEPTED_WITH_MAJOR_CHANGES') return 'ACCEPTED_WITH_MAJOR_CHANGES';
+    if (s === 'NOT_ACCEPTED' || s === 'REJECTED') return 'NOT_ACCEPTED';
+    return '';
+  };
+
+  const [decision, setDecision] = useState<ReviewDecision | ''>(() => normalizeStatus(sub.camera_ready_status));
+  const [feedback, setFeedback] = useState(sub.camera_ready_comments || '');
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedAt, setSavedAt] = useState<string | null>(sub.camera_ready_reviewed_at || null);
+
+  const syncedRef = useRef({
+    status: sub.camera_ready_status || '',
+    comments: sub.camera_ready_comments || '',
+    reviewedAt: sub.camera_ready_reviewed_at || null,
+  });
+
+  useEffect(() => {
+    const incoming = {
+      status: sub.camera_ready_status || '',
+      comments: sub.camera_ready_comments || '',
+      reviewedAt: sub.camera_ready_reviewed_at || null,
+    };
+    const synced = syncedRef.current;
+    if (
+      incoming.status === synced.status &&
+      incoming.comments === synced.comments &&
+      incoming.reviewedAt === synced.reviewedAt
+    ) {
+      return;
+    }
+    syncedRef.current = incoming;
+    setDecision(normalizeStatus(incoming.status));
+    setFeedback(incoming.comments);
+    setSavedAt(incoming.reviewedAt);
+  }, [sub.camera_ready_status, sub.camera_ready_comments, sub.camera_ready_reviewed_at]);
+
+  const chooseDecision = (d: ReviewDecision) => {
+    setDecision(d);
+    if (d !== 'ACCEPTED') {
+      setModalError(null);
+      setFeedbackOpen(true);
+    }
+  };
+
+  const save = async () => {
+    if (!decision) {
+      onError('Please choose a review decision for this paper.');
+      return;
+    }
+    if (decision !== 'ACCEPTED' && !feedback.trim()) {
+      setModalError('Feedback comments are required for this decision.');
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/reviewer/submissions/${sub.id}/camera-ready-review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ decision, comments: feedback.trim() }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to save the camera-ready review.');
+      }
+      const now = new Date().toISOString();
+      setSavedAt(now);
+      setFeedbackOpen(false);
+      setModalError(null);
+      onSaved(sub.id, data.camera_ready_review, feedback.trim());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to save the camera-ready review.';
+      if (feedbackOpen) setModalError(msg);
+      else onError(msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSaveClick = async () => {
+    if (!decision) {
+      onError('Please choose a review decision for this paper.');
+      return;
+    }
+    if (decision !== 'ACCEPTED' && !feedback.trim()) {
+      setModalError(null);
+      setFeedbackOpen(true);
+      return;
+    }
+    await save();
+  };
+
+  const decisionButtons: ReviewDecision[] = [
+    'ACCEPTED',
+    'ACCEPTED_WITH_MINOR_CHANGES',
+    'ACCEPTED_WITH_MAJOR_CHANGES',
+    'NOT_ACCEPTED',
+  ];
+
+  const decisionIcon = (d: ReviewDecision) =>
+    d === 'ACCEPTED' ? (
+      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+    ) : d === 'NOT_ACCEPTED' ? (
+      <XCircle className="w-3.5 h-3.5 shrink-0" />
+    ) : d === 'ACCEPTED_WITH_MINOR_CHANGES' ? (
+      <PenLine className="w-3.5 h-3.5 shrink-0" />
+    ) : (
+      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+    );
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        {decisionButtons.map((d) => {
+          const meta = decisionMeta(d);
+          const active = decision === d;
+          return (
+            <button
+              key={d}
+              type="button"
+              onClick={() => chooseDecision(d)}
+              className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 transition-colors ${
+                active ? meta.cls : 'border-brand-text/15 text-brand-text/70 hover:bg-brand-text/5'
+              }`}
+              aria-pressed={active}
+            >
+              {decisionIcon(d)} {meta.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {savedAt && (
+        <span className="text-[11px] font-medium text-green-700">
+          {decision
+            ? `Reviewed · ${decisionMeta(decision).label} · ${formatDateTime(savedAt)}`
+            : `Review saved · ${formatDateTime(savedAt)}`}
+        </span>
+      )}
+
+      <button
+        type="button"
+        onClick={handleSaveClick}
+        disabled={saving || !decision}
+        className="inline-flex items-center justify-center gap-1.5 w-full px-3 py-1.5 bg-brand-text text-white rounded-lg text-xs font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
+      >
+        {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+        {sub.camera_ready_status ? 'Update Review' : 'Save Review'}
+      </button>
+
+      {sub.camera_ready_comments && (
+        <details className="mt-0.5 w-full">
+          <summary className="text-[10px] text-brand-text/70 cursor-pointer hover:underline">View comments</summary>
+          <div className="mt-1 text-[11px] text-brand-text/80 bg-amber-50 border border-amber-200 rounded-lg p-2 whitespace-pre-wrap">
+            {sub.camera_ready_comments}
+          </div>
+        </details>
+      )}
+
+      <FeedbackModal
+        open={feedbackOpen}
+        title={`Camera-Ready Review · ${sub.paper_id || sub.submission_code} · ${sub.title}`}
+        value={feedback}
+        saving={saving}
+        error={modalError}
+        onChange={setFeedback}
+        onSave={save}
+        onClose={() => {
+          if (saving) return;
+          setFeedbackOpen(false);
+          setModalError(null);
+        }}
+      />
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
 // Main app
 // ------------------------------------------------------------------
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_reviewer_token') || '');
   const [reviewerName, setReviewerName] = useState<string>(() => sessionStorage.getItem('icaidiet_reviewer_user') || '');
   const [activeTab, setActiveTab] = useState<'pending' | 'reviewed' | 'notAccepted' | 'cameraReady'>('pending');
-  const [cameraReadyModal, setCameraReadyModal] = useState<{
-    submissionId: string;
-    title: string;
-    decision: 'ACCEPTED_WITH_MINOR_CHANGES' | 'ACCEPTED_WITH_MAJOR_CHANGES';
-  } | null>(null);
-  const [cameraReadyComments, setCameraReadyComments] = useState('');
-  const [cameraReadySaving, setCameraReadySaving] = useState(false);
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, pending: 0, accepted: 0, notAccepted: 0 });
   const [loading, setLoading] = useState(false);
@@ -922,75 +1112,6 @@ export default function App() {
           : s
       )
     );
-  };
-
-  const submitCameraReadyReview = async (
-    submissionId: string,
-    decision: 'ACCEPTED' | 'ACCEPTED_WITH_MINOR_CHANGES' | 'ACCEPTED_WITH_MAJOR_CHANGES'
-  ) => {
-    if (decision !== 'ACCEPTED') {
-      setCameraReadyComments('');
-      setCameraReadyModal({
-        submissionId,
-        title: visible.find((s) => s.id === submissionId)?.title || '',
-        decision,
-      });
-      return;
-    }
-    if (!token) return;
-    setCameraReadySaving(true);
-    try {
-      const res = await fetch(`${API_URL}/api/reviewer/submissions/${submissionId}/camera-ready-review`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ decision }),
-      });
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        alert(data?.error || 'Failed to save the camera-ready review.');
-        return;
-      }
-      applyCameraReadyReview(submissionId, data.camera_ready_review);
-    } catch (err) {
-      console.error('Camera-ready review error:', err);
-      alert('Failed to save the camera-ready review.');
-    } finally {
-      setCameraReadySaving(false);
-    }
-  };
-
-  const submitCameraReadyChangeComments = async () => {
-    if (!cameraReadyModal) return;
-    const comments = cameraReadyComments.trim();
-    if (!comments) {
-      alert('Please add comments explaining the changes required.');
-      return;
-    }
-    if (!token) return;
-    setCameraReadySaving(true);
-    try {
-      const res = await fetch(
-        `${API_URL}/api/reviewer/submissions/${cameraReadyModal.submissionId}/camera-ready-review`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ decision: cameraReadyModal.decision, comments }),
-        }
-      );
-      const data = await res.json().catch(() => null);
-      if (!res.ok || !data?.success) {
-        alert(data?.error || 'Failed to save the camera-ready review.');
-        return;
-      }
-      applyCameraReadyReview(cameraReadyModal.submissionId, data.camera_ready_review, comments);
-      setCameraReadyModal(null);
-      setCameraReadyComments('');
-    } catch (err) {
-      console.error('Camera-ready review error:', err);
-      alert('Failed to save the camera-ready review.');
-    } finally {
-      setCameraReadySaving(false);
-    }
   };
 
   const pendingCount = submissions.filter((s) => !s.review).length;
@@ -1258,9 +1379,7 @@ export default function App() {
         />
 
         {/* View Camera Ready tab: papers whose authors submitted the Phase 2
-            package — paper title | primary author | submitted on | actions
-            (view camera ready / view copyright). Deliberately no review
-            editor here: the review decision is recorded on the other tabs. */}
+            package — Paper Title | Primary Author | Submitted On | Actions | More Actions */}
         {activeTab === 'cameraReady' && (
           <>
             {/* Desktop table */}
@@ -1268,20 +1387,21 @@ export default function App() {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[30%] rounded-tl-xl">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[24%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Submitted On</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[28%] rounded-tr-xl">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[24%] rounded-tl-xl">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[26%] rounded-tr-xl">More Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-accent/40">
                   {loading ? (
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                      <td colSpan={5} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
                   ) : visible.length === 0 ? (
                     <tr>
-                      <td colSpan={4} className="py-8 text-center text-brand-text/60">
+                      <td colSpan={5} className="py-8 text-center text-brand-text/60">
                         {emptyMessage}
                       </td>
                     </tr>
@@ -1304,46 +1424,8 @@ export default function App() {
                           <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
                             {sub.phase2_submitted_at ? formatDateTime(sub.phase2_submitted_at) : '—'}
                           </td>
-                          <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-br-xl' : ''}`}>
+                          <td className="py-4 px-5 align-top">
                             <div className="flex flex-col items-start gap-2">
-                              {sub.camera_ready_status === 'ACCEPTED' && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-800 border border-green-300">Accepted</span>
-                              )}
-                              {sub.camera_ready_status === 'MINOR_CHANGES' && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300" title={sub.camera_ready_comments || ''}>Accepted With Minor Changes</span>
-                              )}
-                              {sub.camera_ready_status === 'MAJOR_CHANGES' && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-100 text-orange-800 border border-orange-300" title={sub.camera_ready_comments || ''}>Accepted With Major Changes</span>
-                              )}
-                              {!sub.camera_ready_status && (
-                                <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-700 border border-gray-300">Awaiting review</span>
-                              )}
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => submitCameraReadyReview(sub.id, 'ACCEPTED')}
-                                  disabled={cameraReadySaving}
-                                  className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                                >
-                                  Accepted
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => submitCameraReadyReview(sub.id, 'ACCEPTED_WITH_MINOR_CHANGES')}
-                                  disabled={cameraReadySaving}
-                                  className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
-                                >
-                                  Accepted With Minor Changes
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => submitCameraReadyReview(sub.id, 'ACCEPTED_WITH_MAJOR_CHANGES')}
-                                  disabled={cameraReadySaving}
-                                  className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
-                                >
-                                  Accepted With Major Changes
-                                </button>
-                              </div>
                               <button
                                 onClick={() => openPdf(sub.id, 'camera_ready', sub.camera_ready_file || `${sub.title} — Camera Ready`)}
                                 title={sub.camera_ready_file || 'Camera-ready manuscript'}
@@ -1360,13 +1442,26 @@ export default function App() {
                               >
                                 <Eye className="w-4 h-4" /> View Copyright
                               </button>
-                              {(sub.camera_ready_status === 'MINOR_CHANGES' || sub.camera_ready_status === 'MAJOR_CHANGES') && sub.camera_ready_comments && (
-                                <details className="mt-1 w-full">
-                                  <summary className="text-[10px] text-brand-text/70 cursor-pointer">View comments</summary>
-                                  <div className="mt-1 text-[11px] text-brand-text/80 bg-amber-50 border border-amber-200 rounded-lg p-2 whitespace-pre-wrap">{sub.camera_ready_comments}</div>
-                                </details>
+                              {sub.manuscript_file && (
+                                <button
+                                  onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                                  title={sub.manuscript_file || 'Original Manuscript'}
+                                  className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                                >
+                                  <Eye className="w-4 h-4" /> View Paper
+                                </button>
                               )}
                             </div>
+                          </td>
+                          <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-br-xl' : ''}`}>
+                            <CameraReadyReviewEditor
+                              sub={sub}
+                              token={token}
+                              onSaved={(subId, review, fallbackComments) =>
+                                applyCameraReadyReview(subId, review, fallbackComments)
+                              }
+                              onError={setError}
+                            />
                           </td>
                         </tr>
                       );
@@ -1412,44 +1507,6 @@ export default function App() {
                       </div>
 
                       <div className="mt-4 flex flex-col items-start gap-2 border-t-2 border-brand-accent/40 pt-3">
-                        {sub.camera_ready_status === 'ACCEPTED' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-100 text-green-800 border border-green-300">Accepted</span>
-                        )}
-                        {sub.camera_ready_status === 'MINOR_CHANGES' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-100 text-amber-800 border border-amber-300">Accepted With Minor Changes</span>
-                        )}
-                        {sub.camera_ready_status === 'MAJOR_CHANGES' && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-100 text-orange-800 border border-orange-300">Accepted With Major Changes</span>
-                        )}
-                        {!sub.camera_ready_status && (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 text-gray-700 border border-gray-300">Awaiting review</span>
-                        )}
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => submitCameraReadyReview(sub.id, 'ACCEPTED')}
-                            disabled={cameraReadySaving}
-                            className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
-                          >
-                            Accepted
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => submitCameraReadyReview(sub.id, 'ACCEPTED_WITH_MINOR_CHANGES')}
-                            disabled={cameraReadySaving}
-                            className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50"
-                          >
-                            Accepted With Minor Changes
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => submitCameraReadyReview(sub.id, 'ACCEPTED_WITH_MAJOR_CHANGES')}
-                            disabled={cameraReadySaving}
-                            className="inline-flex items-center px-2.5 py-1 rounded-lg text-xs font-semibold bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
-                          >
-                            Accepted With Major Changes
-                          </button>
-                        </div>
                         <button
                           onClick={() => openPdf(sub.id, 'camera_ready', sub.camera_ready_file || `${sub.title} — Camera Ready`)}
                           disabled={!sub.camera_ready_file}
@@ -1464,9 +1521,25 @@ export default function App() {
                         >
                           <Eye className="w-3.5 h-3.5" /> View Copyright
                         </button>
-                        {(sub.camera_ready_status === 'MINOR_CHANGES' || sub.camera_ready_status === 'MAJOR_CHANGES') && sub.camera_ready_comments && (
-                          <div className="mt-1 w-full text-[11px] text-brand-text/80 bg-amber-50 border border-amber-200 rounded-lg p-2 whitespace-pre-wrap">{sub.camera_ready_comments}</div>
+                        {sub.manuscript_file && (
+                          <button
+                            onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                            className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> View Paper
+                          </button>
                         )}
+                      </div>
+
+                      <div className="mt-4 border-t-2 border-brand-accent/40 pt-3">
+                        <CameraReadyReviewEditor
+                          sub={sub}
+                          token={token}
+                          onSaved={(subId, review, fallbackComments) =>
+                            applyCameraReadyReview(subId, review, fallbackComments)
+                          }
+                          onError={setError}
+                        />
                       </div>
                     </div>
                   );
@@ -1669,51 +1742,6 @@ export default function App() {
           </p>
         </div>
       </footer>
-
-      {cameraReadyModal && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4">
-          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => !cameraReadySaving && setCameraReadyModal(null)} />
-          <div className="relative w-full max-w-lg bg-white rounded-2xl shadow-2xl border-2 border-brand-accent overflow-hidden">
-            <div className="px-5 py-4 bg-brand-text text-white">
-              <div className="font-semibold">
-                {cameraReadyModal.decision === 'ACCEPTED_WITH_MAJOR_CHANGES'
-                  ? 'Request Major Changes'
-                  : 'Request Minor Changes'}
-              </div>
-              <div className="text-xs text-white/80 mt-0.5 truncate">{cameraReadyModal.title}</div>
-            </div>
-            <div className="p-5 space-y-3">
-              <div className="text-sm text-brand-text">Add comments explaining the changes required.</div>
-              <textarea
-                value={cameraReadyComments}
-                onChange={(e) => setCameraReadyComments(e.target.value)}
-                rows={5}
-                className="w-full border border-brand-accent/60 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                placeholder="e.g., Please fix formatting of references and update Figure 2 caption..."
-                disabled={cameraReadySaving}
-              />
-              <div className="flex items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setCameraReadyModal(null)}
-                  disabled={cameraReadySaving}
-                  className="px-4 py-2 rounded-lg text-sm border border-brand-accent/60 text-brand-text disabled:opacity-50"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={submitCameraReadyChangeComments}
-                  disabled={cameraReadySaving}
-                  className="px-4 py-2 rounded-lg text-sm bg-brand-text text-white disabled:opacity-50"
-                >
-                  {cameraReadySaving ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {pdfView.open && <PdfViewer file={pdfView} token={token} onClose={closePdf} />}
     </div>

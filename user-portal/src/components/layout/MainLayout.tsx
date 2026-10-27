@@ -4,7 +4,7 @@ import wileyLogoBlack from '../../assets/images/WILEY(BLACK).png';
 import scopusLogo from '../../assets/images/scopus.png';
 import snsctLogo from '../../assets/images/SNSCT.png';
 
-type NavView = 'home' | 'wizard' | 'submissions';
+type NavView = 'home' | 'wizard' | 'submissions' | 'guidelines';
 
 interface MainLayoutProps {
   children: ReactNode;
