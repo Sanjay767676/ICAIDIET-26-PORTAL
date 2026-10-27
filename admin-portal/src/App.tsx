@@ -76,6 +76,7 @@ interface Submission {
   camera_ready_status?: string | null;
   camera_ready_comments?: string | null;
   camera_ready_reviewed_at?: string | null;
+  camera_ready_resubmitted?: number | null;
 }
 
 interface MailTemplate {
@@ -1533,6 +1534,9 @@ function SubmissionListing({
   onToggleMailSelectAll,
   onSendMail,
   mailSending,
+  showMailStatus,
+  mailStatusFilter,
+  onMailStatusFilterChange,
 }: {
   rows: Submission[];
   total: number;
@@ -1571,6 +1575,9 @@ function SubmissionListing({
   onToggleMailSelectAll?: (list: Submission[]) => void;
   onSendMail?: () => void;
   mailSending?: boolean;
+  showMailStatus?: boolean;
+  mailStatusFilter?: string;
+  onMailStatusFilterChange?: (v: string) => void;
 }) {
   const allSelected = mailSelected && rows.length > 0 && rows.every((s) => mailSelected.includes(s.id));
   return (
@@ -1624,6 +1631,22 @@ function SubmissionListing({
                 ? `Send Email (${mailSelected.length})`
                 : 'Send Email'}
           </button>
+          {onMailStatusFilterChange && (
+            <>
+              <div className="w-px h-6 bg-brand-text/10 mx-1"></div>
+              <select
+                value={mailStatusFilter || ''}
+                onChange={(e) => onMailStatusFilterChange(e.target.value)}
+                className="px-2.5 py-1.5 rounded-lg border-2 border-brand-accent/50 bg-white text-xs text-brand-text shadow-sm focus:border-brand-accent focus:ring-1 focus:ring-brand-accent outline-none min-w-[130px]"
+                aria-label="Filter by mail status"
+              >
+                <option value="">All Mail Statuses</option>
+                <option value="sent">Mail Sent</option>
+                <option value="not_sent">Not Sent</option>
+                <option value="sending">Queued</option>
+              </select>
+            </>
+          )}
         </div>
       )}
 
@@ -1656,6 +1679,9 @@ function SubmissionListing({
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Primary Author</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Status</th>
+              {showMailStatus && (
+                <th className="py-4 px-3 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%] whitespace-nowrap">Mail Status</th>
+              )}
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[17%]">Actions</th>
               <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[11%] rounded-tr-xl">More Actions</th>
             </tr>
@@ -1663,11 +1689,11 @@ function SubmissionListing({
           <tbody className="divide-y divide-brand-accent/40">
             {loading ? (
               <tr>
-                <td colSpan={mailSelected ? 9 : 8} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                <td colSpan={(mailSelected ? 9 : 8) + (showMailStatus ? 1 : 0)} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
               </tr>
             ) : rows.length === 0 ? (
               <tr>
-                <td colSpan={mailSelected ? 9 : 8} className="py-8 text-center text-brand-text/60">
+                <td colSpan={(mailSelected ? 9 : 8) + (showMailStatus ? 1 : 0)} className="py-8 text-center text-brand-text/60">
                   {filtersActive ? emptyFilteredMsg : emptyMsg}
                 </td>
               </tr>
@@ -1721,6 +1747,11 @@ function SubmissionListing({
                       onError={onStatusError}
                     />
                   </td>
+                  {showMailStatus && (
+                    <td className="py-4 px-3 align-top">
+                      {mailStatusBadge(sub.mail_status, sub.mail_sent_at)}
+                    </td>
+                  )}
                   <td className="py-4 px-5 align-top">
                     <div className="flex flex-col items-start gap-2">
                       <button
@@ -1844,6 +1875,12 @@ function SubmissionListing({
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
                   <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
                 </div>
+                {showMailStatus && (
+                  <div>
+                    <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Mail Status</div>
+                    <div className="mt-0.5">{mailStatusBadge(sub.mail_status, sub.mail_sent_at)}</div>
+                  </div>
+                )}
               </div>
 
               <div className="mt-4 flex flex-col items-start gap-1.5 border-t-2 border-brand-accent/40 pt-3">
@@ -3119,7 +3156,7 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
     a.localeCompare(b)
   );
   const q = searchTerm.trim().toLowerCase();
-  const filtersActive = !!(q || trackFilter || paperIdFilter);
+  const filtersActive = !!(q || trackFilter || paperIdFilter || dateFilter || mailStatusFilter || reviewDateFilter);
 const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && s.payment_status !== 'APPROVED');
     const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES' && s.payment_status !== 'APPROVED');
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
@@ -3142,7 +3179,7 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
           matchMailStatus = s.mail_status === 'delivered';
         } else if (mailStatusFilter === 'not_sent') {
           matchMailStatus = !s.mail_status || s.mail_status === 'failed';
-        } else if (mailStatusFilter === 'sending') {
+        } else if (mailStatusFilter === 'sending' || mailStatusFilter === 'queued') {
           matchMailStatus = s.mail_status === 'queued' || s.mail_status === 'sending';
         }
         
@@ -3558,6 +3595,9 @@ Duplicates
                 onToggleMailSelectAll={toggleMailSelectAll}
                 onSendMail={handleSendMail}
                 mailSending={mailSending}
+                showMailStatus={true}
+                mailStatusFilter={mailStatusFilter}
+                onMailStatusFilterChange={setMailStatusFilter}
               />
             )}
           </div>

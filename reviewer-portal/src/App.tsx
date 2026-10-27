@@ -55,6 +55,7 @@ interface Submission {
   camera_ready_status?: string | null;
   camera_ready_comments?: string | null;
   camera_ready_reviewed_at?: string | null;
+  camera_ready_resubmitted?: number | null;
   authors?: Author[];
   review?: Review | null;
 }
@@ -1108,6 +1109,7 @@ export default function App() {
               camera_ready_status: review?.status || null,
               camera_ready_comments: review?.comments ?? fallbackComments ?? null,
               camera_ready_reviewed_at: review?.reviewed_at || new Date().toISOString(),
+              camera_ready_resubmitted: 0,
             }
           : s
       )
@@ -1146,11 +1148,15 @@ export default function App() {
         ? submissions.filter((s) => !!s.phase2_submitted_at)
         : submissions.filter((s) => s.review && s.review.decision === 'ACCEPTED'))
     .slice()
-    .sort((a, b) =>
-      activeTab === 'cameraReady'
-        ? (b.phase2_submitted_at || '').localeCompare(a.phase2_submitted_at || '')
-        : Number(!!b.review?.resubmitted) - Number(!!a.review?.resubmitted)
-    );
+    .sort((a, b) => {
+      if (activeTab === 'cameraReady') {
+        const rankA = a.camera_ready_status === 'ACCEPTED' ? 3 : (a.camera_ready_resubmitted === 1 ? 0 : (!a.camera_ready_status ? 1 : 2));
+        const rankB = b.camera_ready_status === 'ACCEPTED' ? 3 : (b.camera_ready_resubmitted === 1 ? 0 : (!b.camera_ready_status ? 1 : 2));
+        if (rankA !== rankB) return rankA - rankB;
+        return (b.phase2_submitted_at || '').localeCompare(a.phase2_submitted_at || '');
+      }
+      return Number(!!b.review?.resubmitted) - Number(!!a.review?.resubmitted);
+    });
   const visible = applyFilters(baseVisible);
 
   const emptyMessage = activeTab === 'pending'
@@ -1409,12 +1415,15 @@ export default function App() {
                     visible.map((sub, idx) => {
                       const primary = (sub.authors || []).find((a) => a.is_primary) || (sub.authors || [])[0];
                       return (
-                        <tr key={sub.id} className="bg-white hover:bg-brand-bg/40">
+                        <tr key={sub.id} className={`${sub.camera_ready_resubmitted === 1 ? 'animate-updated-pulse bg-teal-50/50' : 'bg-white'}`}>
                           <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-bl-xl' : ''}`}>
                             <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
                             <div className="text-xs text-brand-text/50 font-normal mt-0.5 break-words font-mono">
                               {sub.paper_id || sub.submission_code}
                             </div>
+                            {sub.camera_ready_resubmitted === 1 && (
+                              <div className="mt-1"><UpdatedBadge /></div>
+                            )}
                           </td>
                           <td className="py-4 px-5 align-top">
                             <div className="font-medium text-brand-text break-words">
@@ -1485,12 +1494,15 @@ export default function App() {
                 visible.map((sub) => {
                   const primary = (sub.authors || []).find((a) => a.is_primary) || (sub.authors || [])[0];
                   return (
-                    <div key={sub.id} className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 sm:p-5">
+                    <div key={sub.id} className={`${sub.camera_ready_resubmitted === 1 ? 'animate-updated-pulse bg-teal-50/50 border-2 border-teal-400' : 'bg-white rounded-xl shadow-sm border-2 border-brand-accent'} rounded-xl shadow-sm p-4 sm:p-5`}>
                       <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Paper Title</div>
                       <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
                       <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mt-1">
                         {sub.paper_id || sub.submission_code}
                       </div>
+                      {sub.camera_ready_resubmitted === 1 && (
+                        <div className="mt-1.5"><UpdatedBadge /></div>
+                      )}
 
                       <div className="mt-3">
                         <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>

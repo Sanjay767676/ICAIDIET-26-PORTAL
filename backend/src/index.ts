@@ -1468,7 +1468,7 @@ app.get('/api/reviewer/submissions', requireReviewerAuth, async (c) => {
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.deleted_at, s.phase2_submitted_at,
               s.attendance_mode, s.phase2_track, s.phase2_head_count,
-              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
+              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at, s.camera_ready_resubmitted,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -1687,7 +1687,7 @@ app.post('/api/reviewer/submissions/:id/camera-ready-review', requireReviewerAut
         : 'MINOR_CHANGES';
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      `UPDATE submissions SET camera_ready_status = ?, camera_ready_comments = ?, camera_ready_reviewed_at = ?, camera_ready_reviewed_by = ?, updated_at = ? WHERE id = ?`
+      `UPDATE submissions SET camera_ready_status = ?, camera_ready_comments = ?, camera_ready_reviewed_at = ?, camera_ready_reviewed_by = ?, camera_ready_resubmitted = 0, updated_at = ? WHERE id = ?`
     ).bind(status, wantsChanges ? comments : null, now, reviewerId, now, submissionId).run();
 
     return c.json({
@@ -2247,7 +2247,7 @@ app.get('/api/admin/submissions', async (c) => {
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
               s.phase2_track, s.phase2_head_count,
-              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
+              s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at, s.camera_ready_resubmitted,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2823,7 +2823,7 @@ const PHASE2_HEAD_COUNTS = new Set([1, 2, 3, 4]);
 async function preparePhase2Submission(
   c: Context<AppEnv>,
   submissionId: string
-): Promise<{ ok: false; res: Response } | { ok: true }> {
+): Promise<{ ok: false; res: Response } | { ok: true; submission: any }> {
   const settings = await loadSettingsRecord(c.env);
   if (settings['phase2_enabled'] !== 'true') {
     return {
@@ -2842,7 +2842,7 @@ async function preparePhase2Submission(
 
   const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
   const submission = await c.env.DB.prepare(
-    `SELECT id, user_id, author_email, status, payment_status, phase2_submitted_at, camera_ready_status FROM submissions WHERE id = ? AND deleted_at IS NULL`
+    `SELECT id, user_id, author_email, status, payment_status, phase2_submitted_at, camera_ready_status, camera_ready_reviewed_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
   ).bind(submissionId).first() as {
     id: string;
     user_id: string;
@@ -2851,6 +2851,7 @@ async function preparePhase2Submission(
     payment_status: string | null;
     phase2_submitted_at: string | null;
     camera_ready_status: string | null;
+    camera_ready_reviewed_at: string | null;
   } | null;
   if (!submission) {
     return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
@@ -2913,7 +2914,7 @@ async function preparePhase2Submission(
       ),
     };
   }
-  return { ok: true };
+  return { ok: true, submission };
 }
 
 // Validate + write one Phase 2 file to R2 and upsert its submission_files
@@ -3095,6 +3096,8 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     const gate = await preparePhase2Submission(c, submissionId);
     if (!gate.ok) return gate.res;
 
+    const submission = gate.submission;
+
     const formData = await c.req.parseBody();
 
     const attendance = String(formData['attendance_mode'] || '').trim().toUpperCase();
@@ -3161,10 +3164,15 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     // file is then replaced in place.
     if (!copyrightStored.ok) return copyrightStored.res;
 
+    const isResubmission =
+      PHASE2_EDITABLE_REVIEW_STATUSES.has(submission?.camera_ready_status || '') ||
+      !!submission?.camera_ready_reviewed_at;
+    const resubmittedFlag = isResubmission ? 1 : 0;
+
     const now = new Date().toISOString();
     await c.env.DB.prepare(
-      `UPDATE submissions SET attendance_mode = ?, phase2_track = ?, phase2_head_count = ?, declaration_confirmed = 1, phase2_submitted_at = ?, camera_ready_status = NULL, camera_ready_comments = NULL, camera_ready_reviewed_at = NULL, camera_ready_reviewed_by = NULL, updated_at = ? WHERE id = ?`
-    ).bind(attendance, phase2Track, headCount, now, now, submissionId).run();
+      `UPDATE submissions SET attendance_mode = ?, phase2_track = ?, phase2_head_count = ?, declaration_confirmed = 1, phase2_submitted_at = ?, camera_ready_status = NULL, camera_ready_comments = NULL, camera_ready_reviewed_at = NULL, camera_ready_reviewed_by = NULL, camera_ready_resubmitted = ?, updated_at = ? WHERE id = ?`
+    ).bind(attendance, phase2Track, headCount, now, resubmittedFlag, now, submissionId).run();
 
     return c.json({
       success: true,
