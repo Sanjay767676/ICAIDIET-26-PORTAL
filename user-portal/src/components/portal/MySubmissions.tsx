@@ -16,6 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
+import { CONFERENCE_TRACKS } from '../../data/conferenceTracks';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -57,6 +58,10 @@ interface MySubmission {
   copyright_form_file?: string | null;
   phase2_submitted_at?: string | null;
   attendance_mode?: string | null;
+  // Chosen on the Phase 2 form: the track the paper is presented in, and (for
+  // offline attendance only) how many people are attending.
+  phase2_track?: string | null;
+  phase2_head_count?: number | null;
   // Reviewer's decision on the camera-ready package: ACCEPTED (green) or
   // MINOR_CHANGES (amber + the reviewer's comments, author must update files).
   camera_ready_status?: string | null;
@@ -1297,8 +1302,20 @@ export function MySubmissions({
   );
 
   const loadSubmissions = useCallback(async () => {
+    // Clear the previous failure first: a stale error used to stay on screen
+    // forever, because a later successful load only replaced `subs` and never
+    // the error, so one blip locked the author out of the page until a reload.
+    setError(null);
     try {
-      const token = await getToken();
+      // Clerk can return a null token for a moment after a hard refresh (it is
+      // still hydrating the session). Retry briefly instead of telling a
+      // signed-in author to sign in, which is how a transient null turned into
+      // a permanent "sign in" screen.
+      let token = await getToken();
+      for (let attempt = 0; attempt < 3 && !token; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        token = await getToken();
+      }
       if (!token) {
         setError('Please sign in to view your submissions.');
         return;
@@ -1306,12 +1323,20 @@ export function MySubmissions({
       const res = await fetch(`${API_URL}/api/submissions/mine`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) {
+        setError('Your session has expired. Please sign in again.');
+        return;
+      }
       if (!res.ok) {
         setError('Could not load your submissions. Please try again.');
         return;
       }
       const data = await res.json().catch(() => null);
-      setSubs(data?.submissions || []);
+      if (!data?.success) {
+        setError(data?.error || 'Could not load your submissions. Please try again.');
+        return;
+      }
+      setSubs(data.submissions || []);
     } catch {
       setError('Could not reach the server. Please try again.');
     }
@@ -1360,12 +1385,23 @@ export function MySubmissions({
       {error ? (
         <div className="bg-brand-card rounded-2xl p-8 shadow-xl border border-brand-text/5 text-center">
           <div className="text-lg text-brand-text/70 mb-4">{error}</div>
-          <button
-            onClick={onStart}
-            className="px-8 py-3 bg-brand-text text-white rounded-xl font-medium hover:bg-brand-accent transition-all shadow"
-          >
-            Go to Submission Portal
-          </button>
+          <div className="flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={() => {
+                setSubs(null);
+                loadSubmissions();
+              }}
+              className="px-8 py-3 bg-brand-text text-white rounded-xl font-medium hover:bg-brand-accent transition-all shadow"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={onStart}
+              className="px-8 py-3 bg-white text-brand-text border-2 border-brand-text/20 rounded-xl font-medium hover:border-brand-text/40 transition-all shadow-sm"
+            >
+              Go to Submission Portal
+            </button>
+          </div>
         </div>
       ) : subs === null ? (
         <div className="bg-brand-card rounded-2xl p-12 shadow-xl border border-brand-text/5 flex items-center justify-center gap-3 text-brand-text/70">
@@ -1558,6 +1594,25 @@ export function MySubmissions({
                               : sub.attendance_mode === 'OFFLINE'
                               ? 'Offline'
                               : sub.attendance_mode,
+                        },
+                        // Head count only exists for offline attendance; the
+                        // backend stores NULL for online, so the row is hidden
+                        // rather than showing an empty dash.
+                        ...(sub.attendance_mode === 'OFFLINE'
+                          ? [
+                              {
+                                label: 'Head Count Attending',
+                                ok: !!sub.phase2_head_count,
+                                name: sub.phase2_head_count ? String(sub.phase2_head_count) : null,
+                              },
+                            ]
+                          : []),
+                        {
+                          label: 'Track',
+                          ok: !!sub.phase2_track,
+                          name:
+                            CONFERENCE_TRACKS.find((t) => t.value === sub.phase2_track)?.label ||
+                            sub.phase2_track,
                         },
                       ].map((f) => (
                         <div key={f.label} className="flex items-center justify-between gap-2">

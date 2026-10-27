@@ -152,7 +152,17 @@ function corsOrigins(c: any): string[] {
 
 app.use('*', (c, next) => {
   const origin = corsOrigins(c);
-  return cors({ origin, allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], allowHeaders: ['Content-Type', 'Authorization'], maxAge: 86400 })(c, next);
+  return cors({
+    origin,
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    // Template downloads name the saved file from Content-Disposition. Without
+    // this the browser hides the header cross-origin and the portal has to fall
+    // back to a guessed filename (which is how a .docx could be saved as the
+    // wrong name).
+    exposeHeaders: ['Content-Disposition'],
+    maxAge: 86400,
+  })(c, next);
 });
 
 // ------------------------------------------------------------------
@@ -4846,14 +4856,13 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
       );
     }
 
-    // Free any previous proof object so re-uploads can't orphan R2 blobs.
+    // Remember the previous proof so it can be freed once the replacement is
+    // safely stored. It is deleted AFTER the new object is written and the row
+    // is updated: deleting first meant a failed upload (or a failed UPDATE)
+    // left the admin's link pointing at an object that no longer existed.
     const prev = await c.env.DB.prepare(
       `SELECT payment_proof_url FROM submissions WHERE id = ?`
     ).bind(submissionId).first() as any;
-    if (prev?.payment_proof_url) {
-      await c.env.PROOF_BUCKET.delete(prev.payment_proof_url).catch(() => { });
-      await c.env.BUCKET.delete(prev.payment_proof_url).catch(() => { });
-    }
 
     const storageKey = `proof/${submissionId}-${Date.now()}${ext}`;
     const arrayBuffer = await file.arrayBuffer();
@@ -4863,11 +4872,23 @@ app.post('/api/user/submissions/:id/payment-proof', requireClerkAuth, async (c) 
     });
 
     const now = new Date().toISOString();
-    await c.env.DB.prepare(
-      `UPDATE submissions
-       SET payment_proof_url = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ?
-       WHERE id = ?`
-    ).bind(storageKey, now, now, submissionId).run();
+    try {
+      await c.env.DB.prepare(
+        `UPDATE submissions
+         SET payment_proof_url = ?, payment_status = 'PENDING', payment_approved_at = NULL, payment_submitted_at = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(storageKey, now, now, submissionId).run();
+    } catch (dbErr) {
+      // The row still points at the old proof, so drop the orphan we just wrote
+      // and let the author retry.
+      await c.env.PROOF_BUCKET.delete(storageKey).catch(() => { });
+      throw dbErr;
+    }
+
+    if (prev?.payment_proof_url && prev.payment_proof_url !== storageKey) {
+      await c.env.PROOF_BUCKET.delete(prev.payment_proof_url).catch(() => { });
+      await c.env.BUCKET.delete(prev.payment_proof_url).catch(() => { });
+    }
 
     return c.json({ success: true, payment_proof_url: storageKey, payment_status: 'PENDING' });
   } catch (err: any) {

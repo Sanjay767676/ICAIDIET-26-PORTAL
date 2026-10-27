@@ -65,6 +65,10 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
   const [status, setStatus] = useState<Phase2Status | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessDenied, setAccessDenied] = useState(false);
+  // Set when the status request itself failed (offline, server error, expired
+  // session). Without this the page rendered its header and nothing else, which
+  // reads as a broken portal rather than a retryable failure.
+  const [loadError, setLoadError] = useState('');
 
   const [attendance, setAttendance] = useState<AttendanceMode | null>(null);
   const [track, setTrack] = useState('');
@@ -87,16 +91,29 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
       return;
     }
     setLoading(true);
+    setLoadError('');
     try {
-      const token = await getToken();
+      let token = await getToken();
+      // Clerk can briefly return a null token right after a hard refresh; retry
+      // instead of reporting "not available" to a signed-in author.
+      for (let attempt = 0; attempt < 3 && !token; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        token = await getToken();
+      }
       if (!token) {
         setStatus(null);
+        setLoadError('Your session has expired. Please sign in again.');
         return;
       }
       const res = await fetch(`${API_URL}/api/submissions/${submissionId}/phase2`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json().catch(() => null);
+      if (res.status === 401) {
+        setStatus(null);
+        setLoadError('Your session has expired. Please sign in again.');
+        return;
+      }
       if (!res.ok || !data?.success) {
         setStatus(null);
         setAccessDenied(true);
@@ -107,6 +124,7 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
     } catch (err) {
       console.error('Failed to load Phase 2 status:', err);
       setStatus(null);
+      setLoadError('Could not load your Phase 2 status. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
@@ -370,9 +388,34 @@ export function Phase2Page({ submissionId, getToken, onBack }: Phase2PageProps) 
         </div>
       )}
 
+      {/* The status request itself failed. Show the reason with a retry, rather
+          than leaving the page with only its header. */}
+      {!loading && loadError && (
+        <div className="mt-8 bg-white rounded-2xl p-8 sm:p-10 shadow-lg border-2 border-red-300 text-center">
+          <h3 className="font-serif text-xl sm:text-2xl font-bold text-red-800 mb-2">
+            Could Not Load Phase 2
+          </h3>
+          <p className="text-sm text-black/70 max-w-xl mx-auto leading-relaxed">{loadError}</p>
+          <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+            <button
+              onClick={loadStatus}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-all shadow-md"
+            >
+              Try Again
+            </button>
+            <button
+              onClick={onBack}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-white text-black border-2 border-stone-300 rounded-xl font-semibold text-sm hover:border-stone-500 transition-all shadow-sm"
+            >
+              <ArrowLeft className="w-4 h-4" /> Back to My Submissions
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* The status endpoint is ownership-gated server-side; a tampered or
           foreign submission id lands here instead of exposing anything. */}
-      {!loading && accessDenied && (
+      {!loading && !loadError && accessDenied && (
         <div className="mt-8 bg-white rounded-2xl p-8 sm:p-10 shadow-lg border-2 border-red-300 text-center">
           <h3 className="font-serif text-xl sm:text-2xl font-bold text-red-800 mb-2">
             Not Available
