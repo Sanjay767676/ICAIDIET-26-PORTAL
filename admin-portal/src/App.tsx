@@ -1919,6 +1919,15 @@ function ReviewSection({
   loading,
   error,
   emptyMsg,
+  searchTerm,
+  onSearchChange,
+  trackFilter,
+  onTrackFilterChange,
+  paperIdFilter,
+  onPaperIdFilterChange,
+  tracks,
+  paperIds,
+  onClear,
   onOpenPdf,
   onViewInfo,
   onViewPayment,
@@ -1947,6 +1956,15 @@ function ReviewSection({
   loading: boolean;
   error: string | null;
   emptyMsg: string;
+  searchTerm?: string;
+  onSearchChange?: (v: string) => void;
+  trackFilter?: string;
+  onTrackFilterChange?: (v: string) => void;
+  paperIdFilter?: string;
+  onPaperIdFilterChange?: (v: string) => void;
+  tracks?: string[];
+  paperIds?: string[];
+  onClear?: () => void;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => void;
   onViewInfo: (sub: Submission) => void;
   onViewPayment: (sub: Submission) => void;
@@ -2043,6 +2061,22 @@ function ReviewSection({
         </div>
       </div>
 
+      {searchTerm !== undefined && onSearchChange && onClear && (
+        <FilterPanel
+          searchTerm={searchTerm}
+          onSearchChange={onSearchChange}
+          trackFilter={trackFilter || ''}
+          onTrackFilterChange={onTrackFilterChange || (() => {})}
+          paperIdFilter={paperIdFilter || ''}
+          onPaperIdFilterChange={onPaperIdFilterChange || (() => {})}
+          tracks={tracks || []}
+          paperIds={paperIds || []}
+          resultCount={rows.length}
+          totalCount={total}
+          onClear={onClear}
+        />
+      )}
+
       {error && (
         <div className="bg-red-50 text-red-600 p-4 rounded-xl mb-6 border border-red-200 text-sm">
           <div className="flex items-center gap-2">
@@ -2075,7 +2109,7 @@ function ReviewSection({
             ) : rows.length === 0 ? (
               <tr>
                 <td colSpan={9} className="py-8 text-center text-brand-text/60">
-                  {emptyMsg}
+                  {searchTerm?.trim() || trackFilter || paperIdFilter ? "No submissions match your search or filters." : emptyMsg}
                 </td>
               </tr>
             ) : (
@@ -2204,7 +2238,7 @@ function ReviewSection({
           </div>
         ) : rows.length === 0 ? (
           <div className="bg-white rounded-xl p-8 text-center text-brand-text/60 border-2 border-brand-accent">
-            {emptyMsg}
+            {searchTerm?.trim() || trackFilter || paperIdFilter ? "No submissions match your search or filters." : emptyMsg}
           </div>
         ) : (
           rows.map((sub) => (
@@ -3415,10 +3449,23 @@ Duplicates
                 activeTab === 'majorChanges' ? filteredMajor :
                 filteredAccepted
               }
-              total={submissions.length}
+              total={
+                activeTab === 'minorChanges' ? minorSubmissionsList.length :
+                activeTab === 'majorChanges' ? majorSubmissionsList.length :
+                acceptedSubmissionsList.length
+              }
               loading={loading}
               error={error ? `Error loading submissions: ${error}` : null}
               emptyMsg="No papers in this section."
+              searchTerm={searchTerm}
+              onSearchChange={setSearchTerm}
+              trackFilter={trackFilter}
+              onTrackFilterChange={setTrackFilter}
+              paperIdFilter={paperIdFilter}
+              onPaperIdFilterChange={setPaperIdFilter}
+              tracks={tracks}
+              paperIds={paperIds}
+              onClear={clearFilters}
               onOpenPdf={openPdf}
               onViewInfo={setMoreInfoTarget}
               onViewPayment={setPaymentTarget}
