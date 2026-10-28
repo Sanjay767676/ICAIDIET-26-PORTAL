@@ -3713,13 +3713,13 @@ Duplicates
                   {!loading &&
                     filteredCameraReady.map((s) => {
                       const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
-                      // Prefer the camera-ready review decision (the current
-                      // Phase 2 state); fall back to the original paper decision.
+                      // Camera Ready tab shows the camera-ready review status only.
+                      // Until the reviewer updates it, show "Submitted".
                       const cameraDecision = s.camera_ready_status
                         ? PHASE2_REVIEW_META[s.camera_ready_status]
-                        : null;
-                      const decision = cameraDecision || (s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null);
-                      const statusFallback = cameraDecision ? null : STATUS_META[s.status];
+                        : s.phase2_submitted_at
+                          ? { label: 'Submitted', cls: 'bg-amber-100 text-amber-800 border-amber-300' }
+                          : null;
                       return (
                         <tr key={s.id} className="hover:bg-brand-bg/30">
                           <td className="py-4 px-5 text-sm align-top">
@@ -3769,13 +3769,9 @@ Duplicates
                             </div>
                           </td>
                           <td className="py-4 px-5 align-top">
-                            {decision ? (
-                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${decision.cls}`}>
-                                {decision.label}
-                              </span>
-                            ) : statusFallback ? (
-                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold ${statusFallback.cls}`}>
-                                {statusFallback.label}
+                            {cameraDecision ? (
+                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
+                                {cameraDecision.label}
                               </span>
                             ) : (
                               <span className="text-xs text-brand-text/50">—</span>
@@ -3815,9 +3811,9 @@ Duplicates
                   const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
                   const cameraDecision = s.camera_ready_status
                     ? PHASE2_REVIEW_META[s.camera_ready_status]
-                    : null;
-                  const decision = cameraDecision || (s.review_decision ? PHASE2_REVIEW_META[s.review_decision] : null);
-                  const statusFallback = cameraDecision ? null : STATUS_META[s.status];
+                    : s.phase2_submitted_at
+                      ? { label: 'Submitted', cls: 'bg-amber-100 text-amber-800 border-amber-300' }
+                      : null;
                   return (
                     <div key={s.id} className="bg-white rounded-xl p-4 shadow-sm border border-brand-text/10 space-y-2">
                       <div className="font-semibold text-brand-text">{s.title}</div>
@@ -3866,9 +3862,9 @@ Duplicates
                         >
                           View Info
                         </button>
-                        {decision && (
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${decision.cls}`}>
-                            {decision.label}
+                        {cameraDecision && (
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
+                            {cameraDecision.label}
                           </span>
                         )}
                       </div>
