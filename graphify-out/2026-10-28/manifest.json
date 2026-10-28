@@ -1,0 +1,397 @@
+{
+  "admin-portal/package.json": {
+    "mtime": 1790837971.1994886,
+    "ast_hash": "4183d86cc943ad5b0820d03b769bf104",
+    "semantic_hash": ""
+  },
+  "admin-portal/src/App.tsx": {
+    "mtime": 1791442125.4339406,
+    "ast_hash": "c0849f3135f4c5dd845bfc8aaa47a73f",
+    "semantic_hash": ""
+  },
+  "admin-portal/src/components/DownloadPanel.tsx": {
+    "mtime": 1790654398.0509408,
+    "ast_hash": "b1c39f4626c1dbb66f935a3b8c2dbcac",
+    "semantic_hash": ""
+  },
+  "admin-portal/src/components/MailField.tsx": {
+    "mtime": 1790441379.1570866,
+    "ast_hash": "1519d3a215357d862110926d1d10927b",
+    "semantic_hash": ""
+  },
+  "admin-portal/src/components/RegistrationConfigPanel.tsx": {
+    "mtime": 1791279237.2461076,
+    "ast_hash": "4430fca328aea7e9d120f4d5fba42bc5",
+    "semantic_hash": ""
+  },
+  "admin-portal/src/main.tsx": {
+    "mtime": 1787542778.0,
+    "ast_hash": "2b36426d5ad7e08ef79746aa524f4fb7",
+    "semantic_hash": ""
+  },
+  "admin-portal/tsconfig.json": {
+    "mtime": 1787542778.0,
+    "ast_hash": "8827451c4e35790dd3f3538c265e7d15",
+    "semantic_hash": ""
+  },
+  "admin-portal/vite.config.ts": {
+    "mtime": 1787542778.0,
+    "ast_hash": "9c319043c25764dfe83b687f74637c6c",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0001_initial.sql": {
+    "mtime": 1787542778.0,
+    "ast_hash": "cd8fd5be6a3e89c9d284d29eb89a1126",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0002_admin_and_submission_fields.sql": {
+    "mtime": 1788415076.1392164,
+    "ast_hash": "b2c7e35461c7916e41f6f754368aa8e9",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0003_cmt_paper_id.sql": {
+    "mtime": 1788420126.0232816,
+    "ast_hash": "0b1c1121cd407db3bd1a6cc9c5bab29c",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0004_authors.sql": {
+    "mtime": 1788421811.4568307,
+    "ast_hash": "70ec407d982fe445004263c18c98cf9d",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0005_update_admin_and_user_profiles.sql": {
+    "mtime": 1788763250.6520224,
+    "ast_hash": "489ff95e3748c5676d391b7e4d1e54fe",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0006_admin_email.sql": {
+    "mtime": 1788772606.716506,
+    "ast_hash": "89016384c2cad3a7bbf4da9ea1053532",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0007_plagiarism_report.sql": {
+    "mtime": 1788774464.032807,
+    "ast_hash": "2e7ce20612914b8bfbab2c80eca90100",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0008_soft_delete.sql": {
+    "mtime": 1789018031.6083858,
+    "ast_hash": "153eef28ddfdd96bc1d0cc38ee8af28f",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0009_settings.sql": {
+    "mtime": 1789103954.8929095,
+    "ast_hash": "3359429577023875bf2b39533532c1d8",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0010_submission_statuses.sql": {
+    "mtime": 1789187140.8941543,
+    "ast_hash": "e661cd09e26da622e847e62b8e14b41b",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0011_reviewers.sql": {
+    "mtime": 1789449636.729669,
+    "ast_hash": "a1b50cefa70bf9c2996b69186c52fe1a",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0012_review_resubmit.sql": {
+    "mtime": 1789453051.8785064,
+    "ast_hash": "f3c83666776509624f482c55dd6072df",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0013_maintenance_per_portal.sql": {
+    "mtime": 1789458108.7404847,
+    "ast_hash": "c005de9a7857ed9675f4a0ed4d08b392",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0014_ai_plagiarism_files.sql": {
+    "mtime": 1789464144.1776333,
+    "ast_hash": "e3f5cffbd0e12b68615250756e1cbabc",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0015_submission_enquired.sql": {
+    "mtime": 1789533165.9969268,
+    "ast_hash": "fbf251665e92557faa9716568d239dfe",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0016_submission_no_corrections.sql": {
+    "mtime": 1789541583.2642522,
+    "ast_hash": "d500dbcec0167562721519b32f553592",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0017_mail_templates_and_logs.sql": {
+    "mtime": 1789627618.1778338,
+    "ast_hash": "8d7ca69604fd9eb714b8557965ff89c7",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0018_review_decisions.sql": {
+    "mtime": 1789703663.415996,
+    "ast_hash": "c4e89eff5ffd648c0088e97884ce241d",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0019_registration_and_payment.sql": {
+    "mtime": 1790192305.4091108,
+    "ast_hash": "f5979de1147972007a6def451633d0c4",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0020_payment_approval.sql": {
+    "mtime": 1790214596.2026389,
+    "ast_hash": "2f0bb588ce72d38e7b2e2d459a78a8a2",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0021_payment_submitted_at.sql": {
+    "mtime": 1790221726.995813,
+    "ast_hash": "6e2b183cf2b43cbf107ce60fff0e5dc7",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0022_author_type.sql": {
+    "mtime": 1790225032.071676,
+    "ast_hash": "cdbbf9530a59c50b4a17337812fdfe69",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0023_registration_config.sql": {
+    "mtime": 1790587086.171873,
+    "ast_hash": "8126643e821b1845a494e5121a830bb5",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0024_file_edits.sql": {
+    "mtime": 1790591336.802379,
+    "ast_hash": "0350aa157f35bdb46719d5945c6e1389",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0025_payment_fee_snapshot.sql": {
+    "mtime": 1790654153.4981222,
+    "ast_hash": "abea014bb108198bfa6de99fbbfb58d3",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0026_poll_indexes.sql": {
+    "mtime": 1790655579.2728176,
+    "ast_hash": "e582461b598a14c9949ebeec9b3c8d18",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0027_approved_mail_ids.sql": {
+    "mtime": 1790742540.1608684,
+    "ast_hash": "e9994b312aa6195bda99ec782821ca79",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0028_paper_acceptance_enabled.sql": {
+    "mtime": 1790743793.3349016,
+    "ast_hash": "e520f9d794f70f08d86d87ffd08c12dc",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0029_payment_proof_ocr.sql": {
+    "mtime": 1790837362.061107,
+    "ast_hash": "b7defde389c8c5a0f7c530edb5186df9",
+    "semantic_hash": ""
+  },
+  "backend/migrations/0030_heal_submission_owners.sql": {
+    "mtime": 1791197550.7665548,
+    "ast_hash": "adc7bff95dd31846d9a19593dc84935e",
+    "semantic_hash": ""
+  },
+  "backend/package.json": {
+    "mtime": 1789027107.731488,
+    "ast_hash": "421e4e50563df1c36f5e0837311ad702",
+    "semantic_hash": ""
+  },
+  "backend/src/index.ts": {
+    "mtime": 1791436029.2758274,
+    "ast_hash": "84728c598e3ff19a40489f472f816f34",
+    "semantic_hash": ""
+  },
+  "backend/src/paymentOcr.ts": {
+    "mtime": 1790840502.1008334,
+    "ast_hash": "ac4066d31049934a82cd922f1e93a1c4",
+    "semantic_hash": ""
+  },
+  "backend/tsconfig.json": {
+    "mtime": 1788414674.0060136,
+    "ast_hash": "cd440db61a5505d7171e1586ee8cc256",
+    "semantic_hash": ""
+  },
+  "backend/verify-fee-snapshot.cjs": {
+    "mtime": 1790658200.1503325,
+    "ast_hash": "0d4ddce791f3912b5f8e83d99d8ec1f2",
+    "semantic_hash": ""
+  },
+  "metadata.json": {
+    "mtime": 1787542778.0,
+    "ast_hash": "4e5fa04c49b921fcbebc2c50554e4a10",
+    "semantic_hash": ""
+  },
+  "package.json": {
+    "mtime": 1789449959.3204784,
+    "ast_hash": "960f0fa09e23aae1452ac6cc4bdc2ac7",
+    "semantic_hash": ""
+  },
+  "reviewer-portal/package.json": {
+    "mtime": 1789449804.4979074,
+    "ast_hash": "1b67de4f37f3a32c80c8c7ffb2605442",
+    "semantic_hash": ""
+  },
+  "reviewer-portal/src/App.tsx": {
+    "mtime": 1790655713.617799,
+    "ast_hash": "0b67ec6f404c5d3e6a11c3f2c538195a",
+    "semantic_hash": ""
+  },
+  "reviewer-portal/src/main.tsx": {
+    "mtime": 1789449819.3100202,
+    "ast_hash": "c24b078ca775cc40dd63be4910013d29",
+    "semantic_hash": ""
+  },
+  "reviewer-portal/tsconfig.json": {
+    "mtime": 1789449818.5260441,
+    "ast_hash": "e4c4cdf22ce0d56bd71c7104f13169e5",
+    "semantic_hash": ""
+  },
+  "reviewer-portal/vite.config.ts": {
+    "mtime": 1789449816.0518827,
+    "ast_hash": "44428e328b45be357a6d7284efeb3bc6",
+    "semantic_hash": ""
+  },
+  "user-portal/package.json": {
+    "mtime": 1789187803.3398643,
+    "ast_hash": "1ffce0aaffa3b6c076c1cceccdee47c4",
+    "semantic_hash": ""
+  },
+  "user-portal/src/App.tsx": {
+    "mtime": 1791197757.5197794,
+    "ast_hash": "0441019642ec9f35349f6b96c1303ee5",
+    "semantic_hash": ""
+  },
+  "user-portal/src/components/Popup.tsx": {
+    "mtime": 1788763707.4017622,
+    "ast_hash": "f249d714cc7d8131ceeea60e7c9aa2f8",
+    "semantic_hash": ""
+  },
+  "user-portal/src/components/layout/MainLayout.tsx": {
+    "mtime": 1791356873.0299454,
+    "ast_hash": "3adea0de47a974e9a78a2dd616bdc007",
+    "semantic_hash": ""
+  },
+  "user-portal/src/components/portal/HeroSection.tsx": {
+    "mtime": 1789535805.7328916,
+    "ast_hash": "11214e372efd7ccafae6fcb7beaa27be",
+    "semantic_hash": ""
+  },
+  "user-portal/src/components/portal/MySubmissions.tsx": {
+    "mtime": 1791431923.712619,
+    "ast_hash": "f5c14e89d15cee619581601342fc9ca2",
+    "semantic_hash": ""
+  },
+  "user-portal/src/components/portal/SubmissionWizard.tsx": {
+    "mtime": 1790666460.1073582,
+    "ast_hash": "745d13b3b04c2a6e8fd71bbd954ffe10",
+    "semantic_hash": ""
+  },
+  "user-portal/src/main.tsx": {
+    "mtime": 1788763564.8358142,
+    "ast_hash": "a2d413acaca2f7af14fd083cc34dd563",
+    "semantic_hash": ""
+  },
+  "user-portal/tsconfig.json": {
+    "mtime": 1787542778.0,
+    "ast_hash": "8827451c4e35790dd3f3538c265e7d15",
+    "semantic_hash": ""
+  },
+  "user-portal/vite.config.ts": {
+    "mtime": 1787542778.0,
+    "ast_hash": "9c319043c25764dfe83b687f74637c6c",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1789534357.5599954,
+    "ast_hash": "38f07c469dff6c0e14c141630f933acc",
+    "semantic_hash": ""
+  },
+  "CODEBASE_NOTES.md": {
+    "mtime": 1790744264.6026137,
+    "ast_hash": "d5d41aaf788b20c496ffac7efd5ae35c",
+    "semantic_hash": ""
+  },
+  "admin-portal/index.html": {
+    "mtime": 1788419389.2464268,
+    "ast_hash": "205efa65e1f3da798e4288a2666de974",
+    "semantic_hash": ""
+  },
+  "reviewer-portal/index.html": {
+    "mtime": 1789449814.308218,
+    "ast_hash": "0fe933ad04c44f68293f56e915a61096",
+    "semantic_hash": ""
+  },
+  "user-portal/index.html": {
+    "mtime": 1788419376.3577075,
+    "ast_hash": "99bc1694b03c15a55d60afb60a3cbd5d",
+    "semantic_hash": ""
+  },
+  "admin-portal/public/favicon.png": {
+    "mtime": 1784530363.3494892,
+    "ast_hash": "df226385730613b15263f248f32b93fd",
+    "semantic_hash": ""
+  },
+  "reviewer-portal/public/favicon.png": {
+    "mtime": 1784530363.3494892,
+    "ast_hash": "df226385730613b15263f248f32b93fd",
+    "semantic_hash": ""
+  },
+  "user-portal/public/favicon.png": {
+    "mtime": 1784530363.3494892,
+    "ast_hash": "df226385730613b15263f248f32b93fd",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/SNS-DT Logo.png": {
+    "mtime": 1783328541.6662762,
+    "ast_hash": "f2f19c0c392962c980a82c595eb29298",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/Icaideit.png": {
+    "mtime": 1784530363.3494892,
+    "ast_hash": "df226385730613b15263f248f32b93fd",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/SNSCT.png": {
+    "mtime": 1783064781.254475,
+    "ast_hash": "83aa27daefec7a7a05173cf9baab8564",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/WILEY(BLACK).png": {
+    "mtime": 1784532793.8773324,
+    "ast_hash": "f3bb061a407d573e20932d19f24a34f7",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/brochure.png": {
+    "mtime": 1785837708.6651938,
+    "ast_hash": "1a386f1eac47f520bc711f84c6d87e75",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/info.png": {
+    "mtime": 1788420113.1281888,
+    "ast_hash": "a05dc6e86cdc98363302ebab9a6e50db",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/paper.png": {
+    "mtime": 1788418855.5640938,
+    "ast_hash": "01efbc649641c049d3505e3820392dda",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/scopus.png": {
+    "mtime": 1784009420.0538247,
+    "ast_hash": "d3b4d112ba8e03a2b2ff308731d8c882",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/scopusblack.png": {
+    "mtime": 1785214146.7718878,
+    "ast_hash": "93be07041721b6a6872a976cb7239abd",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/wiley.png": {
+    "mtime": 1783317265.807854,
+    "ast_hash": "154518efbc7e88a1aae9e033fedea6f4",
+    "semantic_hash": ""
+  },
+  "user-portal/src/assets/images/york.jpg": {
+    "mtime": 1783317262.9907527,
+    "ast_hash": "10c528607f944958ffd22197be633d3b",
+    "semantic_hash": ""
+  }
+}

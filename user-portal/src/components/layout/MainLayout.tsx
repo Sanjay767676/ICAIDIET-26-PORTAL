@@ -90,8 +90,8 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
                   key={item.view}
                   onClick={() => onNavigate?.(item.view)}
                   className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${view === item.view
-                      ? 'bg-brand-text text-white'
-                      : 'hover:bg-brand-text/10'
+                    ? 'bg-brand-text text-white'
+                    : 'hover:bg-brand-text/10'
                     }`}
                 >
                   {item.label}
@@ -101,11 +101,11 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
           </div>
 
           <div className="flex items-center gap-3 ml-4">
-            <a 
-              href="https://www.icaidiet26.tech" 
+            <a
+              href="https://www.icaidiet26.tech"
               className="px-4 py-2 bg-white text-brand-text border border-brand-text/20 rounded-lg text-sm font-medium hover:bg-brand-text/5 hover:-translate-y-0.5 transition-all shadow-sm whitespace-nowrap flex items-center gap-2"
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><polyline points="9 22 9 12 15 12 15 22" /></svg>
               Home
             </a>
             <Show when="signed-out">
@@ -138,7 +138,6 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
             <div className="flex flex-col items-center md:items-end gap-3 text-xs text-white/50">
               <div className="text-center md:text-right text-white/70">
                 <p className="font-semibold text-white/90 mb-1">For Queries/Assistance</p>
-                <p>+91 7358981203</p>
                 <p>icaidiet26@gmail.com</p>
               </div>
               <div>

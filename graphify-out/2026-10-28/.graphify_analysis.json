@@ -1,0 +1,306 @@
+{
+  "communities": {
+    "0": [
+      "backend_worker_configuration_d_durableobject",
+      "backend_worker_configuration_d_durableobjectbranded"
+    ],
+    "1": [
+      "backend_worker_configuration_d_rpctarget",
+      "backend_worker_configuration_d_rpctargetbranded"
+    ],
+    "2": [
+      "backend_worker_configuration_d_workerentrypoint",
+      "backend_worker_configuration_d_workerentrypointbranded"
+    ],
+    "3": [
+      "backend_worker_configuration_d_workflowentrypoint",
+      "backend_worker_configuration_d_workflowentrypointbranded"
+    ],
+    "4": [
+      "admin_portal_src_components_registrationconfigpanel_bankaccount"
+    ],
+    "5": [
+      "admin_portal_src_components_registrationconfigpanel_configtorows"
+    ],
+    "6": [
+      "admin_portal_src_components_registrationconfigpanel_feerow"
+    ],
+    "7": [
+      "admin_portal_src_components_registrationconfigpanel_registrationconfig"
+    ],
+    "8": [
+      "admin_portal_src_components_registrationconfigpanel_rowstoconfig"
+    ],
+    "9": [
+      "backend_src_paymentocr_duplicategroup"
+    ],
+    "10": [
+      "backend_src_paymentocr_duplicatereason"
+    ],
+    "11": [
+      "backend_src_paymentocr_duplicatereasoncode"
+    ],
+    "12": [
+      "backend_src_paymentocr_findduplicatepaymentgroups"
+    ],
+    "13": [
+      "backend_src_paymentocr_findproofsneedingscan"
+    ],
+    "14": [
+      "backend_src_paymentocr_normalizeocrtext"
+    ],
+    "15": [
+      "backend_src_paymentocr_ocrsimilarity"
+    ],
+    "16": [
+      "backend_src_paymentocr_paymentcheckrecord"
+    ],
+    "17": [
+      "backend_src_paymentocr_proofneedsscan"
+    ],
+    "18": [
+      "backend_src_paymentocr_proofocrenv"
+    ],
+    "19": [
+      "backend_src_paymentocr_proofocrscan"
+    ],
+    "20": [
+      "backend_src_paymentocr_proofocrstatus"
+    ],
+    "21": [
+      "backend_src_paymentocr_scanproofocr"
+    ],
+    "22": [
+      "backend_src_paymentocr_stuckscancutoff"
+    ],
+    "23": [
+      "backend_src_paymentocr_tokenize"
+    ],
+    "24": [
+      "backend_worker_configuration_d_entrypointbranded"
+    ],
+    "25": [
+      "backend_worker_configuration_d_nonretryableerror"
+    ],
+    "26": [
+      "backend_worker_configuration_d_pipeline"
+    ],
+    "27": [
+      "backend_worker_configuration_d_pipelinebatchmetadata"
+    ],
+    "28": [
+      "backend_worker_configuration_d_pipelinerecord"
+    ],
+    "29": [
+      "backend_worker_configuration_d_pipelinetransformationentrypoint"
+    ],
+    "30": [
+      "backend_worker_configuration_d_provider"
+    ],
+    "31": [
+      "backend_worker_configuration_d_rpcstub"
+    ],
+    "32": [
+      "backend_worker_configuration_d_stub"
+    ],
+    "33": [
+      "backend_worker_configuration_d_stubable"
+    ],
+    "34": [
+      "backend_worker_configuration_d_workflowbackoff"
+    ],
+    "35": [
+      "backend_worker_configuration_d_workflowcronschedule"
+    ],
+    "36": [
+      "backend_worker_configuration_d_workflowdelayduration"
+    ],
+    "37": [
+      "backend_worker_configuration_d_workflowdelayfunction"
+    ],
+    "38": [
+      "backend_worker_configuration_d_workflowdurationlabel"
+    ],
+    "39": [
+      "backend_worker_configuration_d_workflowdynamicdelaycontext"
+    ],
+    "40": [
+      "backend_worker_configuration_d_workflowevent"
+    ],
+    "41": [
+      "backend_worker_configuration_d_workflowinstancestatus"
+    ],
+    "42": [
+      "backend_worker_configuration_d_workflowretentionduration"
+    ],
+    "43": [
+      "backend_worker_configuration_d_workflowrollbackcontext"
+    ],
+    "44": [
+      "backend_worker_configuration_d_workflowrollbackhandler"
+    ],
+    "45": [
+      "backend_worker_configuration_d_workflowsleepduration"
+    ],
+    "46": [
+      "backend_worker_configuration_d_workflowstep"
+    ],
+    "47": [
+      "backend_worker_configuration_d_workflowstepconfig"
+    ],
+    "48": [
+      "backend_worker_configuration_d_workflowstepcontext"
+    ],
+    "49": [
+      "backend_worker_configuration_d_workflowstepevent"
+    ],
+    "50": [
+      "backend_worker_configuration_d_workflowsteprollbackconfig"
+    ],
+    "51": [
+      "backend_worker_configuration_d_workflowsteprollbackoptions"
+    ],
+    "52": [
+      "backend_worker_configuration_d_workflowstepsensitivity"
+    ],
+    "53": [
+      "backend_worker_configuration_d_workflowtimeoutduration"
+    ],
+    "54": [
+      "user_portal_src_components_popup_popup"
+    ],
+    "55": [
+      "user_portal_src_components_popup_popupinfo"
+    ],
+    "56": [
+      "user_portal_src_components_portal_herosection_herosection"
+    ],
+    "57": [
+      "user_portal_src_components_portal_mysubmissions_bankaccount"
+    ],
+    "58": [
+      "user_portal_src_components_portal_mysubmissions_registrationconfig"
+    ]
+  },
+  "cohesion": {
+    "0": 1.0,
+    "1": 1.0,
+    "2": 1.0,
+    "3": 1.0,
+    "4": 1.0,
+    "5": 1.0,
+    "6": 1.0,
+    "7": 1.0,
+    "8": 1.0,
+    "9": 1.0,
+    "10": 1.0,
+    "11": 1.0,
+    "12": 1.0,
+    "13": 1.0,
+    "14": 1.0,
+    "15": 1.0,
+    "16": 1.0,
+    "17": 1.0,
+    "18": 1.0,
+    "19": 1.0,
+    "20": 1.0,
+    "21": 1.0,
+    "22": 1.0,
+    "23": 1.0,
+    "24": 1.0,
+    "25": 1.0,
+    "26": 1.0,
+    "27": 1.0,
+    "28": 1.0,
+    "29": 1.0,
+    "30": 1.0,
+    "31": 1.0,
+    "32": 1.0,
+    "33": 1.0,
+    "34": 1.0,
+    "35": 1.0,
+    "36": 1.0,
+    "37": 1.0,
+    "38": 1.0,
+    "39": 1.0,
+    "40": 1.0,
+    "41": 1.0,
+    "42": 1.0,
+    "43": 1.0,
+    "44": 1.0,
+    "45": 1.0,
+    "46": 1.0,
+    "47": 1.0,
+    "48": 1.0,
+    "49": 1.0,
+    "50": 1.0,
+    "51": 1.0,
+    "52": 1.0,
+    "53": 1.0,
+    "54": 1.0,
+    "55": 1.0,
+    "56": 1.0,
+    "57": 1.0,
+    "58": 1.0
+  },
+  "gods": [
+    {
+      "id": "backend_worker_configuration_d_rpctargetbranded",
+      "label": "RpcTargetBranded",
+      "degree": 1
+    },
+    {
+      "id": "backend_worker_configuration_d_workerentrypointbranded",
+      "label": "WorkerEntrypointBranded",
+      "degree": 1
+    },
+    {
+      "id": "backend_worker_configuration_d_durableobjectbranded",
+      "label": "DurableObjectBranded",
+      "degree": 1
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowentrypointbranded",
+      "label": "WorkflowEntrypointBranded",
+      "degree": 1
+    },
+    {
+      "id": "backend_worker_configuration_d_rpctarget",
+      "label": "RpcTarget",
+      "degree": 1
+    },
+    {
+      "id": "backend_worker_configuration_d_workerentrypoint",
+      "label": "WorkerEntrypoint",
+      "degree": 1
+    },
+    {
+      "id": "backend_worker_configuration_d_durableobject",
+      "label": "DurableObject",
+      "degree": 1
+    },
+    {
+      "id": "backend_worker_configuration_d_workflowentrypoint",
+      "label": "WorkflowEntrypoint",
+      "degree": 1
+    },
+    {
+      "id": "admin_portal_src_components_registrationconfigpanel_feerow",
+      "label": "FeeRow",
+      "degree": 0
+    },
+    {
+      "id": "admin_portal_src_components_registrationconfigpanel_bankaccount",
+      "label": "BankAccount",
+      "degree": 0
+    }
+  ],
+  "surprises": [],
+  "questions": [
+    {
+      "type": "isolated_nodes",
+      "question": "What connects `FeeRow`, `BankAccount`, `RegistrationConfig` to the rest of the system?",
+      "why": "63 weakly-connected nodes found - possible documentation gaps or missing edges."
+    }
+  ]
+}

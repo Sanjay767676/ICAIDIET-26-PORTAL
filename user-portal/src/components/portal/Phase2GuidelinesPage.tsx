@@ -7,7 +7,6 @@ import {
   Image,
   BookOpen,
   AlertTriangle,
-  FileDown,
 } from 'lucide-react';
 
 interface Phase2GuidelinesPageProps {
@@ -40,24 +39,6 @@ export function Phase2GuidelinesPage({ onBack }: Phase2GuidelinesPageProps) {
           Authors must prepare the final camera-ready version of their paper strictly according to
           the following guidelines, using the official conference template.
         </p>
-
-        {/* Quick template download helpers */}
-        <div className="mt-6 pt-5 border-t border-stone-200 flex flex-wrap items-center gap-3">
-          <a
-            href="/Conference_paper_Template.docx"
-            download
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-xl font-semibold text-xs sm:text-sm hover:bg-gray-800 transition-all shadow-md"
-          >
-            <FileDown className="w-4 h-4" /> Download Conference Template
-          </a>
-          <a
-            href={`${import.meta.env.BASE_URL}sample_copyright.docx`}
-            download="Sample_Copyright_Form.docx"
-            className="inline-flex items-center gap-2 px-5 py-2.5 bg-stone-100 text-black border border-stone-300 rounded-xl font-semibold text-xs sm:text-sm hover:bg-stone-200 transition-all shadow-sm"
-          >
-            <FileDown className="w-4 h-4" /> Sample Copyright Form
-          </a>
-        </div>
       </div>
 
       <div className="space-y-6">
