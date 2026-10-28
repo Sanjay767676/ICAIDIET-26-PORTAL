@@ -2488,6 +2488,10 @@ export default function App() {
   const [savingApprovedMail, setSavingApprovedMail] = useState<boolean>(false);
   const [approvedMailMessage, setApprovedMailMessage] = useState<string | null>(null);
   const [approvedMailError, setApprovedMailError] = useState<string | null>(null);
+  const [approvedScopusMailIds, setApprovedScopusMailIds] = useState<string>('');
+  const [savingApprovedScopus, setSavingApprovedScopus] = useState<boolean>(false);
+  const [approvedScopusMsg, setApprovedScopusMsg] = useState<string | null>(null);
+  const [approvedScopusErr, setApprovedScopusErr] = useState<string | null>(null);
   const [registrationConfig, setRegistrationConfig] = useState<RegistrationConfig>({
     early_bird_until: '',
     fees: {},
@@ -2596,12 +2600,13 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setFileEditsEnabled(s.file_edits_enabled !== 'false');
         // Absent key means OFF — Phase 2 stays closed until switched on.
         setPhase2Enabled(s.phase2_enabled === 'true');
-setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
-          setApprovedMailIds(s.approved_mail_ids || '');
-          // The server's canonical copy, kept apart from the textarea so the
-          // "is this address approved?" check below always answers for what is
-          // actually saved, never for edits that have not been saved yet.
-          setSavedApprovedMailIds(s.approved_mail_ids || '');
+        setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
+        setApprovedMailIds(s.approved_mail_ids || '');
+        // The server's canonical copy, kept apart from the textarea so the
+        // "is this address approved?" check below always answers for what is
+        // actually saved, never for edits that have not been saved yet.
+        setSavedApprovedMailIds(s.approved_mail_ids || '');
+        setApprovedScopusMailIds(s.approved_scopus_mail_ids || '');
         // Parsed and default-merged by the backend, so the editors always open
         // on the values that are actually live for authors.
         if (data.registration) setRegistrationConfig(data.registration);
@@ -2686,6 +2691,39 @@ setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
       setApprovedMailError(err instanceof Error ? err.message : 'Failed to save the approved email list.');
     } finally {
       setSavingApprovedMail(false);
+    }
+  };
+
+  const saveApprovedScopusMailIds = async () => {
+    setSavingApprovedScopus(true);
+    setApprovedScopusMsg(null);
+    setApprovedScopusErr(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/settings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          approved_scopus_mail_ids: approvedScopusMailIds,
+        })
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to save the approved Scopus email list.');
+      }
+      await fetchSettings();
+      setApprovedScopusMsg('Saved.');
+      setTimeout(() => setApprovedScopusMsg(null), 2000);
+    } catch (err) {
+      setApprovedScopusErr(err instanceof Error ? err.message : 'Failed to save the approved Scopus email list.');
+    } finally {
+      setSavingApprovedScopus(false);
     }
   };
 
@@ -4408,6 +4446,37 @@ Duplicates
                 </div>
 
                 {/* Save Settings Button */}
+                {/* Approved mail IDs for Conference with Scopus proceedings access */}
+                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
+                  <div className="px-5 py-4 border-b-2 border-brand-accent/40">
+                    <h4 className="font-semibold text-brand-text">Approved mail IDs for Conference with Scopus proceedings access</h4>
+                    <p className="text-sm text-brand-text/60 mt-1">
+                      Only emails listed here will be able to see and select the "Conference with Scopus proceedings" option in the payment form.
+                    </p>
+                  </div>
+                  <div className="px-5 py-4 space-y-3">
+                    <textarea
+                      value={approvedScopusMailIds}
+                      onChange={(e) => setApprovedScopusMailIds(e.target.value)}
+                      rows={4}
+                      spellCheck={false}
+                      placeholder={'author@gmail.com\nanother.author@gmail.com'}
+                      className="w-full rounded-lg border border-brand-text/20 px-3 py-2 text-sm font-mono bg-white text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
+                    />
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={saveApprovedScopusMailIds}
+                        disabled={savingApprovedScopus}
+                        className="px-4 py-2 rounded-lg bg-brand-accent text-brand-text font-semibold text-sm hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {savingApprovedScopus ? 'Saving...' : 'Save Scopus Access Emails'}
+                      </button>
+                      {approvedScopusMsg && <span className="text-sm text-green-700">{approvedScopusMsg}</span>}
+                      {approvedScopusErr && <span className="text-sm text-red-600">{approvedScopusErr}</span>}
+                    </div>
+                  </div>
+                </div>
+
                 <div className="flex items-center justify-end pt-2">
                   <button
                     onClick={savePortalSettings}

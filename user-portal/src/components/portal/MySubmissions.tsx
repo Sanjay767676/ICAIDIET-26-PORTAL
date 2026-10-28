@@ -100,6 +100,8 @@ interface MySubmissionsProps {
   phase2Enabled?: boolean;
   // Opens the Phase 2 page for one of the author's submissions.
   onPhase2?: (submissionId: string) => void;
+  approvedScopusMailIds?: string;
+  userEmail?: string;
 }
 
 const STATUS_META: Record<string, { label: string; cls: string }> = {
@@ -326,12 +328,16 @@ function RegistrationFormBody({
   getToken,
   onSaved,
   config,
+  approvedScopusMailIds = '',
+  userEmail = '',
 }: {
   sub: MySubmission;
   resetKey: string;
   getToken: () => Promise<string | null>;
   onSaved: () => void;
   config: RegistrationConfig;
+  approvedScopusMailIds?: string;
+  userEmail?: string;
 }) {
   const [type, setType] = useState(sub.registration_type || '');
   const [authorType, setAuthorType] = useState(sub.author_type || '');
@@ -379,8 +385,21 @@ function RegistrationFormBody({
     for (const tiers of Object.values(config.fees)) {
       for (const regType of Object.keys(tiers || {})) all.add(regType);
     }
-    return Array.from(all);
-  }, [config.fees]);
+    const hasScopusAccess = (() => {
+      if (!userEmail) return false;
+      const email = userEmail.trim().toLowerCase();
+      const list = (approvedScopusMailIds || '')
+        .split(/[\s,;]+/)
+        .map((v) => v.trim().toLowerCase())
+        .filter(Boolean);
+      return list.includes(email);
+    })();
+    const opts = Array.from(all);
+    if (hasScopusAccess) {
+      return opts.filter((opt) => opt === 'Conference alone' || opt === 'Conference with Scopus proceedings');
+    }
+    return opts.filter((opt) => opt === 'Conference alone');
+  }, [config.fees, approvedScopusMailIds, userEmail]);
 
   // Ask the server what this exact pair costs, every time the selection
   // changes. The config object on the props was fetched once when the app
@@ -714,6 +733,9 @@ function RegistrationFormBody({
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
+          <div className="mt-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
+            Conference with Scopus proceedings has closed. Contact the admin for further details: 7358981203
+          </div>
         </div>
 
         {/* Step 2: Author Type (Shown after completing registration type) */}
@@ -985,6 +1007,8 @@ function RegistrationForm({
   getToken,
   onSaved,
   config,
+  approvedScopusMailIds,
+  userEmail,
 }: {
   sub: MySubmission;
   payable: MySubmission[];
@@ -992,6 +1016,8 @@ function RegistrationForm({
   getToken: () => Promise<string | null>;
   onSaved: () => void;
   config: RegistrationConfig;
+  approvedScopusMailIds?: string;
+  userEmail?: string;
 }) {
   const [selectedId, setSelectedId] = useState(sub.id);
   const active = payable.find((p) => p.id === selectedId) || sub;
@@ -1060,6 +1086,8 @@ function RegistrationForm({
         getToken={getToken}
         onSaved={onSaved}
         config={config}
+        approvedScopusMailIds={approvedScopusMailIds}
+        userEmail={userEmail}
       />
     </div>
   );
@@ -1295,6 +1323,8 @@ export function MySubmissions({
   fileEditsEnabled = true,
   phase2Enabled = false,
   onPhase2,
+  approvedScopusMailIds = '',
+  userEmail = '',
 }: MySubmissionsProps) {
   const [subs, setSubs] = useState<MySubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -1570,10 +1600,8 @@ export function MySubmissions({
                 {/* Phase 2 slot: below the submission details, above the payment
                     box. The Move to Phase 2 button shows only while the admin
                     switch is on AND this paper is accepted AND its payment is
-                    approved; once submitted it is replaced by a summary of the
-                    submitted files + status (the paper then lives in the admin's
-                    Camera Ready tab instead of Payments). */}
-                {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && !sub.phase2_submitted_at && (
+                    approved AND registration type is Conference with Scopus proceedings. */}
+                {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && sub.registration_type === 'Conference with Scopus proceedings' && !sub.phase2_submitted_at && (
                   <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
                     <h4 className="text-lg sm:text-xl font-bold font-serif text-brand-text mb-2">
                       Phase 2 — Camera Ready & Copyright
@@ -1720,21 +1748,23 @@ export function MySubmissions({
                     )}
 
                     {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && (
-                      <div className="mt-4 text-center">
-                        <button
-                          type="button"
-                          onClick={() => onPhase2?.(sub.id)}
-                          className="inline-flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-all shadow-md"
-                        >
-                          {sub.camera_ready_status === 'MINOR_CHANGES' ||
-                          sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES' ||
-                          sub.camera_ready_status === 'MAJOR_CHANGES' ||
-                          sub.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES'
-                            ? 'Update Files'
-                            : 'View Phase 2'}{' '}
-                          <ChevronRight className="w-4 h-4" />
-                        </button>
-                      </div>
+                      {sub.registration_type === 'Conference with Scopus proceedings' && (
+                        <div className="mt-4 text-center">
+                          <button
+                            type="button"
+                            onClick={() => onPhase2?.(sub.id)}
+                            className="inline-flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-all shadow-md"
+                          >
+                            {sub.camera_ready_status === 'MINOR_CHANGES' ||
+                            sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES' ||
+                            sub.camera_ready_status === 'MAJOR_CHANGES' ||
+                            sub.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES'
+                              ? 'Update Files'
+                              : 'View Phase 2'}{' '}
+                            <ChevronRight className="w-4 h-4" />
+                          </button>
+                        </div>
+                      )}
                     )}
                   </div>
                 )}

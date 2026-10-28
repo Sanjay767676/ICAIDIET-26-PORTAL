@@ -4308,6 +4308,21 @@ function fileEditsAllowed(settings: Record<string, string>): boolean {
   return settings['file_edits_enabled'] !== 'false';
 }
 
+function approvedScopusMailIdList(settings: Record<string, string>): string[] {
+  const seen = new Set<string>();
+  for (const part of (settings['approved_scopus_mail_ids'] || '').split(/[\s,;]+/)) {
+    const email = part.trim().toLowerCase();
+    if (email) seen.add(email);
+  }
+  return [...seen];
+}
+
+function canAccessScopusProceedings(settings: Record<string, string>, email: string): boolean {
+  const candidate = (email || '').trim().toLowerCase();
+  if (!candidate) return false;
+  return approvedScopusMailIdList(settings).includes(candidate);
+}
+
 // ------------------------------------------------------------------
 // Approved email list (an EXEMPTION from a closed submission window)
 //
@@ -4533,12 +4548,11 @@ app.get('/api/settings', async (c) => {
     const registration = await loadRegistrationConfig(env);
     // This endpoint is unauthenticated, so the approved email list is redacted
     // out of it: the addresses themselves are the admin's business and must not
-    // be readable by anyone. The enabled flag is kept, because the user portal
-    // benefits from being able to explain the refusal it will get. Admins read
-    // the real list from GET /api/admin/settings, which is token-guarded.
+    // be readable by anyone. Admins read the real list from GET /api/admin/settings, which is token-guarded.
+    // Include approved scopus emails for user portal to gate the option.
     return c.json({
       success: true,
-      settings: { ...settings, approved_mail_ids: '' },
+      settings: { ...settings, approved_mail_ids: '', approved_scopus_mail_ids: settings.approved_scopus_mail_ids || '' },
       registration,
     });
   } catch (error) {
@@ -4743,6 +4757,20 @@ app.post('/api/admin/settings', async (c) => {
           `INSERT INTO settings (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
         ).bind('approved_mail_ids_enabled', body.approved_mail_ids_enabled.toString())
+      );
+    }
+
+    // Approved email list for Conference with Scopus proceedings access
+    if (body.approved_scopus_mail_ids !== undefined) {
+      const normalized = normalizeApprovedMailIds(body.approved_scopus_mail_ids);
+      if (!normalized.ok) {
+        return c.json({ success: false, error: normalized.error }, 400);
+      }
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('approved_scopus_mail_ids', normalized.value)
       );
     }
 

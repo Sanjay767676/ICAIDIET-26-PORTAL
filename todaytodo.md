@@ -1,0 +1,13 @@
+I need you to complete the following things if complete means write wat you have completed in simple english in thingsdone29.md
+1. if the author who make the payment only for the conf alone dont show the phase 2 / move to phase two button  
+move to phase 2 button only viisble to the user who make the payment for conference with scopus proceedings 
+2. make another agent to run this 2nd operation in background that is we have given guidlines for the camera ready in user portal and also we have given the template for camera ready check wheather those guidelines matches with the template if not matched note that which is to be writen in thingsdone29.md 
+3. in the admin panel the setting especially the on off sections looks clumsy and more details are presented there this make the admin to confusing i need you to act as a ux engineer and redesin the seeting page of the admin panel if changed means check wheather those works fine dont delete any settng just alter the ui and ux of the setting page 
+4. Remove the Conference with scopus proceeding in the user portal while submitting the payment form insted just show the conference alone and also if choosen this only show the respective amooun for the conference alone below that registration type drop down put an  lite red clr box  in that mentioned this "conference with scopus proceeding have closed contact admin for further details 7358981203 " check for grammer and add this sentence a
+
+5. i need you to add one feature in settings page of admin panel what feature means provide an option approved mail id for conference with scopus proceeding access why this means if i give an mail id here means the system will show the option conference with scopus proceeding only for this user we have already removed default only the approved mail id "which is inside the approved mail id for conference with scopus proceeding option "will get the conference with scopus proceeding in the dropdown  
+
+6. in the normal submission if the papaer get accepted / payment paid /any other the edit option will show that option will be disable if the admin panel turn off the allow file edits toggle (this is not for phase 2 submission)  
+
+7. Complete everything and check/test everything before pushing into git .. I need you to push to github insted of me and do backend deply correctly do migration if need and  unwanted files dont want to be in github if already there means delete it (user data , backup,personal mds )
+8. If all completed means write what you have done during this  tast or after reading the todaytodo.md and write it in thingsdone29.md 
