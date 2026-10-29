@@ -157,30 +157,49 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
   const downloadTemplate = async (kind: 'camera-ready' | 'copyright') => {
     setDownloading(kind);
     try {
-      const token = await getToken();
-      if (!token) throw new Error('Please sign in again.');
-      const res = await fetch(`${API_URL}/api/phase2/templates/${kind}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const data = await res.json().catch(() => null);
-        throw new Error(data?.error || 'Could not download the template.');
+      const fallbackFile =
+        kind === 'copyright'
+          ? `${import.meta.env.BASE_URL}Copyright_Form_Template.docx`
+          : `${import.meta.env.BASE_URL}Camera_Ready_Template.docx`;
+      const fallbackName =
+        kind === 'copyright' ? 'Copyright_Form_Template.docx' : 'Camera_Ready_Template.docx';
+
+      let downloaded = false;
+
+      // 1. Attempt to download from the backend API first
+      try {
+        const token = await getToken().catch(() => null);
+        const headers: Record<string, string> = {};
+        if (token) headers['Authorization'] = `Bearer ${token}`;
+
+        const res = await fetch(`${API_URL}/api/phase2/templates/${kind}`, { headers });
+        if (res.ok) {
+          const disposition = res.headers.get('Content-Disposition') || '';
+          const match = /filename="?([^";]+)"?/i.exec(disposition);
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = match?.[1]?.trim() || fallbackName;
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+          downloaded = true;
+        }
+      } catch (networkErr) {
+        console.warn('API template download failed, falling back to static asset:', networkErr);
       }
-      // Use the filename the server sends (the camera-ready template is a
-      // .docx, the copyright form a .pdf) so the saved file opens correctly.
-      const disposition = res.headers.get('Content-Disposition') || '';
-      const match = /filename="?([^";]+)"?/i.exec(disposition);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download =
-        match?.[1]?.trim() ||
-        (kind === 'copyright' ? 'Copyright_Form_Template.docx' : 'Camera_Ready_Template.docx');
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+
+      // 2. If API didn't succeed, use local static asset fallback
+      if (!downloaded) {
+        const a = document.createElement('a');
+        a.href = fallbackFile;
+        a.download = fallbackName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
     } catch (err: unknown) {
       setPopup({
         type: 'error',

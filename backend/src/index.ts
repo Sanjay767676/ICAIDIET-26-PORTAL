@@ -3191,7 +3191,7 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 // Author: Download a Phase 2 template document (camera-ready template or
 // copyright form) from the Phase2 R2 bucket. Signed-in users only; the
 // buttons themselves live on the eligibility-gated Phase 2 page.
-app.get('/api/phase2/templates/:kind', requireClerkAuth, async (c) => {
+app.get('/api/phase2/templates/:kind', async (c) => {
   try {
     const kind = (c.req.param('kind') || '').toLowerCase();
     const template = PHASE2_TEMPLATES[kind];
@@ -3209,7 +3209,7 @@ app.get('/api/phase2/templates/:kind', requireClerkAuth, async (c) => {
         'Content-Type': object.httpMetadata?.contentType || template.contentType,
         'Content-Disposition': `attachment; filename="${template.filename}"`,
         'Content-Length': String(object.size),
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': 'public, max-age=3600',
       },
     });
   } catch (error) {
@@ -3876,7 +3876,7 @@ app.post('/api/admin/export', async (c) => {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="${fileName}"`,
-        'Cache-Control': 'private, no-store',
+        'Cache-Control': 'public, max-age=3600',
       },
     });
   } catch (error) {
