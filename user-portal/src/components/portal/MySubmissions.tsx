@@ -387,13 +387,16 @@ function RegistrationFormBody({
     }
     const hasScopusAccess = (() => {
       if (!userEmail) return false;
-      const email = userEmail.trim().toLowerCase();
-      if (!email) return false;
-      const list = (approvedScopusMailIds || '')
-        .split(/[\s,;]+/)
+      const emails = userEmail
+        .split(/[\s,;\n]+/)
         .map((v) => v.trim().toLowerCase())
         .filter(Boolean);
-      return list.includes(email);
+      if (emails.length === 0) return false;
+      const list = (approvedScopusMailIds || '')
+        .split(/[\s,;\n]+/)
+        .map((v) => v.trim().toLowerCase())
+        .filter(Boolean);
+      return emails.some((e) => list.includes(e));
     })();
     const opts = Array.from(all);
     if (hasScopusAccess) {

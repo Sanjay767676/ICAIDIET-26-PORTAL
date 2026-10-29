@@ -262,12 +262,13 @@ export default function App() {
               }}
               approvedScopusMailIds={approvedScopusMailIds}
               userEmail={
-                clerkUser?.primaryEmailAddress?.emailAddress ||
-                (clerkUser as any)?.primaryEmailAddress?.emailAddress ||
-                (clerkUser as any)?.emailAddresses?.[0]?.emailAddress ||
-                (clerkUser as any)?.emailAddresses?.[0]?.email ||
-                (clerkUser as any)?.emailAddress ||
-                ''
+                [
+                  clerkUser?.primaryEmailAddress?.emailAddress,
+                  ...((clerkUser as any)?.emailAddresses?.map((e: any) => e?.emailAddress || e?.email) || []),
+                  (clerkUser as any)?.emailAddress,
+                ]
+                  .filter(Boolean)
+                  .join('\n')
               }
             />
           </Show>
