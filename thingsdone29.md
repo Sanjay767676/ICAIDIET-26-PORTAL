@@ -18,7 +18,7 @@
 5. Citations/References: Numbered in square brackets in order of appearance [1],[2],[3]. Template also mentions author-date (Aggarwal, 2026)/(Sodhi 2026) - says confirm which style with organizers. References 9pt, left-aligned with hanging indent, strictly Harvard style. (lines ~243-254)
 6. Compliance warning. (lines ~258-272)
 
-## Template files (what exists)
+## Template files (what exists) 
 - `backend/assets/phase2-templates/camera_ready_template.docx` (PK zip; docx)
 - `backend/assets/phase2-templates/Copyright form.docx` (PK zip; docx)
 - `user-portal/public/sample_copyright.docx` exists (also docx)
