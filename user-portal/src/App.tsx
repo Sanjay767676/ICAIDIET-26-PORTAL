@@ -261,7 +261,12 @@ export default function App() {
                 navigate('phase2');
               }}
               approvedScopusMailIds={approvedScopusMailIds}
-              userEmail={clerkUser?.primaryEmailAddress?.emailAddress || ''}
+              userEmail={
+                clerkUser?.primaryEmailAddress?.emailAddress ||
+                (clerkUser as any)?.emailAddresses?.[0]?.emailAddress ||
+                (clerkUser as any)?.emailAddress ||
+                ''
+              }
             />
           </Show>
         )}
