@@ -1286,7 +1286,7 @@ function MoreInfoModal({
             </div>
             {authors.length === 0 ? (
               <p className="text-sm text-brand-text/70">
-                {(sub.author_name || 'N/A').split(' ')[0] || 'N/A'} {sub.author_email && `Â· ${sub.author_email}`}
+                {(sub.author_name || 'N/A').split(' ')[0] || 'N/A'} {sub.author_email && ` · ${sub.author_email}`}
               </p>
             ) : (
               <div className="space-y-3">
@@ -1304,7 +1304,7 @@ function MoreInfoModal({
                     <div className="text-sm text-brand-text/70 mt-1 space-y-0.5">
                       {a.email && (
                         <div className="flex items-center gap-1.5 break-words">
-                          <span className="shrink-0">âœ‰</span> {a.email}
+                          <Mail className="w-3.5 h-3.5 shrink-0" /> {a.email}
                         </div>
                       )}
                       {(() => {
