@@ -388,6 +388,7 @@ function RegistrationFormBody({
     const hasScopusAccess = (() => {
       if (!userEmail) return false;
       const email = userEmail.trim().toLowerCase();
+      if (!email) return false;
       const list = (approvedScopusMailIds || '')
         .split(/[\s,;]+/)
         .map((v) => v.trim().toLowerCase())

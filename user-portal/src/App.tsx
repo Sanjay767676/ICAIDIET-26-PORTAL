@@ -263,7 +263,9 @@ export default function App() {
               approvedScopusMailIds={approvedScopusMailIds}
               userEmail={
                 clerkUser?.primaryEmailAddress?.emailAddress ||
+                (clerkUser as any)?.primaryEmailAddress?.emailAddress ||
                 (clerkUser as any)?.emailAddresses?.[0]?.emailAddress ||
+                (clerkUser as any)?.emailAddresses?.[0]?.email ||
                 (clerkUser as any)?.emailAddress ||
                 ''
               }
