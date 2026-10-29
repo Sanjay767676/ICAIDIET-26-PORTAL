@@ -34,3 +34,11 @@
 - **Copyright template**: Guidelines page is "Camera-Ready Paper Guidelines" (Phase 2 Guidelines) - it describes paper formatting/citations/figures etc. The copyright form is a separate document (different purpose); the guidelines focus on the camera-ready paper formatting, not the copyright form content. The comparison requested is between "camera-ready guidelines in user portal and camera-ready template files" - so the main content comparison is paper formatting guidelines vs camera-ready template. Copyright form is mentioned as separate template; no detailed content guidelines for copyright form found in the guidelines page.
 
 No obvious textual contradictions found in the guidelines page itself. The main "mismatches" are operational/deployment (naming/keys/formats) and the inherent ambiguity noted in citations style.
+
+## 9. Template Download Fix (Rectified "Download Failed: Invalid or expired session")
+- **Root Cause**: The template download endpoint `/api/phase2/templates/:kind` in `backend/src/index.ts` had `requireClerkAuth`. When users spent time on the Phase 2 page reading guidelines and preparing files (>60 seconds, which is Clerk's token lifespan), clicking the template download triggered a 401 error with "Invalid or expired session. Please sign in again."
+- **Backend Fix**: Removed `requireClerkAuth` from `/api/phase2/templates/:kind` because official conference document templates (Camera Ready Word template and Copyright Form) are generic public documents and should never fail due to token expiration. Added public caching headers.
+- **Frontend Fallback**: Updated `Phase2Page.tsx` so `downloadTemplate()` does not reject on expired tokens, and if the API ever encounters network or server errors, it immediately falls back to downloading the bundled static files directly from `user-portal/public/`.
+- **Static Assets Added**: Placed `Camera_Ready_Template.docx` and `Copyright_Form_Template.docx` in `user-portal/public/`.
+- **Deployed**: Deployed the updated Cloudflare Worker (`npm run deploy`) and verified both template endpoints return HTTP 200 OK.
+- **GitHub**: Committed and pushed changes to `main`.
