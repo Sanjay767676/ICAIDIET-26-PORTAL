@@ -191,7 +191,7 @@ function UpdatedBadge({ label = 'Updated by author' }: { label?: string }) {
 // The timestamp underneath records when that row last changed state, so an
 // organiser can tell a recent send from one that went out weeks ago.
 function mailStatusBadge(status?: string, sentAt?: string | null) {
-  if (!status) return <span className="text-xs text-brand-text/40">â€”</span>;
+  if (!status) return <span className="text-xs text-brand-text/40">—</span>;
 
   const stamp = (label: string) =>
     sentAt ? (
