@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Settings,
   FileText,
@@ -18,6 +18,9 @@ import {
   ToggleLeft,
   MailPlus,
   Info,
+  Trash2,
+  Plus,
+  FileCheck,
 } from 'lucide-react';
 import MailField from './MailField';
 import RegistrationConfigPanel, { RegistrationConfig } from './RegistrationConfigPanel';
@@ -125,7 +128,23 @@ const NAV_ITEMS: { key: SettingsSection; label: string; icon: typeof Settings }[
 ];
 
 /* ---------- Interface for all settings props ---------- */
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+
+export interface PaymentAccessGrant {
+  id: string;
+  submission_id: string;
+  paper_title: string;
+  paper_id?: string;
+  submission_code?: string;
+  author_email?: string;
+  clerk_id?: string;
+  granted_at?: string;
+}
+
 export interface SettingsPanelProps {
+  token?: string;
+  onUnauthorized?: () => void;
+  submissions?: any[];
   // Submission controls
   paperAcceptanceEnabled: boolean;
   setPaperAcceptanceEnabled: (v: boolean) => void;
@@ -197,6 +216,105 @@ export interface SettingsPanelProps {
 
 export default function SettingsPanel(props: SettingsPanelProps) {
   const [section, setSection] = useState<SettingsSection>('submissions');
+  const [paymentGrants, setPaymentGrants] = useState<PaymentAccessGrant[]>([]);
+  const [loadingGrants, setLoadingGrants] = useState(false);
+  const [newPaperTitle, setNewPaperTitle] = useState('');
+  const [addingGrant, setAddingGrant] = useState(false);
+  const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [grantError, setGrantError] = useState<string | null>(null);
+  const [grantSuccess, setGrantSuccess] = useState<string | null>(null);
+
+  const fetchPaymentGrants = useCallback(async () => {
+    if (!props.token) return;
+    setLoadingGrants(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/payment-access`, {
+        headers: { Authorization: `Bearer ${props.token}` },
+      });
+      if (res.status === 401) {
+        props.onUnauthorized?.();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (res.ok && data?.success) {
+        setPaymentGrants(data.grants || []);
+      }
+    } catch (err) {
+      console.error('Failed to load payment access grants:', err);
+    } finally {
+      setLoadingGrants(false);
+    }
+  }, [props.token, props.onUnauthorized]);
+
+  useEffect(() => {
+    fetchPaymentGrants();
+  }, [fetchPaymentGrants]);
+
+  const handleAddPaymentAccess = async () => {
+    const title = newPaperTitle.trim();
+    if (!title) {
+      setGrantError('Please enter a paper title.');
+      return;
+    }
+    setAddingGrant(true);
+    setGrantError(null);
+    setGrantSuccess(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/payment-access`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${props.token}`,
+        },
+        body: JSON.stringify({ title }),
+      });
+      if (res.status === 401) {
+        props.onUnauthorized?.();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to grant payment access.');
+      }
+      const grant = data.grant as PaymentAccessGrant;
+      setGrantSuccess(
+        `Payment access approved: "${grant.paper_title}" (ID: ${grant.paper_id || grant.submission_id.slice(0, 8)}, Email: ${grant.author_email || 'N/A'}, Clerk ID: ${grant.clerk_id || 'Not linked'})`
+      );
+      setNewPaperTitle('');
+      setPaymentGrants((prev) => [grant, ...prev.filter((g) => g.submission_id !== grant.submission_id)]);
+    } catch (err: any) {
+      setGrantError(err?.message || 'Failed to grant payment access.');
+    } finally {
+      setAddingGrant(false);
+    }
+  };
+
+  const handleRevokePaymentAccess = async (id: string) => {
+    setRevokingId(id);
+    setGrantError(null);
+    setGrantSuccess(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/payment-access/${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${props.token}` },
+      });
+      if (res.status === 401) {
+        props.onUnauthorized?.();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to revoke payment access.');
+      }
+      setPaymentGrants((prev) => prev.filter((g) => g.id !== id && g.submission_id !== id));
+      setGrantSuccess('Payment access revoked.');
+      setTimeout(() => setGrantSuccess(null), 3000);
+    } catch (err: any) {
+      setGrantError(err?.message || 'Failed to revoke payment access.');
+    } finally {
+      setRevokingId(null);
+    }
+  };
 
   return (
     <div className="max-w-7xl mx-auto mt-6">
@@ -533,28 +651,177 @@ export default function SettingsPanel(props: SettingsPanelProps) {
               <SettingCard>
                 <CardHeader
                   title="Payment form access"
-                  description="Add paper titles to grant payment form access to specific authors."
+                  description="Add paper titles to grant payment form access to specific authors. Enter a paper title to look up its submission ID, author email, and Clerk ID."
                 />
-                <div className="px-5 pb-4 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={props.approvedScopusMailIds}
-                      onChange={(e) => props.setApprovedScopusMailIds(e.target.value)}
-                      placeholder="Enter paper title"
-                      className="flex-1 rounded-lg border border-stone-200 px-3 py-2 text-sm bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-400"
-                    />
-                    <button
-                      onClick={props.saveApprovedScopusMailIds}
-                      disabled={props.savingApprovedScopus || !props.approvedScopusMailIds.trim()}
-                      className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-stone-900 text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
-                      title="Grant payment access"
-                    >
-                      {props.savingApprovedScopus ? <Loader2 className="w-4 h-4 animate-spin" /> : <span className="text-lg leading-none">+</span>}
-                    </button>
+                <div className="px-5 pb-6 space-y-5">
+                  {/* Input field + Add button */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">
+                      Enter Paper Title
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          value={newPaperTitle}
+                          onChange={(e) => {
+                            setNewPaperTitle(e.target.value);
+                            setGrantError(null);
+                            setGrantSuccess(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddPaymentAccess();
+                            }
+                          }}
+                          placeholder="Enter paper title (or select from list)"
+                          list="submissions-title-list"
+                          className="w-full rounded-lg border border-stone-200 px-3.5 py-2.5 text-sm bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400 focus:border-stone-400"
+                        />
+                        {props.submissions && props.submissions.length > 0 && (
+                          <datalist id="submissions-title-list">
+                            {props.submissions.map((s: any) => (
+                              <option key={s.id} value={s.title}>
+                                {s.paper_id ? `[${s.paper_id}] ` : ''}{s.title}
+                              </option>
+                            ))}
+                          </datalist>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleAddPaymentAccess}
+                        disabled={addingGrant || !newPaperTitle.trim()}
+                        className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-stone-900 text-white font-medium hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all gap-1 shrink-0 shadow-sm"
+                        title="Grant payment access"
+                      >
+                        {addingGrant ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <Plus className="w-5 h-5" />
+                        )}
+                      </button>
+                    </div>
+
+                    {grantError && (
+                      <div className="flex items-center gap-2 p-3 bg-red-50 text-red-700 border border-red-200 rounded-lg text-xs font-medium">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        <span>{grantError}</span>
+                      </div>
+                    )}
+
+                    {grantSuccess && (
+                      <div className="flex items-center gap-2 p-3 bg-green-50 text-green-800 border border-green-200 rounded-lg text-xs font-medium">
+                        <CheckCircle2 className="w-4 h-4 shrink-0 text-green-600" />
+                        <div className="flex-1">
+                          <span className="font-semibold">Payment access approved!</span>{' '}
+                          <span className="text-green-700">{grantSuccess}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  {props.approvedScopusMsg && <span className="text-sm text-green-700">{props.approvedScopusMsg}</span>}
-                  {props.approvedScopusErr && <span className="text-sm text-red-600">{props.approvedScopusErr}</span>}
+
+                  {/* Approved Paper Box */}
+                  <div className="rounded-xl border border-stone-200 bg-stone-50/70 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <FileCheck className="w-4 h-4 text-emerald-600" />
+                        <h5 className="text-sm font-bold text-stone-900">Approved Paper</h5>
+                        <span className="px-2 py-0.5 rounded-full text-xs font-semibold bg-stone-200 text-stone-700">
+                          {paymentGrants.length}
+                        </span>
+                      </div>
+                      {loadingGrants && (
+                        <span className="inline-flex items-center gap-1.5 text-xs text-stone-500">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" /> Refreshing...
+                        </span>
+                      )}
+                    </div>
+
+                    {paymentGrants.length === 0 ? (
+                      <div className="rounded-lg border border-dashed border-stone-300 bg-white p-6 text-center">
+                        <Shield className="w-6 h-6 text-stone-300 mx-auto mb-1.5" />
+                        <p className="text-xs font-medium text-stone-600">No approved papers yet</p>
+                        <p className="text-[11px] text-stone-400 mt-0.5">
+                          Enter a paper title above and click + to grant payment form access.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-stone-200 rounded-lg border border-stone-200 bg-white overflow-hidden shadow-sm">
+                        {paymentGrants.map((grant) => (
+                          <div
+                            key={grant.id}
+                            className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-stone-50/80 transition-colors"
+                          >
+                            <div className="min-w-0 space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-bold text-stone-900 break-words">
+                                  {grant.paper_title}
+                                </span>
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-600" /> Payment Access Approved
+                                </span>
+                              </div>
+
+                              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-stone-500">
+                                {grant.paper_id && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <span className="font-semibold text-stone-700">Paper ID:</span>
+                                    <code className="bg-stone-100 px-1 py-0.5 rounded font-mono text-[11px] text-stone-800">
+                                      {grant.paper_id}
+                                    </code>
+                                  </span>
+                                )}
+                                {grant.submission_id && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <span className="font-semibold text-stone-700">Submission ID:</span>
+                                    <code className="bg-stone-100 px-1 py-0.5 rounded font-mono text-[11px] text-stone-800" title={grant.submission_id}>
+                                      {grant.submission_id.length > 12 ? `${grant.submission_id.slice(0, 8)}...` : grant.submission_id}
+                                    </code>
+                                  </span>
+                                )}
+                                {grant.author_email && (
+                                  <span className="inline-flex items-center gap-1">
+                                    <span className="font-semibold text-stone-700">Email:</span>
+                                    <span className="text-stone-800">{grant.author_email}</span>
+                                  </span>
+                                )}
+                                <span className="inline-flex items-center gap-1">
+                                  <span className="font-semibold text-stone-700">Clerk ID:</span>
+                                  {grant.clerk_id ? (
+                                    <code className="bg-stone-100 px-1 py-0.5 rounded font-mono text-[11px] text-stone-800">
+                                      {grant.clerk_id}
+                                    </code>
+                                  ) : (
+                                    <span className="text-stone-400 italic">Not linked</span>
+                                  )}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="shrink-0 flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => handleRevokePaymentAccess(grant.id)}
+                                disabled={revokingId === grant.id}
+                                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs font-medium transition-colors disabled:opacity-50"
+                                title="Revoke payment access"
+                              >
+                                {revokingId === grant.id ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                )}
+                                <span>Revoke</span>
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </SettingCard>
             </>

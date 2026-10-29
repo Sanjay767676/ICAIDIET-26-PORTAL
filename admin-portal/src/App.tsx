@@ -4033,6 +4033,9 @@ Duplicates
 
         {activeTab === 'settings' && (
           <SettingsPanel
+            token={token}
+            onUnauthorized={handleLogout}
+            submissions={submissions}
             paperAcceptanceEnabled={paperAcceptanceEnabled}
             setPaperAcceptanceEnabled={setPaperAcceptanceEnabled}
             fileEditsEnabled={fileEditsEnabled}

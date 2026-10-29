@@ -2491,14 +2491,11 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
               (
-                 s.user_id = ?
-                 OR (trim(coalesce(?, '')) <> '' AND EXISTS (
-                   SELECT 1 FROM authors a
-                   WHERE a.submission_id = s.id AND lower(trim(a.email)) = lower(?) AND a.is_primary = 1
-                 ))
-                 OR EXISTS (
+                 EXISTS (
                    SELECT 1 FROM payment_access_grants g WHERE g.submission_id = s.id
                  )
+                 OR s.payment_status = 'APPROVED'
+                 OR s.payment_status = 'PENDING'
               ) AS can_pay
        FROM submissions s
        WHERE s.deleted_at IS NULL
@@ -2514,7 +2511,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
            ))
          )
        ORDER BY s.created_at DESC`
-    ).bind(userId, clerkEmail, clerkEmail, userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
+    ).bind(userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
 
     const submissions = (results as any[]) || [];
 
@@ -4516,22 +4513,23 @@ function userPortalGate(
 }
 
 // Returns whether registration is currently open AND the submission is
-// accepted, so that only eligible authors can register / upload proof.
+// granted payment access, so that only eligible authors can register / upload proof.
 async function registrationEligible(
   env: Bindings,
   submissionId: string
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  const settings = await loadSettingsRecord(env);
-  if (settings['registration_open'] !== 'true') {
-    return { ok: false, error: 'Registration is currently closed.' };
-  }
   const row = await env.DB.prepare(
-    `SELECT s.status,
-            (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision
+    `SELECT s.status, s.payment_status,
+            (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
+            EXISTS (SELECT 1 FROM payment_access_grants g WHERE g.submission_id = s.id) AS has_grant
      FROM submissions s
      WHERE s.id = ?`
   ).bind(submissionId).first() as any;
   if (!row) return { ok: false, error: 'Submission not found.' };
+  const hasAccess = Boolean(row.has_grant) || row.payment_status === 'APPROVED' || row.payment_status === 'PENDING';
+  if (!hasAccess) {
+    return { ok: false, error: 'Payment access has not been granted for this paper. Contact admin.' };
+  }
   const acceptedDecisions = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES'];
   const acceptedStatuses = ['ACCEPTED', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
   const accepted = acceptedDecisions.includes(row.review_decision) || acceptedStatuses.includes(row.status);
@@ -4576,6 +4574,133 @@ app.get('/api/admin/settings', async (c) => {
   } catch (error) {
     console.error('Fetch admin settings error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: Payment Access Grants API (get, grant by title/code, revoke)
+// ------------------------------------------------------------------
+app.get('/api/admin/payment-access', async (c) => {
+  const token = getBearer(c);
+  if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+  const verified = await verifyToken(c, token);
+  if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session.' }, 401);
+
+  try {
+    const rows = await c.env.DB.prepare(
+      `SELECT 
+        g.id,
+        g.submission_id,
+        coalesce(s.title, g.paper_title, '') as paper_title,
+        coalesce(s.paper_id, s.submission_code, '') as paper_id,
+        coalesce(s.submission_code, '') as submission_code,
+        coalesce((SELECT a.email FROM authors a WHERE a.submission_id = s.id AND a.is_primary = 1 LIMIT 1), s.author_email, '') as author_email,
+        coalesce(up.clerk_id, CASE WHEN s.user_id LIKE 'user_%' THEN s.user_id ELSE '' END, '') as clerk_id,
+        g.granted_at
+      FROM payment_access_grants g
+      LEFT JOIN submissions s ON s.id = g.submission_id
+      LEFT JOIN user_profiles up ON up.user_id = s.user_id
+      ORDER BY g.granted_at DESC`
+    ).all();
+
+    return c.json({ success: true, grants: rows.results || [] });
+  } catch (err: any) {
+    console.error('Fetch payment access grants error:', err);
+    return c.json({ success: false, error: 'Failed to fetch payment access grants.' }, 500);
+  }
+});
+
+app.post('/api/admin/payment-access', async (c) => {
+  const token = getBearer(c);
+  if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+  const verified = await verifyToken(c, token);
+  if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session.' }, 401);
+
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const title = String(body.title || '').trim();
+    if (!title) {
+      return c.json({ success: false, error: 'Please enter a paper title.' }, 400);
+    }
+
+    // 1. Exact title match (case-insensitive)
+    let sub = await c.env.DB.prepare(
+      `SELECT s.id, s.title, s.paper_id, s.submission_code, s.author_email, s.user_id, up.clerk_id
+       FROM submissions s
+       LEFT JOIN user_profiles up ON up.user_id = s.user_id
+       WHERE lower(trim(s.title)) = lower(?) AND s.deleted_at IS NULL
+       ORDER BY s.created_at DESC LIMIT 1`
+    ).bind(title).first() as any;
+
+    // 2. Fallback to paper_id / submission_code / substring match
+    if (!sub) {
+      sub = await c.env.DB.prepare(
+        `SELECT s.id, s.title, s.paper_id, s.submission_code, s.author_email, s.user_id, up.clerk_id
+         FROM submissions s
+         LEFT JOIN user_profiles up ON up.user_id = s.user_id
+         WHERE (lower(trim(s.submission_code)) = lower(?) OR lower(trim(s.paper_id)) = lower(?) OR lower(trim(s.title)) LIKE '%' || lower(?) || '%')
+           AND s.deleted_at IS NULL
+         ORDER BY s.created_at DESC LIMIT 1`
+      ).bind(title, title, title).first() as any;
+    }
+
+    if (!sub) {
+      return c.json({ success: false, error: 'No submission found matching that paper title or paper ID.' }, 404);
+    }
+
+    const primaryAuthor = await c.env.DB.prepare(
+      `SELECT email FROM authors WHERE submission_id = ? AND is_primary = 1 LIMIT 1`
+    ).bind(sub.id).first() as any;
+    const authorEmail = primaryAuthor?.email || sub.author_email || '';
+    const clerkId = sub.clerk_id || (sub.user_id && sub.user_id.startsWith('user_') ? sub.user_id : '') || '';
+
+    const grantId = typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+      ? (crypto as any).randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    await c.env.DB.prepare(
+      `INSERT INTO payment_access_grants (id, submission_id, paper_title, granted_at)
+       VALUES (?, ?, ?, datetime('now'))
+       ON CONFLICT(submission_id) DO UPDATE SET paper_title = excluded.paper_title, granted_at = datetime('now')`
+    ).bind(grantId, sub.id, sub.title).run();
+
+    const grant = {
+      id: grantId,
+      submission_id: sub.id,
+      paper_title: sub.title,
+      paper_id: sub.paper_id || sub.submission_code || '',
+      submission_code: sub.submission_code || '',
+      author_email: authorEmail,
+      clerk_id: clerkId,
+      granted_at: new Date().toISOString(),
+    };
+
+    return c.json({
+      success: true,
+      message: `Payment access approved for ${sub.title}`,
+      grant,
+    });
+  } catch (err: any) {
+    console.error('Grant payment access error:', err);
+    return c.json({ success: false, error: err?.message || 'Failed to grant payment access.' }, 500);
+  }
+});
+
+app.delete('/api/admin/payment-access/:id', async (c) => {
+  const token = getBearer(c);
+  if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+  const verified = await verifyToken(c, token);
+  if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session.' }, 401);
+
+  try {
+    const id = c.req.param('id');
+    await c.env.DB.prepare(
+      `DELETE FROM payment_access_grants WHERE id = ? OR submission_id = ?`
+    ).bind(id, id).run();
+    return c.json({ success: true, message: 'Payment access revoked.' });
+  } catch (err: any) {
+    console.error('Revoke payment access error:', err);
+    return c.json({ success: false, error: 'Failed to revoke payment access.' }, 500);
   }
 });
 
@@ -4763,47 +4888,54 @@ app.post('/api/admin/settings', async (c) => {
       );
     }
 
-    // Approved email list for Conference with Scopus proceedings access / Payment access by paper title
+    // Payment form access by paper title (or legacy email list)
     if (body.approved_scopus_mail_ids !== undefined) {
-      const input = String(body.approved_scopus_mail_ids || '');
-      const normalized = normalizeApprovedMailIds(input);
-      if (!normalized.ok) {
-        return c.json({ success: false, error: normalized.error }, 400);
-      }
-      // Try to treat as paper title if it's not in email format
-      const parts = input.split(/[\s,;\n]+/).map(p => p.trim()).filter(Boolean);
-      const isEmailLike = parts.length > 0 && parts.every(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p));
-      if (isEmailLike) {
+      const input = String(body.approved_scopus_mail_ids || '').trim();
+      if (input === '') {
         statements.push(
           env.DB.prepare(
             `INSERT INTO settings (key, value) VALUES (?, ?)
              ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-          ).bind('approved_scopus_mail_ids', normalized.value)
+          ).bind('approved_scopus_mail_ids', '')
         );
-      } else if (input.trim()) {
-        // Treat as paper title - find submission and grant payment access to primary author
-        try {
-          const title = input.trim();
-          const sub = await env.DB.prepare(`SELECT id, title, author_email, user_id FROM submissions WHERE lower(trim(title)) = lower(?) AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`).bind(title).first() as any;
-          if (sub) {
-            const grantId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-            try {
-              await env.DB.prepare(`INSERT OR IGNORE INTO payment_access_grants (id, submission_id, paper_title) VALUES (?, ?, ?)`).bind(grantId, sub.id, sub.title).run();
-            } catch {}
-            return c.json({ success: true, message: `Payment access granted for submission: ${sub.title}` });
-          } else {
-            return c.json({ success: false, error: 'Submission not found for the given paper title.' }, 404);
-          }
-        } catch (e: any) {
-          return c.json({ success: false, error: e?.message || 'Failed to grant payment access.' }, 500);
-        }
       } else {
-        statements.push(
-          env.DB.prepare(
-            `INSERT INTO settings (key, value) VALUES (?, ?)
-             ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-          ).bind('approved_scopus_mail_ids', normalized.value)
-        );
+        const parts = input.split(/[\s,;\n]+/).map((p: string) => p.trim()).filter(Boolean);
+        const isEmailLike = parts.length > 0 && parts.every((p: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p));
+        if (isEmailLike) {
+          const normalized = normalizeApprovedMailIds(input);
+          if (!normalized.ok) {
+            return c.json({ success: false, error: normalized.error }, 400);
+          }
+          statements.push(
+            env.DB.prepare(
+              `INSERT INTO settings (key, value) VALUES (?, ?)
+               ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+            ).bind('approved_scopus_mail_ids', normalized.value)
+          );
+        } else {
+          try {
+            const title = input;
+            const sub = await env.DB.prepare(
+              `SELECT id, title, author_email, user_id FROM submissions WHERE lower(trim(title)) = lower(?) AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`
+            ).bind(title).first() as any;
+            if (!sub) {
+              return c.json({ success: false, error: 'Submission not found for the given paper title.' }, 404);
+            }
+            const grantId = typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function'
+              ? (crypto as any).randomUUID()
+              : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            try {
+              await env.DB.prepare(
+                `INSERT OR IGNORE INTO payment_access_grants (id, submission_id, paper_title) VALUES (?, ?, ?)`
+              ).bind(grantId, sub.id, sub.title).run();
+            } catch (e) {
+              console.error('Failed to insert payment access grant:', e);
+            }
+            return c.json({ success: true, message: `Payment access granted for submission: ${sub.title}` });
+          } catch (e: any) {
+            return c.json({ success: false, error: e?.message || 'Failed to grant payment access.' }, 500);
+          }
+        }
       }
     }
 
