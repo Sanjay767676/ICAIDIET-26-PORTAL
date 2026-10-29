@@ -147,6 +147,15 @@ export function Phase2GuidelinesPage({ onBack }: Phase2GuidelinesPageProps) {
                 The <strong>header</strong> must be placed <strong>4.7 cm</strong> from the edge of the page, and the <strong>footer</strong> must be placed <strong>0 cm</strong> from the edge.
               </div>
             </div>
+
+            <div className="flex items-start gap-3 p-3.5 rounded-xl bg-stone-50 border border-stone-200">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-black text-white flex items-center justify-center text-xs font-bold mt-0.5">
+                13
+              </span>
+              <div className="text-sm text-black/85 leading-relaxed">
+                <strong>No.of Pages to be 10</strong>
+              </div>
+            </div>
           </div>
         </section>
 
