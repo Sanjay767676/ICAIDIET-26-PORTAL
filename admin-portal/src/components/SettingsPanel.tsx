@@ -529,33 +529,32 @@ export default function SettingsPanel(props: SettingsPanelProps) {
                 </div>
               </SettingCard>
 
-              {/* Approved mail IDs for Scopus proceedings */}
+              {/* Payment form access */}
               <SettingCard>
                 <CardHeader
-                  title="Scopus Proceedings Access"
-                  description='Only emails listed here will be able to see and select the "Conference with Scopus proceedings" option in the payment form.'
+                  title="Payment form access"
+                  description="Add paper titles to grant payment form access to specific authors."
                 />
                 <div className="px-5 pb-4 space-y-3">
-                  <textarea
-                    value={props.approvedScopusMailIds}
-                    onChange={(e) => props.setApprovedScopusMailIds(e.target.value)}
-                    rows={4}
-                    spellCheck={false}
-                    placeholder={'author@gmail.com\nanother.author@gmail.com'}
-                    className="w-full rounded-lg border border-stone-200 px-3 py-2 text-sm font-mono bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-400"
-                  />
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={props.approvedScopusMailIds}
+                      onChange={(e) => props.setApprovedScopusMailIds(e.target.value)}
+                      placeholder="Enter paper title"
+                      className="flex-1 rounded-lg border border-stone-200 px-3 py-2 text-sm bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-stone-400"
+                    />
                     <button
                       onClick={props.saveApprovedScopusMailIds}
-                      disabled={props.savingApprovedScopus}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-stone-900 text-white font-semibold text-sm hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      disabled={props.savingApprovedScopus || !props.approvedScopusMailIds.trim()}
+                      className="inline-flex items-center justify-center w-9 h-9 rounded-lg bg-stone-900 text-white hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                      title="Grant payment access"
                     >
-                      {props.savingApprovedScopus && <Loader2 className="w-4 h-4 animate-spin" />}
-                      {props.savingApprovedScopus ? 'Saving...' : 'Save Scopus Access Emails'}
+                      {props.savingApprovedScopus ? <Loader2 className="w-4 h-4 animate-spin" /> : <span className="text-lg leading-none">+</span>}
                     </button>
-                    {props.approvedScopusMsg && <span className="text-sm text-green-700">{props.approvedScopusMsg}</span>}
-                    {props.approvedScopusErr && <span className="text-sm text-red-600">{props.approvedScopusErr}</span>}
                   </div>
+                  {props.approvedScopusMsg && <span className="text-sm text-green-700">{props.approvedScopusMsg}</span>}
+                  {props.approvedScopusErr && <span className="text-sm text-red-600">{props.approvedScopusErr}</span>}
                 </div>
               </SettingCard>
             </>

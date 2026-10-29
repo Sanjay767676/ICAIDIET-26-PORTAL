@@ -86,7 +86,6 @@ export default function App() {
   // Admin "Phase 2" switch. Absent setting reads as OFF, so the Move to Phase 2
   // button stays hidden until it is explicitly turned on.
   const [phase2Enabled, setPhase2Enabled] = useState<boolean>(false);
-  const [approvedScopusMailIds, setApprovedScopusMailIds] = useState<string>('');
   // Which submission the Phase 2 page is opened for. The portal has no URL
   // routing — views are in-memory state — so this can only be set by clicking
   // Move to Phase 2 on one of the author's own submissions; the backend
@@ -125,7 +124,6 @@ export default function App() {
           if (data.registration) setRegistration(data.registration);
           setFileEditsEnabled(s.file_edits_enabled !== 'false');
           setPhase2Enabled(s.phase2_enabled === 'true');
-          setApprovedScopusMailIds(s.approved_scopus_mail_ids || '');
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -260,7 +258,7 @@ export default function App() {
                 setPhase2SubmissionId(id);
                 navigate('phase2');
               }}
-              approvedScopusMailIds={approvedScopusMailIds}
+              approvedScopusMailIds=""
               userEmail={
                 [
                   clerkUser?.primaryEmailAddress?.emailAddress,

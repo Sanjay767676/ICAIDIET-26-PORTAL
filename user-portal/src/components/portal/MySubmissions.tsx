@@ -385,25 +385,8 @@ function RegistrationFormBody({
     for (const tiers of Object.values(config.fees)) {
       for (const regType of Object.keys(tiers || {})) all.add(regType);
     }
-    const hasScopusAccess = (() => {
-      if (!userEmail) return false;
-      const emails = userEmail
-        .split(/[\s,;\n]+/)
-        .map((v) => v.trim().toLowerCase())
-        .filter(Boolean);
-      if (emails.length === 0) return false;
-      const list = (approvedScopusMailIds || '')
-        .split(/[\s,;\n]+/)
-        .map((v) => v.trim().toLowerCase())
-        .filter(Boolean);
-      return emails.some((e) => list.includes(e));
-    })();
-    const opts = Array.from(all);
-    if (hasScopusAccess) {
-      return opts.filter((opt) => opt === 'Conference alone' || opt === 'Conference with Scopus proceedings');
-    }
-    return opts.filter((opt) => opt === 'Conference alone');
-  }, [config.fees, approvedScopusMailIds, userEmail]);
+    return Array.from(all);
+  }, [config.fees]);
 
   // Ask the server what this exact pair costs, every time the selection
   // changes. The config object on the props was fetched once when the app
@@ -737,9 +720,6 @@ function RegistrationFormBody({
               <option key={opt} value={opt}>{opt}</option>
             ))}
           </select>
-          <div className="mt-2 p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-800">
-            Conference with Scopus proceedings has closed. Contact the admin for further details: 7358981203
-          </div>
         </div>
 
         {/* Step 2: Author Type (Shown after completing registration type) */}
@@ -1482,9 +1462,9 @@ export function MySubmissions({
               sub.payment_status !== 'REJECTED' &&
               Boolean(sub.payment_submitted_at || (sub.payment_proof_url && sub.utr_transaction_id));
             const isPaymentOpen =
-              expandedPaymentIds[sub.id] ||
-              isPaymentDone ||
-              !!sub.payment_proof_url;
+              (expandedPaymentIds[sub.id] ||
+                isPaymentDone ||
+                !!sub.payment_proof_url) && sub.can_pay && isSubAccepted;
             const isPhase2Shown =
               (phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED') ||
               !!sub.phase2_submitted_at;
@@ -1818,14 +1798,12 @@ export function MySubmissions({
                         )}
                       </>
                     ) : (
-                      <div className="bg-white rounded-2xl p-6 shadow-md border-2 border-gray-200 text-center flex flex-col items-center">
-                        <h4 className="text-lg sm:text-xl font-bold font-serif text-gray-700 mb-2">
-                          Paper Accepted
+                      <div className="bg-white rounded-2xl p-6 shadow-md border-2 border-red-300 text-center flex flex-col items-center">
+                        <h4 className="text-lg sm:text-xl font-bold font-serif text-red-700 mb-2">
+                          Submissions are closed
                         </h4>
-                        <p className="text-sm text-gray-600 max-w-xl mx-auto leading-relaxed">
-                          {isPaymentDone
-                            ? 'Your paper has been accepted and registration payment has been completed.'
-                            : 'Your paper has been accepted. Only the primary author or the original submitter can make the payment for this submission.'}
+                        <p className="text-sm text-red-700 max-w-xl mx-auto leading-relaxed font-medium">
+                          Contact Admin For access 7358981203 | icaidiet26@gmail.com
                         </p>
                         {sub.payment_status === 'APPROVED' && (
                           <div className="mt-4 px-4 py-2 bg-green-100 text-green-800 border border-green-300 rounded-lg text-sm font-semibold">

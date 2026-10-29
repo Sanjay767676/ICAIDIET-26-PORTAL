@@ -2496,6 +2496,9 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
                    SELECT 1 FROM authors a
                    WHERE a.submission_id = s.id AND lower(trim(a.email)) = lower(?) AND a.is_primary = 1
                  ))
+                 OR EXISTS (
+                   SELECT 1 FROM payment_access_grants g WHERE g.submission_id = s.id
+                 )
               ) AS can_pay
        FROM submissions s
        WHERE s.deleted_at IS NULL
@@ -4760,18 +4763,48 @@ app.post('/api/admin/settings', async (c) => {
       );
     }
 
-    // Approved email list for Conference with Scopus proceedings access
+    // Approved email list for Conference with Scopus proceedings access / Payment access by paper title
     if (body.approved_scopus_mail_ids !== undefined) {
-      const normalized = normalizeApprovedMailIds(body.approved_scopus_mail_ids);
+      const input = String(body.approved_scopus_mail_ids || '');
+      const normalized = normalizeApprovedMailIds(input);
       if (!normalized.ok) {
         return c.json({ success: false, error: normalized.error }, 400);
       }
-      statements.push(
-        env.DB.prepare(
-          `INSERT INTO settings (key, value) VALUES (?, ?)
-           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
-        ).bind('approved_scopus_mail_ids', normalized.value)
-      );
+      // Try to treat as paper title if it's not in email format
+      const parts = input.split(/[\s,;\n]+/).map(p => p.trim()).filter(Boolean);
+      const isEmailLike = parts.length > 0 && parts.every(p => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(p));
+      if (isEmailLike) {
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO settings (key, value) VALUES (?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+          ).bind('approved_scopus_mail_ids', normalized.value)
+        );
+      } else if (input.trim()) {
+        // Treat as paper title - find submission and grant payment access to primary author
+        try {
+          const title = input.trim();
+          const sub = await env.DB.prepare(`SELECT id, title, author_email, user_id FROM submissions WHERE lower(trim(title)) = lower(?) AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 1`).bind(title).first() as any;
+          if (sub) {
+            const grantId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            try {
+              await env.DB.prepare(`INSERT OR IGNORE INTO payment_access_grants (id, submission_id, paper_title) VALUES (?, ?, ?)`).bind(grantId, sub.id, sub.title).run();
+            } catch {}
+            return c.json({ success: true, message: `Payment access granted for submission: ${sub.title}` });
+          } else {
+            return c.json({ success: false, error: 'Submission not found for the given paper title.' }, 404);
+          }
+        } catch (e: any) {
+          return c.json({ success: false, error: e?.message || 'Failed to grant payment access.' }, 500);
+        }
+      } else {
+        statements.push(
+          env.DB.prepare(
+            `INSERT INTO settings (key, value) VALUES (?, ?)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+          ).bind('approved_scopus_mail_ids', normalized.value)
+        );
+      }
     }
 
     // Fees, early-bird cutoff and bank details. Validated as a whole before
