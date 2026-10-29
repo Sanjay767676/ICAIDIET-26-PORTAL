@@ -19,4 +19,4 @@ the user expects both together on every "deploy to cloudflare" request.
 ## Notes
 - Git pushes and Vercel deployments are done by the user; do not run them unless asked.
 - Production Worker runs from `wrangler.toml` `[vars]` (e.g. `ALLOWED_ORIGINS`) + `wrangler deploy`; the Worker is NOT deployed via GitHub integrations.
-- Frontend portals read `VITE_API_URL` (build-time env var) and must be configured in Vercel dashboard.
+- Frontend portals read `VITE_API_URL` (build-time env var) and must be configured in Vercel dashboard. 

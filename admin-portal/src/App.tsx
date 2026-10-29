@@ -3,6 +3,7 @@ import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Load
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
 import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
+import SettingsPanel from './components/SettingsPanel';
 import { PaymentDashboard } from './components/PaymentDashboard';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -161,7 +162,7 @@ const REVIEW_DECISION_META: Record<string, { label: string; box: string; text: s
 
 function reviewBadge(decision?: string | null, updatedAt?: string | null) {
   const meta = decision ? REVIEW_DECISION_META[decision] : undefined;
-  const label = meta?.label ?? '—';
+  const label = meta?.label ?? 'â€”';
   const box = meta?.box ?? 'bg-gray-50 border-gray-300';
   const text = meta?.text ?? 'text-brand-text';
   return (
@@ -190,7 +191,7 @@ function UpdatedBadge({ label = 'Updated by author' }: { label?: string }) {
 // The timestamp underneath records when that row last changed state, so an
 // organiser can tell a recent send from one that went out weeks ago.
 function mailStatusBadge(status?: string, sentAt?: string | null) {
-  if (!status) return <span className="text-xs text-brand-text/40">—</span>;
+  if (!status) return <span className="text-xs text-brand-text/40">â€”</span>;
 
   const stamp = (label: string) =>
     sentAt ? (
@@ -358,7 +359,7 @@ function primaryAuthorLines(sub: Submission) {
     return (
       <>
         <div className="font-medium text-brand-text break-words">
-          {[primary.first_name, primary.last_name].filter(Boolean).join(' ') || '—'}
+          {[primary.first_name, primary.last_name].filter(Boolean).join(' ') || 'â€”'}
         </div>
         <div className="flex items-center gap-1.5 text-xs text-brand-text/60 font-normal mt-0.5 break-words">
           <span className="inline-flex items-center gap-1">
@@ -367,7 +368,7 @@ function primaryAuthorLines(sub: Submission) {
               const digits = onlyDigits(primary.phone || '');
               return digits.length >= PHONE_MIN_DIGITS && digits.length <= PHONE_MAX_DIGITS
                 ? digits
-                : '—';
+                : 'â€”';
             })()}
           </span>
         </div>
@@ -860,7 +861,7 @@ function EditAuthorsModal({
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <p className="text-sm text-brand-text/60 mb-4">
-            <span className="font-semibold text-brand-text">{sub.title}</span> — fill in phone numbers, co-authors and
+            <span className="font-semibold text-brand-text">{sub.title}</span> â€” fill in phone numbers, co-authors and
             college names. Mark exactly one author as <span className="font-semibold text-brand-text">Primary</span> (the
             corresponding author).
           </p>
@@ -1084,7 +1085,7 @@ function PaymentModal({
           <div className="grid grid-cols-2 gap-4 bg-brand-bg/40 border border-brand-accent/30 rounded-xl p-4">
             <div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Author</div>
-              <div className="font-semibold text-sm mt-0.5">{sub.author_name || '—'}</div>
+              <div className="font-semibold text-sm mt-0.5">{sub.author_name || 'â€”'}</div>
               <div className="text-xs text-brand-text/60">{sub.author_email}</div>
             </div>
 <div>
@@ -1118,7 +1119,7 @@ function PaymentModal({
             <div className="space-y-4 border border-brand-accent/40 rounded-xl p-4 bg-white">
               <div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Registration Type</div>
-                <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.registration_type || '—'}</div>
+                <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.registration_type || 'â€”'}</div>
               </div>
 
               {sub.author_type && (
@@ -1131,14 +1132,14 @@ function PaymentModal({
 <div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">UTR / Transaction ID</div>
                 <div className="font-mono font-semibold text-sm text-brand-accent mt-0.5 select-all">
-                  {sub.utr_transaction_id || '—'}
+                  {sub.utr_transaction_id || 'â€”'}
                 </div>
               </div>
 
               <div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submitted Date</div>
                 <div className="font-semibold text-sm text-brand-text mt-0.5">
-                  {formatDateTime(sub.payment_submitted_at) || '—'}
+                  {formatDateTime(sub.payment_submitted_at) || 'â€”'}
                 </div>
               </div>
 
@@ -1146,7 +1147,7 @@ function PaymentModal({
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium mb-1.5">Payment Proof File</div>
                 {sub.payment_proof_url ? (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'payment', `Payment Proof — ${sub.paper_id || sub.submission_code}`)}
+                    onClick={() => onOpenPdf(sub.id, 'payment', `Payment Proof â€” ${sub.paper_id || sub.submission_code}`)}
                     className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-colors shadow-sm"
                   >
                     <Eye className="w-4 h-4" /> View / Verify Payment Proof
@@ -1264,11 +1265,11 @@ function MoreInfoModal({
             </div>
             <div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Track</div>
-              <div className="font-semibold capitalize break-words mt-0.5">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+              <div className="font-semibold capitalize break-words mt-0.5">{sub.track?.replace(/-/g, ' ') || 'â€”'}</div>
             </div>
             <div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submitted</div>
-              <div className="font-semibold mt-0.5">{formatDateTime(sub.created_at) || '—'}</div>
+              <div className="font-semibold mt-0.5">{formatDateTime(sub.created_at) || 'â€”'}</div>
             </div>
           </div>
 
@@ -1285,7 +1286,7 @@ function MoreInfoModal({
             </div>
             {authors.length === 0 ? (
               <p className="text-sm text-brand-text/70">
-                {(sub.author_name || 'N/A').split(' ')[0] || 'N/A'} {sub.author_email && `· ${sub.author_email}`}
+                {(sub.author_name || 'N/A').split(' ')[0] || 'N/A'} {sub.author_email && `Â· ${sub.author_email}`}
               </p>
             ) : (
               <div className="space-y-3">
@@ -1303,7 +1304,7 @@ function MoreInfoModal({
                     <div className="text-sm text-brand-text/70 mt-1 space-y-0.5">
                       {a.email && (
                         <div className="flex items-center gap-1.5 break-words">
-                          <span className="shrink-0">✉</span> {a.email}
+                          <span className="shrink-0">âœ‰</span> {a.email}
                         </div>
                       )}
                       {(() => {
@@ -1750,12 +1751,12 @@ function SubmissionListing({
                       </div>
                     )}
                   </td>
-                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</td>
                   <td className="py-4 px-5 align-top">
                     {primaryAuthorLines(sub)}
                   </td>
                   <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
-                    {formatDateTime(sub.created_at) || '—'}
+                    {formatDateTime(sub.created_at) || 'â€”'}
                   </td>
                   <td className="py-4 px-5 align-top">
                     <StatusSelect
@@ -1785,7 +1786,7 @@ function SubmissionListing({
                       </button>
                       {sub.plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
                           title={sub.plagiarism_file || 'Plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -1794,7 +1795,7 @@ function SubmissionListing({
                       )}
                       {sub.ai_plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
                           title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -1828,7 +1829,7 @@ function SubmissionListing({
                       <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
                         <label
                           className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                          title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                          title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
                         >
                           <input
                             type="checkbox"
@@ -1887,7 +1888,7 @@ function SubmissionListing({
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
-                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</div>
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
@@ -1895,7 +1896,7 @@ function SubmissionListing({
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
-                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
+                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || 'â€”'}</div>
                 </div>
                 {showMailStatus && (
                   <div>
@@ -1920,7 +1921,7 @@ function SubmissionListing({
                 </button>
                 {sub.plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
                     title={sub.plagiarism_file || 'Plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -1929,7 +1930,7 @@ function SubmissionListing({
                 )}
                 {sub.ai_plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
                     title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -1950,7 +1951,7 @@ function SubmissionListing({
                 </button>
                 <label
                   className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                  title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                  title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
                 >
                   <input
                     type="checkbox"
@@ -2204,10 +2205,10 @@ function ReviewSection({
                     <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
                     <div className="mt-1">{statusBadge(sub.status)}</div>
                   </td>
-                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</td>
                   <td className="py-4 px-5 align-top">{primaryAuthorLines(sub)}</td>
                   <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
-                    {formatDateTime(sub.created_at) || '—'}
+                    {formatDateTime(sub.created_at) || 'â€”'}
                   </td>
                   <td className="py-4 px-5 align-top">
                     {reviewBadge(sub.review_decision, sub.review_updated_at)}
@@ -2232,7 +2233,7 @@ function ReviewSection({
                       </button>
                       {sub.plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
                           title={sub.plagiarism_file || 'Plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -2241,7 +2242,7 @@ function ReviewSection({
                       )}
                       {sub.ai_plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
                           title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -2272,7 +2273,7 @@ function ReviewSection({
                         <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
                           <label
                             className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                            title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                            title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
                           >
                             <input
                               type="checkbox"
@@ -2334,7 +2335,7 @@ function ReviewSection({
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
-                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
+                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</div>
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
@@ -2342,7 +2343,7 @@ function ReviewSection({
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
-                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
+                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || 'â€”'}</div>
                 </div>
               </div>
 
@@ -2374,7 +2375,7 @@ function ReviewSection({
                 </button>
                 {sub.plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
                     title={sub.plagiarism_file || 'Plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -2383,7 +2384,7 @@ function ReviewSection({
                 )}
                 {sub.ai_plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
                     title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -2405,7 +2406,7 @@ function ReviewSection({
                 {showEnquired && (
                   <label
                     className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                    title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
+                    title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
                   >
                     <input
                       type="checkbox"
@@ -2598,7 +2599,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setMtReviewUntil(s.maintenance_review_until || '');
         // Absent key means allowed; see fileEditsAllowed in backend/src/index.ts.
         setFileEditsEnabled(s.file_edits_enabled !== 'false');
-        // Absent key means OFF — Phase 2 stays closed until switched on.
+        // Absent key means OFF â€” Phase 2 stays closed until switched on.
         setPhase2Enabled(s.phase2_enabled === 'true');
         setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
         setApprovedMailIds(s.approved_mail_ids || '');
@@ -2756,7 +2757,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
       const tableCount = Object.keys(data.backup.tables || {}).length;
       const r2Count = Array.isArray(data.backup.r2_objects) ? data.backup.r2_objects.length : 0;
       setBackupMessage(
-        `Backup downloaded to your computer (${tableCount} tables, ${r2Count} files on record). Stored only on your machine — nothing was written to or kept in the database.`
+        `Backup downloaded to your computer (${tableCount} tables, ${r2Count} files on record). Stored only on your machine â€” nothing was written to or kept in the database.`
       );
     } catch (err) {
       setBackupError(err instanceof Error ? err.message : 'Backup failed.');
@@ -2856,7 +2857,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
   };
 
   // ------------------------------------------------------------------
-  // Mail (Resend) — template management + one-at-a-time queue draining
+  // Mail (Resend) â€” template management + one-at-a-time queue draining
   // ------------------------------------------------------------------
 
   const fetchMailTemplates = async (opts?: { silent?: boolean }) => {
@@ -3246,7 +3247,7 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
     const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED');
     // The Camera Ready tab holds exactly the papers that have submitted the
-    // Phase 2 package — once phase2_submitted_at is set the paper leaves the
+    // Phase 2 package â€” once phase2_submitted_at is set the paper leaves the
     // Payments tab (above) and appears here.
     const cameraReadySubmissionsList = submissions.filter(s => !!s.phase2_submitted_at);
     const acceptedSubmissionsList = submissions.filter(s => (s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY') && s.payment_status !== 'APPROVED');
@@ -3766,12 +3767,12 @@ Duplicates
                             {(s.attendance_mode || s.phase2_track) && (
                               <div className="mt-1 text-[11px] leading-snug text-brand-text/60">
                                 {s.attendance_mode === 'OFFLINE'
-                                  ? `Offline · ${s.phase2_head_count ?? '—'} attending`
+                                  ? `Offline Â· ${s.phase2_head_count ?? 'â€”'} attending`
                                   : s.attendance_mode === 'ONLINE'
                                   ? 'Online'
                                   : ''}
                                 {s.phase2_track
-                                  ? `${s.attendance_mode ? ' · ' : ''}${
+                                  ? `${s.attendance_mode ? ' Â· ' : ''}${
                                       TRACK_LABELS[s.phase2_track] || s.phase2_track.replace(/-/g, ' ')
                                     }`
                                   : ''}
@@ -3780,13 +3781,13 @@ Duplicates
                           </td>
                           <td className="py-4 px-5 text-sm align-top">
                             <div className="font-medium text-brand-text">
-                              {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : '—')}
+                              {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : 'â€”')}
                             </div>
                             {primary?.phone && <div className="text-xs text-brand-text/60">{primary.phone}</div>}
                             <div className="text-xs text-brand-text/60">{primary?.email || s.author_email}</div>
                           </td>
                           <td className="py-4 px-5 text-sm text-brand-text/70 align-top">
-                            {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
+                            {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : 'â€”'}
                           </td>
                           <td className="py-4 px-5 align-top">
                             <div className="flex flex-wrap gap-1.5">
@@ -3812,7 +3813,7 @@ Duplicates
                                 {cameraDecision.label}
                               </span>
                             ) : (
-                              <span className="text-xs text-brand-text/50">—</span>
+                              <span className="text-xs text-brand-text/50">â€”</span>
                             )}
                           </td>
                           <td className="py-4 px-5 align-top">
@@ -3857,23 +3858,23 @@ Duplicates
                       <div className="font-semibold text-brand-text">{s.title}</div>
                       <div className="text-sm">
                         <span className="text-brand-text/60">Primary Author: </span>
-                        {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : '—')}
+                        {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : 'â€”')}
                         <div className="text-xs text-brand-text/60">
-                          {[primary?.phone, primary?.email || s.author_email].filter(Boolean).join(' • ')}
+                          {[primary?.phone, primary?.email || s.author_email].filter(Boolean).join(' â€¢ ')}
                         </div>
                       </div>
                       <div className="text-xs text-brand-text/60">
-                        Submitted: {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
+                        Submitted: {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : 'â€”'}
                       </div>
                       {(s.attendance_mode || s.phase2_track) && (
                         <div className="text-xs text-brand-text/60">
                           {s.attendance_mode === 'OFFLINE'
-                            ? `Offline · ${s.phase2_head_count ?? '—'} attending`
+                            ? `Offline Â· ${s.phase2_head_count ?? 'â€”'} attending`
                             : s.attendance_mode === 'ONLINE'
                             ? 'Online'
                             : ''}
                           {s.phase2_track
-                            ? `${s.attendance_mode ? ' · ' : ''}${
+                            ? `${s.attendance_mode ? ' Â· ' : ''}${
                                 TRACK_LABELS[s.phase2_track] || s.phase2_track.replace(/-/g, ' ')
                               }`
                             : ''}
@@ -3989,7 +3990,7 @@ Duplicates
                           </div>
                           <h4 className="font-serif font-bold text-lg mt-2 break-words leading-snug">{sub.title}</h4>
                           <p className="text-sm text-brand-text/70 mt-1 capitalize break-words">
-                            {sub.track?.replace(/-/g, ' ') || '—'}
+                            {sub.track?.replace(/-/g, ' ') || 'â€”'}
                           </p>
                         </div>
                         <div className="shrink-0 flex flex-col items-start lg:items-end gap-2">
@@ -4000,7 +4001,7 @@ Duplicates
                             {expired ? 'Expired' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
                           </span>
                           <span className="text-xs text-brand-text/60">
-                            Deleted {deletedAt ? formatDate(deletedAt.toISOString()) : '—'}
+                            Deleted {deletedAt ? formatDate(deletedAt.toISOString()) : 'â€”'}
                           </span>
                         </div>
                       </div>
@@ -4031,650 +4032,60 @@ Duplicates
         )}
 
         {activeTab === 'settings' && (
-          <>
-          <div className="bg-white rounded-2xl shadow-md border-2 border-brand-accent p-6 sm:p-8 max-w-7xl mx-auto mt-6">
-            <div className="mb-6">
-              <h3 className="font-serif text-2xl font-bold mb-1 text-black">Portal Settings</h3>
-              <p className="text-sm text-brand-text/60 max-w-3xl">
-                Turn maintenance on per portal. While a portal is under maintenance, the end date/time you set is
-                shown to visitors; the user portal blocks new submissions and the reviewer portal blocks sign-in.
-                Leave the date/time blank for maintenance with no scheduled end.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-              {/* LEFT COLUMN: Portal Controls & Maintenance */}
-              <div className="space-y-4">
-                {/* 1. Accepting Paper Submissions */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">Accepting Paper Submissions</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        When on, the user portal accepts new paper submissions. When off, nobody can start a new
-                        paper &mdash; unless their email is on the Approved Email IDs list below. Authors can still
-                        replace files on papers they already submitted; that is controlled separately by Allow File
-                        Edits.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setPaperAcceptanceEnabled(!paperAcceptanceEnabled)}
-                      disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${paperAcceptanceEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      role="switch"
-                      aria-checked={paperAcceptanceEnabled}
-                    >
-                      <span className="sr-only">Toggle accepting paper submissions</span>
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${paperAcceptanceEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
-                    <span
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                        paperAcceptanceEnabled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${paperAcceptanceEnabled ? 'bg-green-600' : 'bg-red-600'}`} />
-                      {paperAcceptanceEnabled ? 'Accepting submissions' : 'Not accepting submissions'}
-                    </span>
-                    <span className="text-xs text-brand-text/50">
-                      Save the settings below to apply.
-                    </span>
-                  </div>
-                </div>
-
-                {/* 2. Approved Email IDs -- fully independent, always visible */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                    <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                      <div>
-                        <h4 className="font-semibold text-brand-text">Approved Email IDs</h4>
-                        <p className="text-sm text-brand-text/60 mt-1">
-                          An exemption list, independent of every other switch. While this is{' '}
-                          <strong>off</strong> it does nothing at all. Turn it <strong>on</strong> and enter the email
-                          addresses that should keep working even when the submission window is shut &mdash; those
-                          people sign in with that Google account and can submit papers and update their files. Everyone
-                          else is still blocked.
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => setApprovedMailEnabled(!approvedMailEnabled)}
-                        disabled={savingApprovedMail}
-                        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${approvedMailEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingApprovedMail ? 'opacity-50 cursor-not-allowed' : ''}`}
-                        role="switch"
-                        aria-checked={approvedMailEnabled}
-                      >
-                        <span className="sr-only">Toggle approved email list</span>
-                        <span
-                          aria-hidden="true"
-                          className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${approvedMailEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                        />
-                      </button>
-                    </div>
-
-                    <div className="px-5 py-4 space-y-3">
-                      <div>
-                        <label htmlFor="approved-mail-ids" className="block text-sm font-medium text-brand-text mb-1">
-                          Email addresses
-                        </label>
-                        <textarea
-                          id="approved-mail-ids"
-                          value={approvedMailIds}
-                          onChange={(e) => {
-                            setApprovedMailIds(e.target.value);
-                            setApprovedMailMessage(null);
-                            setApprovedMailError(null);
-                          }}
-                          disabled={!approvedMailEnabled || savingApprovedMail}
-                          rows={5}
-                          spellCheck={false}
-                          placeholder={'author@gmail.com\nanother.author@gmail.com'}
-                          className="w-full rounded-lg border border-brand-text/20 px-3 py-2 text-sm font-mono bg-white text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent disabled:bg-stone-100 disabled:text-brand-text/40 disabled:cursor-not-allowed"
-                        />
-                        <p className="text-xs text-brand-text/50 mt-1.5">
-                          One address per line. Commas and semicolons also work. Matching ignores case and surrounding
-                          spaces, and uses the email address of the signed-in Google account.
-                        </p>
-                      </div>
-
-                      {/* Confirms against the SAVED list, so a typo or a save that
-                          did not land is visible here instead of only showing up as
-                          an author who is mysteriously still blocked. */}
-                      <div>
-                        <label htmlFor="approved-mail-check" className="block text-sm font-medium text-brand-text mb-1">
-                          Check an address
-                        </label>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <input
-                            id="approved-mail-check"
-                            type="email"
-                            value={approvedMailCheck}
-                            onChange={(e) => setApprovedMailCheck(e.target.value)}
-                            placeholder="author@gmail.com"
-                            spellCheck={false}
-                            className="w-full sm:w-72 rounded-lg border border-brand-text/20 px-3 py-2 text-sm font-mono bg-white text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                          />
-                          {(() => {
-                            const candidate = approvedMailCheck.trim().toLowerCase();
-                            if (!candidate) return null;
-                            // Same split/lowercase the backend uses on both write and
-                            // read, so this answers exactly as the gate would.
-                            const onList = savedApprovedMailIds
-                              .split(/[\s,;]+/)
-                              .map((v) => v.trim().toLowerCase())
-                              .filter(Boolean)
-                              .includes(candidate);
-                            if (onList && approvedMailEnabled) {
-                              return (
-                                <span className="text-sm font-medium text-green-700">
-                                  On the saved list and active &mdash; this account can submit.
-                                </span>
-                              );
-                            }
-                            if (onList) {
-                              return (
-                                <span className="text-sm font-medium text-amber-700">
-                                  On the saved list but the toggle is off, so it has no effect yet.
-                                </span>
-                              );
-                            }
-                            return (
-                              <span className="text-sm font-medium text-red-600">
-                                Not on the saved list. Check for typos and save again.
-                              </span>
-                            );
-                          })()}
-                        </div>
-                        {approvedMailIds !== savedApprovedMailIds && (
-                          <p className="text-xs text-amber-700 mt-1.5">
-                            Unsaved changes in the box above &mdash; this check is against the last saved list.
-                          </p>
-                        )}
-                      </div>
-
-                      {approvedMailEnabled && approvedMailIds.trim() === '' && (
-                        <p className="text-sm font-medium text-red-600">
-                          This is on with no addresses listed, so nobody is exempt &mdash; everyone stays blocked. Add
-                          at least one address or turn it off.
-                        </p>
-                      )}
-
-                      {approvedMailError && (
-                        <p className="text-sm font-medium text-red-600">{approvedMailError}</p>
-                      )}
-                      {approvedMailMessage && (
-                        <p className="text-sm font-medium text-green-700">{approvedMailMessage}</p>
-                      )}
-
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          onClick={saveApprovedMailIds}
-                          disabled={savingApprovedMail}
-                          className="px-4 py-2 rounded-lg bg-brand-accent text-brand-text font-semibold text-sm hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {savingApprovedMail ? 'Saving...' : 'Save Approved Emails'}
-                        </button>
-                        {/* Reports the list on its own terms, and separately says
-                            whether anything is actually closed right now, so the
-                            two switches can be reasoned about independently. */}
-                        <span
-                          className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                            approvedMailEnabled ? 'bg-green-100 text-green-700' : 'bg-stone-200 text-stone-600'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              approvedMailEnabled ? 'bg-green-600' : 'bg-stone-400'
-                            }`}
-                          />
-                          {approvedMailEnabled
-                            ? `${approvedMailIds.split(/[\s,;]+/).filter(Boolean).length} address(es) exempt`
-                            : 'Off — has no effect'}
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                            paperAcceptanceEnabled && !mtUserEnabled
-                              ? 'bg-green-100 text-green-700'
-                              : 'bg-amber-100 text-amber-700'
-                          }`}
-                        >
-                          <span
-                            className={`w-1.5 h-1.5 rounded-full ${
-                              paperAcceptanceEnabled && !mtUserEnabled ? 'bg-green-600' : 'bg-amber-600'
-                            }`}
-                          />
-                          {paperAcceptanceEnabled && !mtUserEnabled
-                            ? 'Submissions open to everyone'
-                            : 'Submissions closed to everyone else'}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                {/* 3. Ready for Registration */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between gap-4 px-5 py-4">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">Ready for Registration</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        When on, authors of accepted papers will see the payment form in their portal.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setRegistrationOpen(!registrationOpen)}
-                      disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${registrationOpen ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      role="switch"
-                      aria-checked={registrationOpen}
-                    >
-                      <span className="sr-only">Toggle registration</span>
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${registrationOpen ? 'translate-x-5' : 'translate-x-0'}`}
-                      />
-                    </button>
-                  </div>
-                </div>
-
-                {/* 3. Allow File Edits */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between gap-4 px-5 py-4">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">Allow File Edits</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        When on, authors can replace the files on a paper they have already submitted. Turn this off
-                        to close revisions without taking the portal into maintenance &mdash; new submissions are
-                        still accepted. This is the only switch that governs file replacement: closing Accepting Paper
-                        Submissions does not close it.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setFileEditsEnabled(!fileEditsEnabled)}
-                      disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${fileEditsEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      role="switch"
-                      aria-checked={fileEditsEnabled}
-                    >
-                      <span className="sr-only">Toggle author file edits</span>
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${fileEditsEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
-                    <span
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                        fileEditsEnabled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${fileEditsEnabled ? 'bg-green-600' : 'bg-red-600'}`} />
-                      {fileEditsEnabled ? 'Authors can edit files' : 'File edits closed'}
-                    </span>
-                    <span className="text-xs text-brand-text/50">
-                      {fileEditsEnabled
-                        ? 'The "Edit Files" button is showing in the user portal.'
-                        : 'The "Edit Files" button is hidden and the upload endpoint refuses replacements.'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 3b. Phase 2 (Camera Ready & Copyright) — OFF by default */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between gap-4 px-5 py-4">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">Phase 2 &mdash; Camera Ready &amp; Copyright</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        When on, authors of accepted papers whose payment is approved see a
-                        &quot;Move to Phase 2&quot; button and can submit their camera-ready manuscript, the
-                        signed copyright form, their mode of attending, and the declaration. Submitted papers
-                        move from the Payments tab to the Camera Ready tab. Off by default.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setPhase2Enabled(!phase2Enabled)}
-                      disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${phase2Enabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      role="switch"
-                      aria-checked={phase2Enabled}
-                    >
-                      <span className="sr-only">Toggle Phase 2 submissions</span>
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${phase2Enabled ? 'translate-x-5' : 'translate-x-0'}`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
-                    <span
-                      className={`inline-flex items-center gap-1.5 text-xs font-semibold rounded-full px-2.5 py-1 ${
-                        phase2Enabled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                      }`}
-                    >
-                      <span className={`w-1.5 h-1.5 rounded-full ${phase2Enabled ? 'bg-green-600' : 'bg-red-600'}`} />
-                      {phase2Enabled ? 'Phase 2 open' : 'Phase 2 closed'}
-                    </span>
-                    <span className="text-xs text-brand-text/50">
-                      {phase2Enabled
-                        ? 'Eligible authors see the "Move to Phase 2" button in the user portal.'
-                        : 'The "Move to Phase 2" button is hidden and the Phase 2 submit endpoint refuses requests.'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 4. User Portal Maintenance */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">User Portal Maintenance</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        A portal-wide outage switch: when on, users cannot create or update submissions and see a
-                        maintenance message. Independent of Accepting Paper Submissions and Allow File Edits.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setMtUserEnabled(!mtUserEnabled)}
-                      disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtUserEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      role="switch"
-                      aria-checked={mtUserEnabled}
-                    >
-                      <span className="sr-only">Toggle user portal maintenance</span>
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtUserEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
-                    <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
-                    <input
-                      type="datetime-local"
-                      value={mtUserUntil}
-                      disabled={savingSettings}
-                      onChange={(e) => setMtUserUntil(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                    />
-                    {mtUserUntil && (
-                      <span className="text-xs text-brand-text/50">
-                        Shown as "back online {new Date(mtUserUntil).toLocaleString()}"
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* 5. Reviewer Portal Maintenance */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">Reviewer Portal Maintenance</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        When on, reviewers cannot sign in and see a maintenance message.
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setMtReviewEnabled(!mtReviewEnabled)}
-                      disabled={savingSettings}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-brand-accent focus:ring-offset-2 ${mtReviewEnabled ? 'bg-brand-accent' : 'bg-gray-200'} ${savingSettings ? 'opacity-50 cursor-not-allowed' : ''}`}
-                      role="switch"
-                      aria-checked={mtReviewEnabled}
-                    >
-                      <span className="sr-only">Toggle reviewer portal maintenance</span>
-                      <span
-                        aria-hidden="true"
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${mtReviewEnabled ? 'translate-x-5' : 'translate-x-0'}`}
-                      />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-3 px-5 py-3.5 bg-brand-bg/20">
-                    <label className="text-sm font-medium text-brand-text/80">Resume date &amp; time</label>
-                    <input
-                      type="datetime-local"
-                      value={mtReviewUntil}
-                      disabled={savingSettings}
-                      onChange={(e) => setMtReviewUntil(e.target.value)}
-                      className="px-3 py-1.5 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                    />
-                    {mtReviewUntil && (
-                      <span className="text-xs text-brand-text/50">
-                        Shown as "back online {new Date(mtReviewUntil).toLocaleString()}"
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {/* Save Settings Button */}
-                {/* Approved mail IDs for Conference with Scopus proceedings access */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="px-5 py-4 border-b-2 border-brand-accent/40">
-                    <h4 className="font-semibold text-brand-text">Approved mail IDs for Conference with Scopus proceedings access</h4>
-                    <p className="text-sm text-brand-text/60 mt-1">
-                      Only emails listed here will be able to see and select the "Conference with Scopus proceedings" option in the payment form.
-                    </p>
-                  </div>
-                  <div className="px-5 py-4 space-y-3">
-                    <textarea
-                      value={approvedScopusMailIds}
-                      onChange={(e) => setApprovedScopusMailIds(e.target.value)}
-                      rows={4}
-                      spellCheck={false}
-                      placeholder={'author@gmail.com\nanother.author@gmail.com'}
-                      className="w-full rounded-lg border border-brand-text/20 px-3 py-2 text-sm font-mono bg-white text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent"
-                    />
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={saveApprovedScopusMailIds}
-                        disabled={savingApprovedScopus}
-                        className="px-4 py-2 rounded-lg bg-brand-accent text-brand-text font-semibold text-sm hover:brightness-95 disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {savingApprovedScopus ? 'Saving...' : 'Save Scopus Access Emails'}
-                      </button>
-                      {approvedScopusMsg && <span className="text-sm text-green-700">{approvedScopusMsg}</span>}
-                      {approvedScopusErr && <span className="text-sm text-red-600">{approvedScopusErr}</span>}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center justify-end pt-2">
-                  <button
-                    onClick={savePortalSettings}
-                    disabled={savingSettings}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-text text-white rounded-xl text-sm font-semibold hover:bg-brand-accent transition-all disabled:opacity-50 shadow-md"
-                  >
-                    {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                    {savingSettings ? 'Saving...' : 'Save Portal Settings'}
-                  </button>
-                </div>
-              </div>
-
-              {/* RIGHT COLUMN: Mail Templates & Backup */}
-              <div className="space-y-4">
-                {/* 1. Mail Templates */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-center justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">Mail Templates</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        Templates used when sending emails to authors from the Reviewed / Needs Revisions sections. Add
-                        placeholders and the system fills them automatically per paper.
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
-                        <span className="text-brand-text/50">Available placeholders:</span>
-                        <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{name}'}</code>
-                        <span className="text-brand-text/50">→ primary author</span>
-                        <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_title}'}</code>
-                        <span className="text-brand-text/50">→ paper title</span>
-                        <code className="bg-brand-bg px-1.5 py-0.5 rounded text-brand-text font-semibold">{'{paper_id}'}</code>
-                        <span className="text-brand-text/50">→ paper ID</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setTemplateDraft({ id: '', name: '', subject: '', body: '' })}
-                      className="inline-flex items-center gap-1.5 px-3 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0"
-                    >
-                      <Mail className="w-4 h-4" /> New Template
-                    </button>
-                  </div>
-
-                  {mailTemplatesError && (
-                    <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2 border-b-2 border-brand-accent/40">
-                      <AlertCircle className="w-4 h-4 shrink-0" /> {mailTemplatesError}
-                    </div>
-                  )}
-
-                  {templateDraft && (
-                    <div className="px-5 py-4 border-b-2 border-brand-accent/40 bg-brand-bg/40">
-                      <h5 className="font-semibold text-brand-text mb-3">{templateDraft.id ? 'Edit Template' : 'New Template'}</h5>
-                      <div className="grid gap-3">
-                        <div>
-                          <label className="block text-sm font-medium text-brand-text/80 mb-1">Template Name</label>
-                          <input
-                            value={templateDraft.name}
-                            onChange={(e) => setTemplateDraft({ ...templateDraft, name: e.target.value })}
-                            placeholder="e.g. Accepted paper intimation"
-                            className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
-                          />
-                        </div>
-                        <MailField
-                          label="Subject"
-                          value={templateDraft.subject}
-                          onChange={(v) => setTemplateDraft(d => (d ? { ...d, subject: v } : d))}
-                          placeholder="e.g. Regarding your paper {paper_title}"
-                        />
-                        <MailField
-                          label="Body"
-                          rows={8}
-                          value={templateDraft.body}
-                          onChange={(v) => setTemplateDraft(d => (d ? { ...d, body: v } : d))}
-                          placeholder={'Dear {name},\n\nYour paper "{paper_title}" has been...'}
-                          help="Formatting buttons and Ctrl+B / Ctrl+I / Ctrl+U / Ctrl+K insert tags like <b> and <link> (e.g. <link>https://icaidiet.tech</link>), which automatically render as bold text, italics, or clickable links."
-                        />
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => saveMailTemplate(templateDraft)}
-                            disabled={savingTemplate}
-                            className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all disabled:opacity-50"
-                          >
-                            {savingTemplate ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
-                            {savingTemplate ? 'Saving...' : 'Save Template'}
-                          </button>
-                          <button
-                            onClick={() => setTemplateDraft(null)}
-                            disabled={savingTemplate}
-                            className="px-4 py-2 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors disabled:opacity-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="divide-y divide-brand-text/10 max-h-80 overflow-y-auto">
-                    {mailTemplatesLoading ? (
-                      <div className="px-5 py-4 text-sm text-brand-text/60">Loading templates...</div>
-                    ) : mailTemplates.length === 0 ? (
-                      <div className="px-5 py-4 text-sm text-brand-text/60">
-                        No mail templates yet. Create one to send emails to authors.
-                      </div>
-                    ) : (
-                      mailTemplates.map((t) => (
-                        <div key={t.id} className="px-5 py-4 flex items-start justify-between gap-4">
-                          <div className="min-w-0">
-                            <h5 className="font-semibold text-brand-text">{t.name}</h5>
-                            <p className="text-xs text-brand-text/50 font-medium mt-0.5 break-words">{t.subject}</p>
-                            <p className="text-sm text-brand-text/70 mt-1.5 whitespace-pre-wrap break-words line-clamp-3">{t.body}</p>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              onClick={() => setTemplateDraft({ id: t.id, name: t.name, subject: t.subject, body: t.body })}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-brand-text rounded-lg border border-brand-text/15 hover:bg-brand-text/5 transition-colors"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => deleteMailTemplate(t.id)}
-                              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-sm font-medium text-red-600 rounded-lg border border-red-200 hover:bg-red-50 transition-colors"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* 2. Full Backup / Download */}
-                <div className="border border-brand-text/10 rounded-xl bg-white shadow-sm overflow-hidden">
-                  <div className="flex items-start justify-between gap-4 px-5 py-4 border-b-2 border-brand-accent/40">
-                    <div>
-                      <h4 className="font-semibold text-brand-text">Full Backup / Download</h4>
-                      <p className="text-sm text-brand-text/60 mt-1">
-                        Download a complete snapshot of all data (every table, plus the record of stored paper files) as a
-                        single JSON file saved straight to your computer. The backup is generated on demand, is never stored
-                        in the database, and is deleted from our servers the moment it leaves.
-                      </p>
-                    </div>
-                    <button
-                      onClick={downloadBackup}
-                      disabled={backingUp}
-                      className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-all shrink-0 disabled:opacity-50 shadow"
-                    >
-                      {backingUp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-                      {backingUp ? 'Creating backup...' : 'Download Backup'}
-                    </button>
-                  </div>
-                  {backupError && (
-                    <div className="px-5 py-3 text-sm text-red-600 flex items-center gap-2 bg-red-50">
-                      <AlertCircle className="w-4 h-4 shrink-0" /> {backupError}
-                    </div>
-                  )}
-                  {backupMessage && (
-                    <div className="px-5 py-3 text-sm text-green-700 flex items-center gap-2 bg-green-50">
-                      <CheckCircle2 className="w-4 h-4 shrink-0" /> {backupMessage}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Registration fees, early-bird deadline and bank details.
-              Full width below the two-column grid because the fee table needs
-              the room. Saved by the same "Save Portal Settings" button. */}
-          <div className="mt-6 pt-6 border-t border-brand-text/10">
-            <div className="mb-4">
-              <h3 className="font-serif text-2xl font-bold mb-1 text-black">Registration Fees &amp; Bank Details</h3>
-              <p className="text-sm text-brand-text/60 max-w-3xl">
-                These values are shown to authors in their payment form. Each fee row is also an option authors can
-                choose, so adding a row adds a choice to the user portal. Changes take effect for authors as soon as
-                you save.
-              </p>
-            </div>
-            <RegistrationConfigPanel
-              config={registrationConfig}
-              onChange={setRegistrationConfig}
-            />
-            {error && (
-              <div className="mt-4 flex items-center gap-2 p-3 bg-red-50 text-red-700 border border-red-200 rounded-xl text-sm font-medium">
-                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" /> {error}
-              </div>
-            )}
-            <div className="flex items-center justify-end mt-5">
-              <button
-                onClick={savePortalSettings}
-                disabled={savingSettings}
-                className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-text text-white rounded-xl text-sm font-semibold hover:bg-brand-accent transition-all disabled:opacity-50 shadow-md"
-              >
-                {savingSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
-                {savingSettings ? 'Saving...' : 'Save Fees & Bank Details'}
-              </button>
-            </div>
-          </div>
-          </>
+          <SettingsPanel
+            paperAcceptanceEnabled={paperAcceptanceEnabled}
+            setPaperAcceptanceEnabled={setPaperAcceptanceEnabled}
+            fileEditsEnabled={fileEditsEnabled}
+            setFileEditsEnabled={setFileEditsEnabled}
+            registrationOpen={registrationOpen}
+            setRegistrationOpen={setRegistrationOpen}
+            phase2Enabled={phase2Enabled}
+            setPhase2Enabled={setPhase2Enabled}
+            approvedMailEnabled={approvedMailEnabled}
+            setApprovedMailEnabled={setApprovedMailEnabled}
+            approvedMailIds={approvedMailIds}
+            setApprovedMailIds={setApprovedMailIds}
+            savedApprovedMailIds={savedApprovedMailIds}
+            approvedMailCheck={approvedMailCheck}
+            setApprovedMailCheck={setApprovedMailCheck}
+            savingApprovedMail={savingApprovedMail}
+            approvedMailMessage={approvedMailMessage}
+            approvedMailError={approvedMailError}
+            setApprovedMailMessage={setApprovedMailMessage}
+            setApprovedMailError={setApprovedMailError}
+            saveApprovedMailIds={saveApprovedMailIds}
+            approvedScopusMailIds={approvedScopusMailIds}
+            setApprovedScopusMailIds={setApprovedScopusMailIds}
+            savingApprovedScopus={savingApprovedScopus}
+            approvedScopusMsg={approvedScopusMsg}
+            approvedScopusErr={approvedScopusErr}
+            saveApprovedScopusMailIds={saveApprovedScopusMailIds}
+            mtUserEnabled={mtUserEnabled}
+            setMtUserEnabled={setMtUserEnabled}
+            mtUserUntil={mtUserUntil}
+            setMtUserUntil={setMtUserUntil}
+            mtReviewEnabled={mtReviewEnabled}
+            setMtReviewEnabled={setMtReviewEnabled}
+            mtReviewUntil={mtReviewUntil}
+            setMtReviewUntil={setMtReviewUntil}
+            mailTemplates={mailTemplates}
+            mailTemplatesLoading={mailTemplatesLoading}
+            mailTemplatesError={mailTemplatesError}
+            templateDraft={templateDraft}
+            setTemplateDraft={setTemplateDraft}
+            savingTemplate={savingTemplate}
+            saveMailTemplate={saveMailTemplate}
+            deleteMailTemplate={deleteMailTemplate}
+            backingUp={backingUp}
+            backupMessage={backupMessage}
+            backupError={backupError}
+            downloadBackup={downloadBackup}
+            registrationConfig={registrationConfig}
+            setRegistrationConfig={setRegistrationConfig}
+            savingSettings={savingSettings}
+            savePortalSettings={savePortalSettings}
+            error={error}
+          />
         )}
       </main>
 
@@ -4693,7 +4104,7 @@ Duplicates
         title="Delete Submission?"
         message={
           deleteTarget
-            ? `Move "${deleteTarget.paper_id || deleteTarget.submission_code}" — ${deleteTarget.title} to Deleted Files?\n\nAuthor: ${deleteTarget.author_name || 'Unknown'} <${deleteTarget.author_email || 'no email'}>\n\nThe submitter will no longer see this paper in their portal. You can recover it from the "Deleted Files" tab within 30 days, after which it will be permanently removed.`
+            ? `Move "${deleteTarget.paper_id || deleteTarget.submission_code}" â€” ${deleteTarget.title} to Deleted Files?\n\nAuthor: ${deleteTarget.author_name || 'Unknown'} <${deleteTarget.author_email || 'no email'}>\n\nThe submitter will no longer see this paper in their portal. You can recover it from the "Deleted Files" tab within 30 days, after which it will be permanently removed.`
             : ''
         }
         confirmLabel="Delete"
