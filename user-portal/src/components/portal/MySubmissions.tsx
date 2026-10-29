@@ -1747,24 +1747,22 @@ export function MySubmissions({
                       </div>
                     )}
 
-                    {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && (
-                      {sub.registration_type === 'Conference with Scopus proceedings' && (
-                        <div className="mt-4 text-center">
-                          <button
-                            type="button"
-                            onClick={() => onPhase2?.(sub.id)}
-                            className="inline-flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-all shadow-md"
-                          >
-                            {sub.camera_ready_status === 'MINOR_CHANGES' ||
-                            sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES' ||
-                            sub.camera_ready_status === 'MAJOR_CHANGES' ||
-                            sub.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES'
-                              ? 'Update Files'
-                              : 'View Phase 2'}{' '}
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-                      )}
+                    {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && sub.registration_type === 'Conference with Scopus proceedings' && (
+                      <div className="mt-4 text-center">
+                        <button
+                          type="button"
+                          onClick={() => onPhase2?.(sub.id)}
+                          className="inline-flex items-center gap-2 px-6 py-2.5 bg-black text-white rounded-xl font-semibold text-sm hover:bg-gray-800 transition-all shadow-md"
+                        >
+                          {sub.camera_ready_status === 'MINOR_CHANGES' ||
+                          sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES' ||
+                          sub.camera_ready_status === 'MAJOR_CHANGES' ||
+                          sub.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES'
+                            ? 'Update Files'
+                            : 'View Phase 2'}{' '}
+                          <ChevronRight className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
