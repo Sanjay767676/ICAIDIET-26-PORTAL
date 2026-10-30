@@ -162,7 +162,7 @@ const REVIEW_DECISION_META: Record<string, { label: string; box: string; text: s
 
 function reviewBadge(decision?: string | null, updatedAt?: string | null) {
   const meta = decision ? REVIEW_DECISION_META[decision] : undefined;
-  const label = meta?.label ?? 'â€”';
+  const label = meta?.label ?? '—';
   const box = meta?.box ?? 'bg-gray-50 border-gray-300';
   const text = meta?.text ?? 'text-brand-text';
   return (
@@ -359,7 +359,7 @@ function primaryAuthorLines(sub: Submission) {
     return (
       <>
         <div className="font-medium text-brand-text break-words">
-          {[primary.first_name, primary.last_name].filter(Boolean).join(' ') || 'â€”'}
+          {[primary.first_name, primary.last_name].filter(Boolean).join(' ') || '—'}
         </div>
         <div className="flex items-center gap-1.5 text-xs text-brand-text/60 font-normal mt-0.5 break-words">
           <span className="inline-flex items-center gap-1">
@@ -368,7 +368,7 @@ function primaryAuthorLines(sub: Submission) {
               const digits = onlyDigits(primary.phone || '');
               return digits.length >= PHONE_MIN_DIGITS && digits.length <= PHONE_MAX_DIGITS
                 ? digits
-                : 'â€”';
+                : '—';
             })()}
           </span>
         </div>
@@ -861,7 +861,7 @@ function EditAuthorsModal({
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <p className="text-sm text-brand-text/60 mb-4">
-            <span className="font-semibold text-brand-text">{sub.title}</span> â€” fill in phone numbers, co-authors and
+            <span className="font-semibold text-brand-text">{sub.title}</span> — fill in phone numbers, co-authors and
             college names. Mark exactly one author as <span className="font-semibold text-brand-text">Primary</span> (the
             corresponding author).
           </p>
@@ -1085,7 +1085,7 @@ function PaymentModal({
           <div className="grid grid-cols-2 gap-4 bg-brand-bg/40 border border-brand-accent/30 rounded-xl p-4">
             <div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Author</div>
-              <div className="font-semibold text-sm mt-0.5">{sub.author_name || 'â€”'}</div>
+              <div className="font-semibold text-sm mt-0.5">{sub.author_name || '—'}</div>
               <div className="text-xs text-brand-text/60">{sub.author_email}</div>
             </div>
 <div>
@@ -1119,7 +1119,7 @@ function PaymentModal({
             <div className="space-y-4 border border-brand-accent/40 rounded-xl p-4 bg-white">
               <div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Registration Type</div>
-                <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.registration_type || 'â€”'}</div>
+                <div className="font-semibold text-sm text-brand-text mt-0.5">{sub.registration_type || '—'}</div>
               </div>
 
               {sub.author_type && (
@@ -1132,14 +1132,14 @@ function PaymentModal({
 <div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">UTR / Transaction ID</div>
                 <div className="font-mono font-semibold text-sm text-brand-accent mt-0.5 select-all">
-                  {sub.utr_transaction_id || 'â€”'}
+                  {sub.utr_transaction_id || '—'}
                 </div>
               </div>
 
               <div>
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submitted Date</div>
                 <div className="font-semibold text-sm text-brand-text mt-0.5">
-                  {formatDateTime(sub.payment_submitted_at) || 'â€”'}
+                  {formatDateTime(sub.payment_submitted_at) || '—'}
                 </div>
               </div>
 
@@ -1147,7 +1147,7 @@ function PaymentModal({
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium mb-1.5">Payment Proof File</div>
                 {sub.payment_proof_url ? (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'payment', `Payment Proof â€” ${sub.paper_id || sub.submission_code}`)}
+                    onClick={() => onOpenPdf(sub.id, 'payment', `Payment Proof — ${sub.paper_id || sub.submission_code}`)}
                     className="inline-flex items-center gap-2 px-4 py-2 bg-brand-text text-white rounded-lg text-sm font-medium hover:bg-brand-accent transition-colors shadow-sm"
                   >
                     <Eye className="w-4 h-4" /> View / Verify Payment Proof
@@ -1265,11 +1265,11 @@ function MoreInfoModal({
             </div>
             <div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Track</div>
-              <div className="font-semibold capitalize break-words mt-0.5">{sub.track?.replace(/-/g, ' ') || 'â€”'}</div>
+              <div className="font-semibold capitalize break-words mt-0.5">{sub.track?.replace(/-/g, ' ') || '—'}</div>
             </div>
             <div>
               <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Submitted</div>
-              <div className="font-semibold mt-0.5">{formatDateTime(sub.created_at) || 'â€”'}</div>
+              <div className="font-semibold mt-0.5">{formatDateTime(sub.created_at) || '—'}</div>
             </div>
           </div>
 
@@ -1751,12 +1751,12 @@ function SubmissionListing({
                       </div>
                     )}
                   </td>
-                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
                   <td className="py-4 px-5 align-top">
                     {primaryAuthorLines(sub)}
                   </td>
                   <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
-                    {formatDateTime(sub.created_at) || 'â€”'}
+                    {formatDateTime(sub.created_at) || '—'}
                   </td>
                   <td className="py-4 px-5 align-top">
                     <StatusSelect
@@ -1786,7 +1786,7 @@ function SubmissionListing({
                       </button>
                       {sub.plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
                           title={sub.plagiarism_file || 'Plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -1795,7 +1795,7 @@ function SubmissionListing({
                       )}
                       {sub.ai_plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
                           title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -1829,7 +1829,7 @@ function SubmissionListing({
                       <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
                         <label
                           className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                          title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
+                          title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
                         >
                           <input
                             type="checkbox"
@@ -1888,7 +1888,7 @@ function SubmissionListing({
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
-                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</div>
+                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
@@ -1896,7 +1896,7 @@ function SubmissionListing({
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
-                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || 'â€”'}</div>
+                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
                 </div>
                 {showMailStatus && (
                   <div>
@@ -1921,7 +1921,7 @@ function SubmissionListing({
                 </button>
                 {sub.plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
                     title={sub.plagiarism_file || 'Plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -1930,7 +1930,7 @@ function SubmissionListing({
                 )}
                 {sub.ai_plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
                     title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -1951,7 +1951,7 @@ function SubmissionListing({
                 </button>
                 <label
                   className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                  title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
+                  title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
                 >
                   <input
                     type="checkbox"
@@ -2205,10 +2205,10 @@ function ReviewSection({
                     <div className="font-semibold text-brand-text break-words leading-snug">{sub.title}</div>
                     <div className="mt-1">{statusBadge(sub.status)}</div>
                   </td>
-                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</td>
+                  <td className="py-4 px-5 align-top text-sm text-brand-text/70 capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</td>
                   <td className="py-4 px-5 align-top">{primaryAuthorLines(sub)}</td>
                   <td className="py-4 px-5 align-top text-sm text-brand-text/70 break-words">
-                    {formatDateTime(sub.created_at) || 'â€”'}
+                    {formatDateTime(sub.created_at) || '—'}
                   </td>
                   <td className="py-4 px-5 align-top">
                     {reviewBadge(sub.review_decision, sub.review_updated_at)}
@@ -2233,7 +2233,7 @@ function ReviewSection({
                       </button>
                       {sub.plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
                           title={sub.plagiarism_file || 'Plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -2242,7 +2242,7 @@ function ReviewSection({
                       )}
                       {sub.ai_plagiarism_file && (
                         <button
-                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
+                          onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
                           title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                           className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
                         >
@@ -2273,7 +2273,7 @@ function ReviewSection({
                         <div className="mt-2 pt-2 border-t border-brand-text/10 w-full">
                           <label
                             className="inline-flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                            title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
+                            title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
                           >
                             <input
                               type="checkbox"
@@ -2335,7 +2335,7 @@ function ReviewSection({
               <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Track</div>
-                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || 'â€”'}</div>
+                  <div className="font-medium capitalize break-words">{sub.track?.replace(/-/g, ' ') || '—'}</div>
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Primary Author</div>
@@ -2343,7 +2343,7 @@ function ReviewSection({
                 </div>
                 <div>
                   <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide">Submitted On</div>
-                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || 'â€”'}</div>
+                  <div className="text-brand-text/90 break-words">{formatDateTime(sub.created_at) || '—'}</div>
                 </div>
               </div>
 
@@ -2375,7 +2375,7 @@ function ReviewSection({
                 </button>
                 {sub.plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} â€” Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
                     title={sub.plagiarism_file || 'Plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -2384,7 +2384,7 @@ function ReviewSection({
                 )}
                 {sub.ai_plagiarism_file && (
                   <button
-                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} â€” AI Plagiarism Report`)}
+                    onClick={() => onOpenPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
                     title={sub.ai_plagiarism_file || 'AI plagiarism report'}
                     className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                   >
@@ -2406,7 +2406,7 @@ function ReviewSection({
                 {showEnquired && (
                   <label
                     className="mt-1.5 pt-1.5 border-t border-brand-text/10 w-full flex items-center gap-1.5 text-xs text-brand-text/70 cursor-pointer select-none"
-                    title={sub.enquired ? 'Author contacted â€” uncheck if they update their submission.' : 'Mark author as contacted'}
+                    title={sub.enquired ? 'Author contacted — uncheck if they update their submission.' : 'Mark author as contacted'}
                   >
                     <input
                       type="checkbox"
@@ -2599,7 +2599,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setMtReviewUntil(s.maintenance_review_until || '');
         // Absent key means allowed; see fileEditsAllowed in backend/src/index.ts.
         setFileEditsEnabled(s.file_edits_enabled !== 'false');
-        // Absent key means OFF â€” Phase 2 stays closed until switched on.
+        // Absent key means OFF — Phase 2 stays closed until switched on.
         setPhase2Enabled(s.phase2_enabled === 'true');
         setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
         setApprovedMailIds(s.approved_mail_ids || '');
@@ -2757,7 +2757,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
       const tableCount = Object.keys(data.backup.tables || {}).length;
       const r2Count = Array.isArray(data.backup.r2_objects) ? data.backup.r2_objects.length : 0;
       setBackupMessage(
-        `Backup downloaded to your computer (${tableCount} tables, ${r2Count} files on record). Stored only on your machine â€” nothing was written to or kept in the database.`
+        `Backup downloaded to your computer (${tableCount} tables, ${r2Count} files on record). Stored only on your machine — nothing was written to or kept in the database.`
       );
     } catch (err) {
       setBackupError(err instanceof Error ? err.message : 'Backup failed.');
@@ -2857,7 +2857,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
   };
 
   // ------------------------------------------------------------------
-  // Mail (Resend) â€” template management + one-at-a-time queue draining
+  // Mail (Resend) — template management + one-at-a-time queue draining
   // ------------------------------------------------------------------
 
   const fetchMailTemplates = async (opts?: { silent?: boolean }) => {
@@ -3247,7 +3247,7 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
     const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED');
     // The Camera Ready tab holds exactly the papers that have submitted the
-    // Phase 2 package â€” once phase2_submitted_at is set the paper leaves the
+    // Phase 2 package — once phase2_submitted_at is set the paper leaves the
     // Payments tab (above) and appears here.
     const cameraReadySubmissionsList = submissions.filter(s => !!s.phase2_submitted_at);
     const acceptedSubmissionsList = submissions.filter(s => (s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY') && s.payment_status !== 'APPROVED');
@@ -3767,12 +3767,12 @@ Duplicates
                             {(s.attendance_mode || s.phase2_track) && (
                               <div className="mt-1 text-[11px] leading-snug text-brand-text/60">
                                 {s.attendance_mode === 'OFFLINE'
-                                  ? `Offline Â· ${s.phase2_head_count ?? 'â€”'} attending`
+                                  ? `Offline · ${s.phase2_head_count ?? '—'} attending`
                                   : s.attendance_mode === 'ONLINE'
                                   ? 'Online'
                                   : ''}
                                 {s.phase2_track
-                                  ? `${s.attendance_mode ? ' Â· ' : ''}${
+                                  ? `${s.attendance_mode ? ' · ' : ''}${
                                       TRACK_LABELS[s.phase2_track] || s.phase2_track.replace(/-/g, ' ')
                                     }`
                                   : ''}
@@ -3781,13 +3781,13 @@ Duplicates
                           </td>
                           <td className="py-4 px-5 text-sm align-top">
                             <div className="font-medium text-brand-text">
-                              {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : 'â€”')}
+                              {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : '—')}
                             </div>
                             {primary?.phone && <div className="text-xs text-brand-text/60">{primary.phone}</div>}
                             <div className="text-xs text-brand-text/60">{primary?.email || s.author_email}</div>
                           </td>
                           <td className="py-4 px-5 text-sm text-brand-text/70 align-top">
-                            {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : 'â€”'}
+                            {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
                           </td>
                           <td className="py-4 px-5 align-top">
                             <div className="flex flex-wrap gap-1.5">
@@ -3813,7 +3813,7 @@ Duplicates
                                 {cameraDecision.label}
                               </span>
                             ) : (
-                              <span className="text-xs text-brand-text/50">â€”</span>
+                              <span className="text-xs text-brand-text/50">—</span>
                             )}
                           </td>
                           <td className="py-4 px-5 align-top">
@@ -3858,23 +3858,23 @@ Duplicates
                       <div className="font-semibold text-brand-text">{s.title}</div>
                       <div className="text-sm">
                         <span className="text-brand-text/60">Primary Author: </span>
-                        {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : 'â€”')}
+                        {s.author_name || (primary ? `${primary.first_name} ${primary.last_name}` : '—')}
                         <div className="text-xs text-brand-text/60">
-                          {[primary?.phone, primary?.email || s.author_email].filter(Boolean).join(' â€¢ ')}
+                          {[primary?.phone, primary?.email || s.author_email].filter(Boolean).join(' • ')}
                         </div>
                       </div>
                       <div className="text-xs text-brand-text/60">
-                        Submitted: {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : 'â€”'}
+                        Submitted: {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
                       </div>
                       {(s.attendance_mode || s.phase2_track) && (
                         <div className="text-xs text-brand-text/60">
                           {s.attendance_mode === 'OFFLINE'
-                            ? `Offline Â· ${s.phase2_head_count ?? 'â€”'} attending`
+                            ? `Offline · ${s.phase2_head_count ?? '—'} attending`
                             : s.attendance_mode === 'ONLINE'
                             ? 'Online'
                             : ''}
                           {s.phase2_track
-                            ? `${s.attendance_mode ? ' Â· ' : ''}${
+                            ? `${s.attendance_mode ? ' · ' : ''}${
                                 TRACK_LABELS[s.phase2_track] || s.phase2_track.replace(/-/g, ' ')
                               }`
                             : ''}
@@ -3990,7 +3990,7 @@ Duplicates
                           </div>
                           <h4 className="font-serif font-bold text-lg mt-2 break-words leading-snug">{sub.title}</h4>
                           <p className="text-sm text-brand-text/70 mt-1 capitalize break-words">
-                            {sub.track?.replace(/-/g, ' ') || 'â€”'}
+                            {sub.track?.replace(/-/g, ' ') || '—'}
                           </p>
                         </div>
                         <div className="shrink-0 flex flex-col items-start lg:items-end gap-2">
@@ -4001,7 +4001,7 @@ Duplicates
                             {expired ? 'Expired' : `${daysLeft} day${daysLeft === 1 ? '' : 's'} left`}
                           </span>
                           <span className="text-xs text-brand-text/60">
-                            Deleted {deletedAt ? formatDate(deletedAt.toISOString()) : 'â€”'}
+                            Deleted {deletedAt ? formatDate(deletedAt.toISOString()) : '—'}
                           </span>
                         </div>
                       </div>
@@ -4107,7 +4107,7 @@ Duplicates
         title="Delete Submission?"
         message={
           deleteTarget
-            ? `Move "${deleteTarget.paper_id || deleteTarget.submission_code}" â€” ${deleteTarget.title} to Deleted Files?\n\nAuthor: ${deleteTarget.author_name || 'Unknown'} <${deleteTarget.author_email || 'no email'}>\n\nThe submitter will no longer see this paper in their portal. You can recover it from the "Deleted Files" tab within 30 days, after which it will be permanently removed.`
+            ? `Move "${deleteTarget.paper_id || deleteTarget.submission_code}" — ${deleteTarget.title} to Deleted Files?\n\nAuthor: ${deleteTarget.author_name || 'Unknown'} <${deleteTarget.author_email || 'no email'}>\n\nThe submitter will no longer see this paper in their portal. You can recover it from the "Deleted Files" tab within 30 days, after which it will be permanently removed.`
             : ''
         }
         confirmLabel="Delete"
