@@ -251,6 +251,10 @@ export default function SettingsPanel(props: SettingsPanelProps) {
   }, [fetchPaymentGrants]);
 
   const handleAddPaymentAccess = async () => {
+    if (props.registrationOpen) {
+      setGrantError('Ready for Registration is currently turned on. Turn it off to use manual paper payment access.');
+      return;
+    }
     const title = newPaperTitle.trim();
     if (!title) {
       setGrantError('Please enter a paper title.');
@@ -652,8 +656,35 @@ export default function SettingsPanel(props: SettingsPanelProps) {
                 <CardHeader
                   title="Payment form access"
                   description="Add paper titles to grant payment form access to specific authors. Enter a paper title to look up its submission ID, author email, and Clerk ID."
+                  right={
+                    props.registrationOpen ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-200">
+                        <AlertCircle className="w-3.5 h-3.5 text-amber-600" />
+                        Disabled (Registration Open)
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                        Active (Manual Approval Mode)
+                      </span>
+                    )
+                  }
                 />
                 <div className="px-5 pb-6 space-y-5">
+                  {props.registrationOpen && (
+                    <div className="flex items-start gap-3 p-3.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs sm:text-sm">
+                      <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="font-semibold text-amber-950">
+                          Ready for Registration is currently turned ON
+                        </p>
+                        <p className="mt-0.5 text-amber-800 text-xs leading-relaxed">
+                          All authors whose papers are accepted currently have access to the payment form automatically in their portal. Manual paper title approval is disabled while registration is open to everyone. Turn off &quot;Ready for Registration&quot; in the Submissions tab to activate manual paper title approval.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Input field + Add button */}
                   <div className="space-y-2">
                     <label className="block text-xs font-semibold uppercase tracking-wider text-stone-500">
@@ -664,20 +695,25 @@ export default function SettingsPanel(props: SettingsPanelProps) {
                         <input
                           type="text"
                           value={newPaperTitle}
+                          disabled={props.registrationOpen || addingGrant}
                           onChange={(e) => {
                             setNewPaperTitle(e.target.value);
                             setGrantError(null);
                             setGrantSuccess(null);
                           }}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
+                            if (e.key === 'Enter' && !props.registrationOpen) {
                               e.preventDefault();
                               handleAddPaymentAccess();
                             }
                           }}
-                          placeholder="Enter paper title (or select from list)"
+                          placeholder={
+                            props.registrationOpen
+                              ? 'Disabled — registration is open to all accepted authors'
+                              : 'Enter paper title (or select from list)'
+                          }
                           list="submissions-title-list"
-                          className="w-full rounded-lg border border-stone-200 px-3.5 py-2.5 text-sm bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400 focus:border-stone-400"
+                          className="w-full rounded-lg border border-stone-200 px-3.5 py-2.5 text-sm bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400 focus:border-stone-400 disabled:bg-stone-100 disabled:text-stone-400 disabled:cursor-not-allowed"
                         />
                         {props.submissions && props.submissions.length > 0 && (
                           <datalist id="submissions-title-list">
@@ -693,9 +729,9 @@ export default function SettingsPanel(props: SettingsPanelProps) {
                       <button
                         type="button"
                         onClick={handleAddPaymentAccess}
-                        disabled={addingGrant || !newPaperTitle.trim()}
-                        className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-stone-900 text-white font-medium hover:bg-stone-800 disabled:opacity-50 disabled:cursor-not-allowed transition-all gap-1 shrink-0 shadow-sm"
-                        title="Grant payment access"
+                        disabled={props.registrationOpen || addingGrant || !newPaperTitle.trim()}
+                        className="inline-flex items-center justify-center w-10 h-10 rounded-lg bg-stone-900 text-white font-medium hover:bg-stone-800 disabled:opacity-40 disabled:cursor-not-allowed transition-all gap-1 shrink-0 shadow-sm"
+                        title={props.registrationOpen ? 'Registration is open to all accepted papers' : 'Grant payment access'}
                       >
                         {addingGrant ? (
                           <Loader2 className="w-4 h-4 animate-spin" />

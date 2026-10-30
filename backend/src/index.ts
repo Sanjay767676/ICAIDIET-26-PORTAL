@@ -2471,6 +2471,9 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
 
     const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
 
+    const settings = await loadSettingsRecord(c.env);
+    const registrationOpen = settings['registration_open'] === 'true';
+
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
@@ -2491,7 +2494,15 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
               (
-                 EXISTS (
+                 (? = 1 AND (
+                   s.status IN ('ACCEPTED', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY')
+                   OR EXISTS (
+                     SELECT 1 FROM reviews r
+                     WHERE r.submission_id = s.id
+                       AND r.decision IN ('ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES')
+                   )
+                 ))
+                 OR EXISTS (
                    SELECT 1 FROM payment_access_grants g WHERE g.submission_id = s.id
                  )
                  OR s.payment_status = 'APPROVED'
@@ -2511,7 +2522,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
            ))
          )
        ORDER BY s.created_at DESC`
-    ).bind(userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
+    ).bind(registrationOpen ? 1 : 0, userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
 
     const submissions = (results as any[]) || [];
 
@@ -4526,15 +4537,20 @@ async function registrationEligible(
      WHERE s.id = ?`
   ).bind(submissionId).first() as any;
   if (!row) return { ok: false, error: 'Submission not found.' };
-  const hasAccess = Boolean(row.has_grant) || row.payment_status === 'APPROVED' || row.payment_status === 'PENDING';
-  if (!hasAccess) {
-    return { ok: false, error: 'Payment access has not been granted for this paper. Contact admin.' };
-  }
+
   const acceptedDecisions = ['ACCEPTED', 'ACCEPTED_WITH_MINOR_CHANGES', 'ACCEPTED_WITH_MAJOR_CHANGES'];
   const acceptedStatuses = ['ACCEPTED', 'READY_FOR_REGISTRATION', 'READY_FOR_CAMERA_READY'];
   const accepted = acceptedDecisions.includes(row.review_decision) || acceptedStatuses.includes(row.status);
   if (!accepted) {
     return { ok: false, error: 'This paper has not been accepted for registration yet.' };
+  }
+
+  const settings = await loadSettingsRecord(env);
+  const isRegistrationOpen = settings['registration_open'] === 'true';
+
+  const hasAccess = isRegistrationOpen || Boolean(row.has_grant) || row.payment_status === 'APPROVED' || row.payment_status === 'PENDING';
+  if (!hasAccess) {
+    return { ok: false, error: 'Payment access has not been granted for this paper. Contact admin.' };
   }
   return { ok: true };
 }
@@ -4615,6 +4631,14 @@ app.post('/api/admin/payment-access', async (c) => {
   if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
   const verified = await verifyToken(c, token);
   if (!verified.ok) return c.json({ success: false, error: 'Invalid or expired session.' }, 401);
+
+  const settings = await loadSettingsRecord(c.env);
+  if (settings['registration_open'] === 'true') {
+    return c.json({
+      success: false,
+      error: 'Ready for Registration is currently turned ON (all accepted papers already have payment access). Turn it off to manage individual paper access.',
+    }, 400);
+  }
 
   try {
     const body = await c.req.json().catch(() => ({}));

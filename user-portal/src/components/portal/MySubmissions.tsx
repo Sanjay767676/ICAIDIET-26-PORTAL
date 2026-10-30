@@ -1464,7 +1464,7 @@ export function MySubmissions({
             const isPaymentOpen =
               (expandedPaymentIds[sub.id] ||
                 isPaymentDone ||
-                !!sub.payment_proof_url) && sub.can_pay && isSubAccepted;
+                !!sub.payment_proof_url) && (sub.can_pay || registrationOpen) && isSubAccepted;
             const isPhase2Shown =
               (phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED') ||
               !!sub.phase2_submitted_at;
@@ -1755,7 +1755,7 @@ export function MySubmissions({
                     When Phase 2 is shown, the payment card is removed. */}
                 {isSubAccepted && !isPhase2Shown && (
                   <div className="space-y-4">
-                    {sub.can_pay ? (
+                    {(sub.can_pay || registrationOpen) ? (
                       <>
                         {!isPaymentDone && (
                           <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
@@ -1780,7 +1780,7 @@ export function MySubmissions({
                         {/* Payment Form (Progressive Disclosure) */}
                         {isPaymentOpen && (
                           <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border-2 border-yellow-400 text-black animate-fadeIn">
-                            {registrationOpen || isPaymentDone ? (
+                            {registrationOpen || sub.can_pay || isPaymentDone ? (
                               <RegistrationForm
                                 sub={sub}
                                 payable={payableSubs}
