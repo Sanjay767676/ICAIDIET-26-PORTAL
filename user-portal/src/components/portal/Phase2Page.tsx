@@ -17,7 +17,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 type AttendanceMode = 'ONLINE' | 'OFFLINE';
 
 // Head-count options for offline attendees (compulsory for offline).
-const HEAD_COUNT_OPTIONS = [1, 2, 3, 4];
+const HEAD_COUNT_OPTIONS = [1, 2];
 
 interface Phase2Status {
   submission_code: string | null;
@@ -218,7 +218,7 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
       return;
     }
     if (attendance === 'OFFLINE' && !headCount) {
-      setFormError('Please select how many people will be attending (1 to 6).');
+      setFormError('Please select how many people will be attending (1 or 2).');
       return;
     }
     if (!track) {
