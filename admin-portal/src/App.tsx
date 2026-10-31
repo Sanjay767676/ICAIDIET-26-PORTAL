@@ -3821,9 +3821,16 @@ Duplicates
                           </td>
                           <td className="py-4 px-5 align-top">
                             {cameraDecision ? (
-                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
-                                {cameraDecision.label}
-                              </span>
+                              <div>
+                                <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
+                                  {cameraDecision.label}
+                                </span>
+                                {(cameraDecision.label === 'Major Changes' || s.camera_ready_status === 'MAJOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES') && s.camera_ready_comments && (
+                                  <div className="mt-2 text-xs text-red-900 bg-red-50 border border-red-200 rounded-lg p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                    {s.camera_ready_comments}
+                                  </div>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-xs text-brand-text/50">—</span>
                             )}
