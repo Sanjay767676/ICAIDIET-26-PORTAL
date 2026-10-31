@@ -1393,21 +1393,22 @@ export default function App() {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[24%] rounded-tl-xl">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[22%] rounded-tl-xl">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[26%] rounded-tr-xl">More Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Plagiarism</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%] rounded-tr-xl">More Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-accent/40">
                   {loading ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                      <td colSpan={6} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
                   ) : visible.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="py-8 text-center text-brand-text/60">
+                      <td colSpan={6} className="py-8 text-center text-brand-text/60">
                         {emptyMessage}
                       </td>
                     </tr>
@@ -1459,6 +1460,31 @@ export default function App() {
                                 >
                                   <Eye className="w-4 h-4" /> View Paper
                                 </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-4 px-5 align-top">
+                            <div className="flex flex-col items-start gap-2">
+                              {sub.plagiarism_file && (
+                                <button
+                                  onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                                  title={sub.plagiarism_file || 'Plagiarism report'}
+                                  className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                                >
+                                  <Eye className="w-4 h-4" /> View Plag.
+                                </button>
+                              )}
+                              {sub.ai_plagiarism_file && (
+                                <button
+                                  onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                                  title={sub.ai_plagiarism_file || 'AI plagiarism report'}
+                                  className="inline-flex items-center gap-1.5 text-brand-text font-medium text-xs whitespace-nowrap hover:underline"
+                                >
+                                  <Eye className="w-4 h-4" /> View AI Plag.
+                                </button>
+                              )}
+                              {!sub.plagiarism_file && !sub.ai_plagiarism_file && (
+                                <span className="text-xs text-brand-text/50">—</span>
                               )}
                             </div>
                           </td>

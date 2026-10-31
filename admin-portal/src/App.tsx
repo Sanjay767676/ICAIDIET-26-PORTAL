@@ -3724,25 +3724,26 @@ Duplicates
               <table className="w-full">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[26%]">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[22%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[12%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[24%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[18%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Count</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[17%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[13%]">Status</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[11%]">Status</th>
                     <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Info</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-text/10">
                   {loading && (
                     <tr>
-                      <td colSpan={6} className="py-10 text-center text-sm text-brand-text/60 flex items-center justify-center gap-2">
+                      <td colSpan={7} className="py-10 text-center text-sm text-brand-text/60 flex items-center justify-center gap-2">
                         <Loader2 className="w-4 h-4 animate-spin" /> Loading submissions...
                       </td>
                     </tr>
                   )}
                   {!loading && filteredCameraReady.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="py-10 text-center text-sm text-brand-text/60">
+                      <td colSpan={7} className="py-10 text-center text-sm text-brand-text/60">
                         {cameraReadySubmissionsList.length === 0
                           ? 'No Phase 2 submissions yet. Papers appear here once their authors submit the camera-ready package.'
                           : 'No submissions match your search.'}
@@ -3788,6 +3789,17 @@ Duplicates
                           </td>
                           <td className="py-4 px-5 text-sm text-brand-text/70 align-top">
                             {s.phase2_submitted_at ? new Date(s.phase2_submitted_at).toLocaleDateString() : '—'}
+                          </td>
+                          <td className="py-4 px-5 text-sm align-top">
+                            {s.attendance_mode === 'OFFLINE' ? (
+                              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">
+                                Counts: {s.phase2_head_count ?? '—'}
+                              </span>
+                            ) : (
+                              <span className="inline-block px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+                                Online
+                              </span>
+                            )}
                           </td>
                           <td className="py-4 px-5 align-top">
                             <div className="flex flex-wrap gap-1.5">
