@@ -48,11 +48,12 @@ const ALLOWED_SUBMISSION_STATUSES = new Set([
   'READY_FOR_CAMERA_READY',
 ]);
 
-// Statuses that mean "this paper has been accepted". A paper ENTERING this
-// set (from outside it) is what fires the automatic acceptance mail, and it
-// is also the gate for the final-phase uploads (copyright form +
-// camera-ready manuscript). 'ACCEPTED' is kept in the set even though no
-// current code path writes it, because it exists in the DB CHECK vocabulary.
+// Statuses that mean "this paper has been accepted". The transitions are only
+// recorded by the status/review endpoints now — the acceptance mail is sent
+// manually from the admin Mail tab, as it was before. This set is still the
+// gate for the final-phase uploads (copyright form + camera-ready manuscript).
+// 'ACCEPTED' is kept in the set even though no current code path writes it,
+// because it exists in the DB CHECK vocabulary.
 const ACCEPTED_STATUSES = new Set([
   'ACCEPTED',
   'READY_FOR_REGISTRATION',
@@ -614,142 +615,6 @@ async function sendViaResend(
     return { ok: false, rateLimited: res.status === 429, error: msg };
   }
   return { ok: true, id: data.id };
-}
-
-// ------------------------------------------------------------------
-// Automatic acceptance mail
-//
-// From now on the acceptance mail goes out BY ITSELF the moment a paper
-// enters an accepted state (a reviewer saves decision ACCEPTED, or an admin
-// sets READY_FOR_REGISTRATION / READY_FOR_CAMERA_READY from outside the
-// accepted set). The admin no longer needs to enqueue it manually — that
-// manual bulk-mail flow stays for every other kind of mail.
-//
-// Exactly-once: `submissions.acceptance_mail_sent_at` is claimed with a
-// conditional UPDATE before anything is sent, so two triggers racing (or a
-// double-click) can never produce two mails. Papers accepted BEFORE this
-// feature existed are never mailed retroactively: they never pass through an
-// into-accepted transition again, and nothing iterates old rows.
-//
-// Wording comes from the admin's own mail template: whichever template
-// matches one of the reserved names below (case-insensitive, trimmed) is
-// used, so the acceptance wording stays editable from the existing Mail
-// Templates UI. With no match, the built-in default is sent instead, so an
-// acceptance can never silently produce no mail at all.
-// ------------------------------------------------------------------
-const ACCEPTANCE_TEMPLATE_NAMES = ['acceptance', 'acceptence', 'acceptance letter'];
-
-const DEFAULT_ACCEPTANCE_SUBJECT = "ICAIDIET'26: Acceptance of your paper {submission_code}";
-
-const DEFAULT_ACCEPTANCE_BODY = `Dear {name},
-
-We are pleased to inform you that your paper "{paper_title}" (Submission ID: {submission_code}) has been ACCEPTED for ICAIDIET'26.
-
-Track: {track}
-
-Next steps:
-1. Complete your registration and upload your payment proof from the author portal.
-2. Once your payment is approved, upload the signed Copyright Form and the Camera-Ready manuscript from the author portal.
-
-Congratulations on the acceptance of your paper!
-
-Best regards,
-ICAIDIET'26 Team`;
-
-async function sendAcceptanceMail(env: Bindings, submissionId: string): Promise<void> {
-  // Claim first: the conditional UPDATE only matches while the latch is still
-  // NULL, so exactly one caller can ever win this race.
-  const now = new Date().toISOString();
-  const claim = await env.DB.prepare(
-    `UPDATE submissions SET acceptance_mail_sent_at = ?
-     WHERE id = ? AND acceptance_mail_sent_at IS NULL`
-  ).bind(now, submissionId).run();
-  if (!claim.meta.changes) return;
-
-  let recorded = false;
-  try {
-    const sub = await env.DB.prepare(
-      `SELECT id, submission_code, paper_id, title, track, author_name, author_email,
-              (SELECT decision FROM reviews r WHERE r.submission_id = submissions.id
-               ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
-              (SELECT feedback FROM reviews r WHERE r.submission_id = submissions.id
-               ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback
-       FROM submissions
-       WHERE id = ? AND deleted_at IS NULL`
-    ).bind(submissionId).first() as any;
-    if (!sub) return;
-
-    // Same recipient rules as the admin's bulk enqueue: the primary author,
-    // falling back to the address the submission was made with.
-    const primary = await env.DB.prepare(
-      `SELECT first_name, last_name, email FROM authors
-       WHERE submission_id = ? AND is_primary = 1 LIMIT 1`
-    ).bind(submissionId).first() as any;
-    const recipientEmail = ((primary?.email || '') as string).trim() || ((sub.author_email || '') as string).trim();
-    if (!recipientEmail) return;
-
-    const recipientName =
-      [(primary?.first_name || '').trim(), (primary?.last_name || '').trim()].filter(Boolean).join(' ') ||
-      sub.author_name ||
-      'Author';
-
-    const template = await env.DB.prepare(
-      `SELECT id, subject, body FROM mail_templates
-       WHERE LOWER(TRIM(name)) IN (?, ?, ?)
-       ORDER BY updated_at DESC LIMIT 1`
-    ).bind(ACCEPTANCE_TEMPLATE_NAMES[0], ACCEPTANCE_TEMPLATE_NAMES[1], ACCEPTANCE_TEMPLATE_NAMES[2]).first() as any;
-
-    const placeholders = {
-      recipient_name: recipientName,
-      title: sub.title,
-      track: sub.track,
-      paper_id: sub.paper_id,
-      submission_code: sub.submission_code,
-      review_decision: sub.review_decision,
-      review_feedback: sub.review_feedback,
-    };
-    const subject = renderMailBody(template?.subject || DEFAULT_ACCEPTANCE_SUBJECT, placeholders);
-    const body = renderMailBody(template?.body || DEFAULT_ACCEPTANCE_BODY, placeholders);
-
-    const mailId = crypto.randomUUID();
-    await env.DB.prepare(
-      `INSERT INTO mail_logs
-        (id, submission_id, template_id, recipient_name, recipient_email, paper_title, subject, body, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'sending', ?, ?)`
-    ).bind(mailId, sub.id, template?.id || null, recipientName, recipientEmail, sub.title, subject, body, now, now).run();
-    recorded = true;
-
-    // Sent inline rather than through the shared queue so the acceptance mail
-    // goes out immediately instead of waiting for the admin's next paced
-    // process call or the hourly cron. A rate-limited send goes back to
-    // 'queued' and is retried by those same drains.
-    const result = await sendViaResend({ env }, recipientEmail, subject, body);
-    const ts = new Date().toISOString();
-    if (result.ok) {
-      await env.DB.prepare(
-        `UPDATE mail_logs SET status = 'delivered', resend_id = ?, error = NULL, updated_at = ? WHERE id = ?`
-      ).bind(result.id || null, ts, mailId).run();
-    } else if (result.rateLimited) {
-      await env.DB.prepare(
-        `UPDATE mail_logs SET status = 'queued', error = ?, updated_at = ? WHERE id = ?`
-      ).bind(result.error || 'Rate Limit Exceeded', ts, mailId).run();
-    } else {
-      await env.DB.prepare(
-        `UPDATE mail_logs SET status = 'failed', error = ?, updated_at = ? WHERE id = ?`
-      ).bind(result.error || 'Send failed.', ts, mailId).run();
-    }
-  } catch (err) {
-    console.error('Automatic acceptance mail error:', err);
-  } finally {
-    if (!recorded) {
-      // Nothing reached the mail log (deleted paper, no recipient address, or
-      // a failed insert), so release the latch and let a later transition
-      // retry instead of losing the mail forever.
-      await env.DB.prepare(
-        `UPDATE submissions SET acceptance_mail_sent_at = NULL WHERE id = ?`
-      ).bind(submissionId).run().catch(() => {});
-    }
-  }
 }
 
 // ------------------------------------------------------------------
@@ -1734,7 +1599,7 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
     }
 
     const existing = await c.env.DB.prepare(
-      `SELECT id, status FROM submissions WHERE id = ? AND deleted_at IS NULL`
+      `SELECT id FROM submissions WHERE id = ? AND deleted_at IS NULL`
     ).bind(submissionId).first() as any;
     if (!existing) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
@@ -1766,15 +1631,6 @@ app.post('/api/reviewer/submissions/:id/review', requireReviewerAuth, async (c) 
       ).bind(nextStatus, now, submissionId),
     ];
     await c.env.DB.batch(statements);
-
-    // Automatic acceptance mail: the moment the paper enters an accepted
-    // state, the acceptance mail goes out to the primary author on its own.
-    // Only a transition INTO the accepted set fires it — re-saving an
-    // already-accepted paper does not — and sendAcceptanceMail's latch makes
-    // the send exactly-once even if an admin status change races this save.
-    if (decision === 'ACCEPTED' && !ACCEPTED_STATUSES.has(existing.status)) {
-      c.executionCtx.waitUntil(sendAcceptanceMail(c.env, submissionId));
-    }
 
     return c.json({
       success: true,
@@ -1967,6 +1823,32 @@ app.get('/api/submission-eligibility', requireClerkAuth, async (c) => {
     const refusal = userPortalGate(settings, email, 'submit');
     const maintenance = portalMaintenanceActive(settings, 'user');
 
+    // Whether this author has already submitted at least one paper. The portal
+    // uses this to stop offering a second submission to an existing author and
+    // to show them only the My Submissions tab. Counted with exactly the same
+    // ownership rules as GET /api/submissions/mine, otherwise an author could
+    // be told "you have nothing" by one endpoint and shown their paper by the
+    // other.
+    const clerkUserId = c.get('clerkUserId') as string;
+    const userId = await ensureUserForClerk(c, clerkUserId, email);
+    const countRow = await c.env.DB.prepare(
+      `SELECT COUNT(*) AS c
+       FROM submissions s
+       WHERE s.deleted_at IS NULL
+         AND (
+           s.user_id = ?
+           OR s.user_id IN (SELECT id FROM users WHERE email = ? || '@clerk.local')
+           OR (trim(coalesce(?, '')) <> '' AND (
+             lower(trim(s.author_email)) = lower(?)
+             OR EXISTS (
+               SELECT 1 FROM authors a
+               WHERE a.submission_id = s.id AND lower(trim(a.email)) = lower(?)
+             )
+           ))
+         )`
+    ).bind(userId, clerkUserId, email, email, email).first() as any;
+    const submissionCount = Number(countRow?.c || 0);
+
     return c.json({
       success: true,
       can_submit: refusal === null,
@@ -1982,6 +1864,11 @@ app.get('/api/submission-eligibility', requireClerkAuth, async (c) => {
       approved_list_active: approvedMailListEnabled(settings),
       maintenance_active: maintenance.active,
       maintenance_until: maintenance.until,
+      // Submission count, not just a boolean, so the portal can decide without
+      // a second request whether this author has already used their submit
+      // button. Redacted to this caller's own papers only.
+      submission_count: submissionCount,
+      has_submissions: submissionCount > 0,
     });
   } catch (error) {
     console.error('Fetch submission eligibility error:', error);
@@ -3333,8 +3220,8 @@ app.post('/api/admin/submissions/:id/status', async (c) => {
       return c.json({ success: false, error: 'Invalid status value.' }, 400);
     }
 
-    const existing = await c.env.DB.prepare(`SELECT id, status FROM submissions WHERE id = ?`)
-      .bind(submissionId).first() as { id: string; status: string } | null;
+    const existing = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
+      .bind(submissionId).first() as { id: string } | null;
     if (!existing) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
     }
@@ -3345,15 +3232,6 @@ app.post('/api/admin/submissions/:id/status', async (c) => {
     ).bind(status, now, submissionId).run();
 
     const updated = result.meta.changes > 0;
-
-    // Automatic acceptance mail, same rule as the reviewer path: only a
-    // transition INTO the accepted set from outside it counts. Moving a
-    // paper between two accepted statuses (or re-saving the same one) does
-    // not send anything, and the latch covers papers whose acceptance mail
-    // already went out.
-    if (updated && ACCEPTED_STATUSES.has(status) && !ACCEPTED_STATUSES.has(existing.status)) {
-      c.executionCtx.waitUntil(sendAcceptanceMail(c.env, submissionId));
-    }
 
     return c.json({
       success: updated,

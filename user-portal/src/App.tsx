@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Show, SignInButton, useAuth, useUser } from '@clerk/react';
 import { Analytics } from '@vercel/analytics/react';
 import { MainLayout } from './components/layout/MainLayout';
@@ -99,6 +99,21 @@ export default function App() {
   const [canSubmit, setCanSubmit] = useState<boolean | null>(null);
   const [submitBlockMessage, setSubmitBlockMessage] = useState<string>('');
   const [submitEmail, setSubmitEmail] = useState<string>('');
+  // Whether this author already has at least one paper. Returned by the same
+  // eligibility call that answers can-submit, so the two answers can never
+  // disagree. Existing authors lose the Submit Paper tab and are landed on My
+  // Submissions; the home page swaps its call-to-action accordingly.
+  const [hasSubmissions, setHasSubmissions] = useState<boolean>(false);
+  const [eligibilityLoaded, setEligibilityLoaded] = useState<boolean>(false);
+  // Public acceptance switch. Used for signed-out visitors, who have no
+  // eligibility answer to consult: if the portal is not accepting papers, the
+  // home page says so instead of inviting them into a dead wizard.
+  const [paperAcceptanceOpen, setPaperAcceptanceOpen] = useState<boolean>(true);
+  // Admin-editable Scopus access list, threaded into the payment form.
+  const [approvedScopusMailIds, setApprovedScopusMailIds] = useState<string>('');
+  // One-shot landing on My Submissions after an existing author signs in, so
+  // the portal does not open on a home page whose only nav tab is elsewhere.
+  const landedOnSubmissions = useRef(false);
   const { getToken, isSignedIn } = useAuth();
   const { user: clerkUser } = useUser();
 
@@ -124,6 +139,10 @@ export default function App() {
           if (data.registration) setRegistration(data.registration);
           setFileEditsEnabled(s.file_edits_enabled !== 'false');
           setPhase2Enabled(s.phase2_enabled === 'true');
+          // Absent key means the call for papers is open (matching the backend),
+          // so only the explicit 'false' closes the public view.
+          setPaperAcceptanceOpen(s.paper_acceptance_enabled !== 'false');
+          setApprovedScopusMailIds(s.approved_scopus_mail_ids || '');
         }
       } catch (err) {
         console.error('Failed to load settings:', err);
@@ -140,6 +159,8 @@ export default function App() {
       setCanSubmit(null);
       setSubmitBlockMessage('');
       setSubmitEmail('');
+      setHasSubmissions(false);
+      setEligibilityLoaded(false);
       return;
     }
     let cancelled = false;
@@ -157,9 +178,12 @@ export default function App() {
           setCanSubmit(data.can_submit === true);
           setSubmitBlockMessage(data.message || '');
           setSubmitEmail(data.email || '');
+          setHasSubmissions(data.has_submissions === true || Number(data.submission_count) > 0);
         }
       } catch (err) {
         console.error('Failed to load submission eligibility:', err);
+      } finally {
+        if (!cancelled) setEligibilityLoaded(true);
       }
     };
     fetchEligibility();
@@ -191,12 +215,58 @@ export default function App() {
     syncUser();
   }, [isSignedIn, clerkUser, getToken]);
 
+  // ----- Submission-window state for this viewer -------------------------
+  // Signed in: the server's eligibility answer is authoritative, because the
+  // approved-email list is redacted from the public settings. Signed out: fall
+  // back to the public switch, which is all an anonymous visitor can know.
+  const authorHasSubmission = isSignedIn && hasSubmissions;
+  const submissionsClosedForViewer = isSignedIn
+    ? canSubmit === false
+    : maintenanceMode || !paperAcceptanceOpen;
+  // A brand-new author may open the wizard only when they are signed in, the
+  // eligibility check has answered (so an existing author never sees the tab
+  // flash), they are not already an author, and the window is open to them.
+  const canStartSubmission = isSignedIn
+    ? eligibilityLoaded && canSubmit !== false && !authorHasSubmission
+    : !maintenanceMode && paperAcceptanceOpen;
+
+  // Existing authors get one tab: My Submissions. Everyone else gets Home and
+  // My Submissions, plus Submit Paper only while the window is open to them.
+  const visibleNavViews: ('home' | 'wizard' | 'submissions')[] = authorHasSubmission
+    ? ['submissions']
+    : canStartSubmission
+      ? ['home', 'wizard', 'submissions']
+      : ['home', 'submissions'];
+
+  // Land an existing author on their submissions once per sign-in. Guarded by a
+  // ref so clicking the logo/Home afterwards is not immediately overridden.
+  useEffect(() => {
+    if (!isSignedIn) {
+      landedOnSubmissions.current = false;
+      return;
+    }
+    if (authorHasSubmission && !landedOnSubmissions.current) {
+      landedOnSubmissions.current = true;
+      setCurrentView('submissions');
+    }
+  }, [isSignedIn, authorHasSubmission]);
+
   return (
     <>
-      <MainLayout view={currentView === 'phase2' || currentView === 'guidelines' ? 'submissions' : currentView} onNavigate={navigate} maintenanceMode={maintenanceMode} maintenanceUntil={maintenanceUntil}>
+      <MainLayout
+        view={currentView === 'phase2' || currentView === 'guidelines' ? 'submissions' : currentView}
+        onNavigate={navigate}
+        maintenanceMode={maintenanceMode}
+        maintenanceUntil={maintenanceUntil}
+        visibleNavViews={visibleNavViews}
+        submissionsClosed={!maintenanceMode && submissionsClosedForViewer}
+      >
         {currentView === 'home' && (
           <HeroSection
             onStart={() => navigate('wizard')}
+            onMySubmissions={() => navigate('submissions')}
+            hasSubmission={authorHasSubmission}
+            submissionsClosed={submissionsClosedForViewer}
             maintenanceMode={maintenanceMode}
             maintenanceUntil={maintenanceUntil}
           />
@@ -215,11 +285,16 @@ export default function App() {
                 />
               }
             >
-              {canSubmit === false ? (
+              {authorHasSubmission ? (
+                <SubmissionClosedNotice
+                  message="You have already submitted a paper, so a second submission is not available from this portal. You can track your existing paper, upload revisions and complete registration from My Submissions."
+                  email={submitEmail}
+                />
+              ) : canSubmit === false ? (
                 <SubmissionClosedNotice
                   message={
                     submitBlockMessage ||
-                    'New submissions are currently limited to specific email addresses. Please contact the conference team if you need to be added to the list.'
+                    'New submissions are currently closed. Please contact the conference team if you need to submit a paper.'
                   }
                   email={submitEmail}
                 />
@@ -258,7 +333,8 @@ export default function App() {
                 setPhase2SubmissionId(id);
                 navigate('phase2');
               }}
-              approvedScopusMailIds=""
+              canStartSubmission={canStartSubmission}
+              approvedScopusMailIds={approvedScopusMailIds}
               userEmail={
                 [
                   clerkUser?.primaryEmailAddress?.emailAddress,

@@ -100,6 +100,11 @@ interface MySubmissionsProps {
   phase2Enabled?: boolean;
   // Opens the Phase 2 page for one of the author's submissions.
   onPhase2?: (submissionId: string) => void;
+  // False when this author may not start another paper (already submitted, the
+  // call for papers is closed to them, or the portal is in maintenance). The
+  // "Submit ... Paper" shortcuts are removed rather than opening a wizard that
+  // the server would refuse.
+  canStartSubmission?: boolean;
   approvedScopusMailIds?: string;
   userEmail?: string;
 }
@@ -1307,6 +1312,7 @@ export function MySubmissions({
   fileEditsEnabled = true,
   phase2Enabled = false,
   onPhase2,
+  canStartSubmission = true,
   approvedScopusMailIds = '',
   userEmail = '',
 }: MySubmissionsProps) {
@@ -1424,12 +1430,14 @@ export function MySubmissions({
             >
               Try Again
             </button>
-            <button
-              onClick={onStart}
-              className="px-8 py-3 bg-white text-brand-text border-2 border-brand-text/20 rounded-xl font-medium hover:border-brand-text/40 transition-all shadow-sm"
-            >
-              Go to Submission Portal
-            </button>
+            {canStartSubmission && (
+              <button
+                onClick={onStart}
+                className="px-8 py-3 bg-white text-brand-text border-2 border-brand-text/20 rounded-xl font-medium hover:border-brand-text/40 transition-all shadow-sm"
+              >
+                Go to Submission Portal
+              </button>
+            )}
           </div>
         </div>
       ) : subs === null ? (
@@ -1441,12 +1449,19 @@ export function MySubmissions({
           <Inbox className="w-14 h-14 text-brand-accent mx-auto mb-4" />
           <h2 className="text-2xl font-serif font-bold mb-2">No submissions yet</h2>
           <p className="text-brand-text/70 mb-6">You haven&apos;t submitted any papers yet.</p>
-          <button
-            onClick={onStart}
-            className="px-8 py-3 bg-brand-text text-white rounded-xl font-medium hover:bg-brand-accent hover:-translate-y-0.5 transition-all shadow-lg"
-          >
-            Submit Your First Paper
-          </button>
+          {canStartSubmission ? (
+            <button
+              onClick={onStart}
+              className="px-8 py-3 bg-brand-text text-white rounded-xl font-medium hover:bg-brand-accent hover:-translate-y-0.5 transition-all shadow-lg"
+            >
+              Submit Your First Paper
+            </button>
+          ) : (
+            <p className="text-sm font-medium text-amber-800 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 inline-block">
+              New paper submissions are currently closed. Please contact the conference team
+              (icaidiet26@gmail.com) if you need to submit a paper.
+            </p>
+          )}
         </div>
       ) : (
         <div className="space-y-8">
@@ -1461,10 +1476,19 @@ export function MySubmissions({
               sub.payment_status !== 'APPROVED' &&
               sub.payment_status !== 'REJECTED' &&
               Boolean(sub.payment_submitted_at || (sub.payment_proof_url && sub.utr_transaction_id));
+            // Registration access. While the admin's "Ready for Registration"
+            // switch is ON every accepted paper is eligible; once it is OFF only
+            // papers the admin explicitly granted payment access to (the
+            // "Approved Paper" list, surfaced as can_pay by the backend) may see
+            // the payment form and its Submit button. Payments already approved
+            // or under verification keep their status panel but never a submit
+            // button, so nobody can pay twice or resubmit an approved payment.
+            const paymentAccessGranted = Boolean(sub.can_pay) || registrationOpen;
+            const isPaymentApproved = sub.payment_status === 'APPROVED';
             const isPaymentOpen =
               (expandedPaymentIds[sub.id] ||
                 isPaymentDone ||
-                !!sub.payment_proof_url) && (sub.can_pay || registrationOpen) && isSubAccepted;
+                !!sub.payment_proof_url) && paymentAccessGranted && isSubAccepted;
             const isPhase2Shown =
               (phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED') ||
               !!sub.phase2_submitted_at;
@@ -1755,16 +1779,21 @@ export function MySubmissions({
                     When Phase 2 is shown, the payment card is removed. */}
                 {isSubAccepted && !isPhase2Shown && (
                   <div className="space-y-4">
-                    {(sub.can_pay || registrationOpen) ? (
+                    {paymentAccessGranted ? (
                       <>
-                        {!isPaymentDone && (
+                        {!isPaymentDone && !isPaymentApproved && (
                           <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
                             <h4 className="text-xl sm:text-2xl font-bold font-serif text-brand-text mb-2">
                               Congratulations Your Paper is Accepted
                             </h4>
-                            <p className="text-sm sm:text-base text-black/80 max-w-2xl mx-auto leading-relaxed mb-6 font-normal">
+                            <p className="text-sm sm:text-base text-black/80 max-w-2xl mx-auto leading-relaxed mb-4 font-normal">
                               Please complete the payment as soon as possible because we accept a limited number of papers. Registration operates on a first-come, first-served basis.
                             </p>
+                            {!registrationOpen && !isPaymentOpen && (
+                              <span className="mb-5 inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Payment access granted to you
+                              </span>
+                            )}
                             {!isPaymentOpen ? (
                               <button
                                 type="button"
@@ -1780,32 +1809,29 @@ export function MySubmissions({
                         {/* Payment Form (Progressive Disclosure) */}
                         {isPaymentOpen && (
                           <div className="bg-white rounded-2xl p-6 sm:p-8 shadow-xl border-2 border-yellow-400 text-black animate-fadeIn">
-                            {registrationOpen || sub.can_pay || isPaymentDone ? (
-                              <RegistrationForm
-                                sub={sub}
-                                payable={payableSubs}
-                                totalPapers={subs.length}
-                                getToken={getToken}
-                                onSaved={loadSubmissions}
-                                config={config}
-                              />
-                            ) : (
-                              <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
-                                Registration &amp; payment for accepted papers will open soon. Please check back here.
-                              </div>
-                            )}
+                            <RegistrationForm
+                              sub={sub}
+                              payable={payableSubs}
+                              totalPapers={subs.length}
+                              getToken={getToken}
+                              onSaved={loadSubmissions}
+                              config={config}
+                              approvedScopusMailIds={approvedScopusMailIds}
+                              userEmail={userEmail}
+                            />
                           </div>
                         )}
                       </>
                     ) : (
                       <div className="bg-white rounded-2xl p-6 shadow-md border-2 border-red-300 text-center flex flex-col items-center">
                         <h4 className="text-lg sm:text-xl font-bold font-serif text-red-700 mb-2">
-                          Submissions are closed
+                          Registration Access Not Granted
                         </h4>
                         <p className="text-sm text-red-700 max-w-xl mx-auto leading-relaxed font-medium">
-                          Contact Admin For access 7358981203 | icaidiet26@gmail.com
+                          Registration is currently closed. Your paper is accepted, but the payment form
+                          has not been opened for it yet. Contact Admin for access 7358981203 | icaidiet26@gmail.com
                         </p>
-                        {sub.payment_status === 'APPROVED' && (
+                        {isPaymentApproved && (
                           <div className="mt-4 px-4 py-2 bg-green-100 text-green-800 border border-green-300 rounded-lg text-sm font-semibold">
                             Payment Confirmed
                           </div>

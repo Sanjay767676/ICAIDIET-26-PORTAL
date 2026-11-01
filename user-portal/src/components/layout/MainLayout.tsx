@@ -12,6 +12,15 @@ interface MainLayoutProps {
   onNavigate?: (view: NavView) => void;
   maintenanceMode?: boolean;
   maintenanceUntil?: string | null;
+  // Which nav tabs this viewer may see. When omitted all three are shown. The
+  // portal passes an explicit list so an author who has already submitted only
+  // ever sees "My Submissions", and the Submit Paper tab disappears entirely
+  // once the call for papers closes.
+  visibleNavViews?: NavView[];
+  // True when new paper submissions are closed for this viewer (acceptance
+  // switch off / approved-list mismatch). Rendered as a status strip so the
+  // closed state is visible even on the home page, not only inside the wizard.
+  submissionsClosed?: boolean;
 }
 
 const NAV_ITEMS: { view: NavView; label: string }[] = [
@@ -20,7 +29,19 @@ const NAV_ITEMS: { view: NavView; label: string }[] = [
   { view: 'submissions', label: 'My Submissions' },
 ];
 
-export function MainLayout({ children, view, onNavigate, maintenanceMode, maintenanceUntil }: MainLayoutProps) {
+export function MainLayout({
+  children,
+  view,
+  onNavigate,
+  maintenanceMode,
+  maintenanceUntil,
+  visibleNavViews,
+  submissionsClosed = false,
+}: MainLayoutProps) {
+  const navItems = visibleNavViews
+    ? NAV_ITEMS.filter((item) => visibleNavViews.includes(item.view))
+    : NAV_ITEMS;
+
   return (
     <div className="min-h-screen flex flex-col font-sans text-brand-text bg-brand-bg">
       {maintenanceMode && (
@@ -85,7 +106,7 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
         <div className="container mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-y-3">
           <div className="flex items-center gap-2 overflow-x-auto">
             <Show when="signed-in">
-              {NAV_ITEMS.map((item) => (
+              {navItems.map((item) => (
                 <button
                   key={item.view}
                   onClick={() => onNavigate?.(item.view)}
@@ -120,6 +141,19 @@ export function MainLayout({ children, view, onNavigate, maintenanceMode, mainte
             </Show>
           </div>
         </div>
+
+        {/* Row 4: submission-window status. Shown to everyone (signed in or
+            not) whenever new papers are not being accepted, so the closed
+            window is stated on the home page instead of only after the author
+            has started the wizard. */}
+        {submissionsClosed && !maintenanceMode && (
+          <div className="w-full bg-amber-100 border-t border-amber-300 py-2">
+            <div className="container mx-auto px-4 text-center text-xs sm:text-sm font-semibold text-amber-900">
+              Not accepting new paper submissions right now. Authors who already submitted can still
+              sign in and open My Submissions.
+            </div>
+          </div>
+        )}
       </header>
 
       <main className="flex-1">
