@@ -3286,9 +3286,10 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     const filteredCameraReady = masterApply(cameraReadySubmissionsList);
 
     // Camera Ready attendance totals for the tab header: offline papers
-    // contribute their head count (people attending), while online papers are
-    // counted as one entry each (they have no head count). Follows the current
-    // search/filters, so it doubles as a per-track/per-search tally.
+    // (count and total attendees), online papers, and overall total.
+    const cameraReadyOfflinePapers = filteredCameraReady.filter(
+      (s) => s.attendance_mode === 'OFFLINE'
+    ).length;
     const cameraReadyOfflineHeadCount = filteredCameraReady.reduce(
       (sum, s) => (s.attendance_mode === 'OFFLINE' ? sum + (Number(s.phase2_head_count) || 0) : sum),
       0
@@ -3717,27 +3718,39 @@ Duplicates
                 </p>
               </div>
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
-                {/* Attendance tally: offline head count vs online entries. */}
+                {/* Attendance tally: offline papers & attendees vs online papers. */}
                 <div
                   className="flex items-stretch divide-x divide-brand-text/10 rounded-lg border border-brand-text/20 bg-white shadow-sm overflow-hidden shrink-0"
-                  title="Offline papers are summed by their head count; online papers are counted as one entry each."
+                  title={`${cameraReadyOfflinePapers} offline papers (${cameraReadyOfflineHeadCount} attendees) + ${cameraReadyOnlineEntries} online papers = ${filteredCameraReady.length} total`}
                 >
                   <div className="px-3 py-1.5">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-brand-text/50">
                       Offline
                     </div>
-                    <div className="text-sm font-bold text-brand-text">
-                      {cameraReadyOfflineHeadCount}
-                      <span className="ml-1 text-[10px] font-medium text-brand-text/60">head count</span>
+                    <div className="text-sm font-bold text-brand-text flex items-baseline gap-1">
+                      <span>{cameraReadyOfflinePapers}</span>
+                      <span className="text-[10px] font-normal text-brand-text/60">papers</span>
+                      <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-900 border border-amber-200">
+                        {cameraReadyOfflineHeadCount} attendees
+                      </span>
                     </div>
                   </div>
                   <div className="px-3 py-1.5">
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-brand-text/50">
                       Online
                     </div>
-                    <div className="text-sm font-bold text-brand-text">
-                      {cameraReadyOnlineEntries}
-                      <span className="ml-1 text-[10px] font-medium text-brand-text/60">entries</span>
+                    <div className="text-sm font-bold text-brand-text flex items-baseline gap-1">
+                      <span>{cameraReadyOnlineEntries}</span>
+                      <span className="text-[10px] font-normal text-brand-text/60">papers</span>
+                    </div>
+                  </div>
+                  <div className="px-3 py-1.5 bg-stone-50/80">
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-brand-text/50">
+                      Total
+                    </div>
+                    <div className="text-sm font-bold text-brand-text flex items-baseline gap-1">
+                      <span>{filteredCameraReady.length}</span>
+                      <span className="text-[10px] font-normal text-brand-text/60">papers</span>
                     </div>
                   </div>
                 </div>
