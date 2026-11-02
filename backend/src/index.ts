@@ -2701,8 +2701,8 @@ const PHASE2_TRACKS = new Set([
   'emerging-tech-sustainability',
 ]);
 
-// Offline attendees must say how many people are coming (1-4).
-const PHASE2_HEAD_COUNTS = new Set([1, 2]);
+// Offline attendees must say how many people are coming (1-6).
+const PHASE2_HEAD_COUNTS = new Set([1, 2, 3, 4, 5, 6]);
 
 // Shared gate for the Phase 2 submit: maintenance + approved list (via
 // userPortalGate 'edit'), the phase2_enabled switch, ownership of the
@@ -3004,7 +3004,7 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
       const rawHeadCount = Number(String(formData['head_count'] || '').trim());
       if (!Number.isInteger(rawHeadCount) || !PHASE2_HEAD_COUNTS.has(rawHeadCount)) {
         return c.json(
-          { success: false, error: 'Please select how many people will be attending (1 or 2).' },
+          { success: false, error: 'Please select how many people will be attending (1 to 6).' },
           400
         );
       }
