@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck, Send } from 'lucide-react';
+import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck, Send, Globe, MapPin } from 'lucide-react';
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
 import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
@@ -3720,37 +3720,51 @@ Duplicates
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 w-full sm:w-auto">
                 {/* Attendance tally: offline papers & attendees vs online papers. */}
                 <div
-                  className="flex items-stretch divide-x divide-brand-text/10 rounded-lg border border-brand-text/20 bg-white shadow-sm overflow-hidden shrink-0"
+                  className="inline-flex items-stretch rounded-xl border border-stone-200/90 bg-white shadow-sm divide-x divide-stone-100 overflow-hidden shrink-0 select-none hover:shadow transition-shadow"
                   title={`${cameraReadyOfflinePapers} offline papers (${cameraReadyOfflineHeadCount} attendees) + ${cameraReadyOnlineEntries} online papers = ${filteredCameraReady.length} total`}
                 >
-                  <div className="px-3 py-1.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-brand-text/50">
-                      Offline
+                  {/* Offline */}
+                  <div className="px-3.5 py-2 flex flex-col justify-center">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-amber-700">
+                      <MapPin className="w-3 h-3 text-amber-600 shrink-0" />
+                      <span>Offline</span>
                     </div>
-                    <div className="text-sm font-bold text-brand-text flex items-baseline gap-1">
-                      <span>{cameraReadyOfflinePapers}</span>
-                      <span className="text-[10px] font-normal text-brand-text/60">papers</span>
-                      <span className="ml-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-100 text-amber-900 border border-amber-200">
+                    <div className="flex items-baseline gap-1.5 mt-0.5 flex-wrap">
+                      <span className="text-base font-extrabold text-stone-900 leading-none">
+                        {cameraReadyOfflinePapers}
+                      </span>
+                      <span className="text-[11px] font-medium text-stone-500">papers</span>
+                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-800 border border-amber-200/80">
+                        <Users className="w-2.5 h-2.5 text-amber-600 shrink-0" />
                         {cameraReadyOfflineHeadCount} attendees
                       </span>
                     </div>
                   </div>
-                  <div className="px-3 py-1.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-brand-text/50">
-                      Online
+
+                  {/* Online */}
+                  <div className="px-3.5 py-2 flex flex-col justify-center">
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-700">
+                      <Globe className="w-3 h-3 text-sky-600 shrink-0" />
+                      <span>Online</span>
                     </div>
-                    <div className="text-sm font-bold text-brand-text flex items-baseline gap-1">
-                      <span>{cameraReadyOnlineEntries}</span>
-                      <span className="text-[10px] font-normal text-brand-text/60">papers</span>
+                    <div className="flex items-baseline gap-1 mt-0.5">
+                      <span className="text-base font-extrabold text-stone-900 leading-none">
+                        {cameraReadyOnlineEntries}
+                      </span>
+                      <span className="text-[11px] font-medium text-stone-500">papers</span>
                     </div>
                   </div>
-                  <div className="px-3 py-1.5 bg-stone-50/80">
-                    <div className="text-[10px] font-semibold uppercase tracking-wider text-brand-text/50">
+
+                  {/* Total */}
+                  <div className="px-3.5 py-2 bg-stone-50/70 flex flex-col justify-center">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-stone-500">
                       Total
                     </div>
-                    <div className="text-sm font-bold text-brand-text flex items-baseline gap-1">
-                      <span>{filteredCameraReady.length}</span>
-                      <span className="text-[10px] font-normal text-brand-text/60">papers</span>
+                    <div className="flex items-baseline gap-1 mt-0.5">
+                      <span className="text-base font-extrabold text-stone-900 leading-none">
+                        {filteredCameraReady.length}
+                      </span>
+                      <span className="text-[11px] font-medium text-stone-500">papers</span>
                     </div>
                   </div>
                 </div>
