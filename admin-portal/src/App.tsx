@@ -3245,10 +3245,13 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
 const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && s.payment_status !== 'APPROVED');
     const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES' && s.payment_status !== 'APPROVED');
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
-    const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED');
+    // Payments tab = accepted papers whose payment was approved, EXCLUDING the
+    // ones that have already submitted the Phase 2 package. Setting
+    // phase2_submitted_at moves a paper out of here and into Camera Ready, so a
+    // paper never sits in both tabs at once.
+    const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED' && !s.phase2_submitted_at);
     // The Camera Ready tab holds exactly the papers that have submitted the
-    // Phase 2 package — once phase2_submitted_at is set the paper leaves the
-    // Payments tab (above) and appears here.
+    // Phase 2 package (camera-ready + copyright + attendance + declaration).
     const cameraReadySubmissionsList = submissions.filter(s => !!s.phase2_submitted_at);
     const acceptedSubmissionsList = submissions.filter(s => (s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY') && s.payment_status !== 'APPROVED');
 
