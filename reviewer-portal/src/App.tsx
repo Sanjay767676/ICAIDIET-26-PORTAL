@@ -118,6 +118,70 @@ function UpdatedBadge() {
   );
 }
 
+// Camera-ready statuses are stored as ACCEPTED / MINOR_CHANGES / MAJOR_CHANGES /
+// NOT_ACCEPTED (with some rows also carrying the ACCEPTED_WITH_* spelling), so
+// map them onto the same four review decisions before labelling them.
+function normalizeCameraDecision(status?: string | null): ReviewDecision | null {
+  if (!status) return null;
+  if (status === 'ACCEPTED') return 'ACCEPTED';
+  if (status === 'MINOR_CHANGES' || status === 'ACCEPTED_WITH_MINOR_CHANGES') return 'ACCEPTED_WITH_MINOR_CHANGES';
+  if (status === 'MAJOR_CHANGES' || status === 'ACCEPTED_WITH_MAJOR_CHANGES') return 'ACCEPTED_WITH_MAJOR_CHANGES';
+  if (status === 'NOT_ACCEPTED' || status === 'REJECTED') return 'NOT_ACCEPTED';
+  return null;
+}
+
+// What the author has been told about this paper: the paper review round
+// (decision + feedback) and the camera-ready review comment. Shown in the
+// Camera Ready tab so comments are readable without opening each editor.
+const REVIEW_TONE: Record<string, string> = {
+  ACCEPTED: 'text-green-800 border-green-400',
+  ACCEPTED_WITH_MINOR_CHANGES: 'text-yellow-800 border-yellow-500',
+  ACCEPTED_WITH_MAJOR_CHANGES: 'text-orange-800 border-orange-500',
+  NOT_ACCEPTED: 'text-red-800 border-red-400',
+};
+
+function ReviewCommentsSummary({ sub, compact = false }: { sub: Submission; compact?: boolean }) {
+  const paperMeta = sub.review?.decision ? decisionMeta(sub.review.decision) : undefined;
+  const paperTone = (sub.review?.decision && REVIEW_TONE[sub.review.decision]) || 'text-brand-text border-brand-text/30';
+  const cameraDecision = normalizeCameraDecision(sub.camera_ready_status);
+  const cameraMeta = cameraDecision ? decisionMeta(cameraDecision) : undefined;
+  const cameraNeedsMajor = cameraDecision === 'ACCEPTED_WITH_MAJOR_CHANGES';
+  const bodyCls = compact ? 'mt-1 text-[11px] leading-snug whitespace-pre-wrap max-h-24 overflow-y-auto' : 'mt-1 text-xs leading-snug whitespace-pre-wrap';
+
+  if (!sub.review?.decision && !sub.review?.feedback && !sub.camera_ready_comments) {
+    return <span className="text-xs text-brand-text/40">No comments</span>;
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {(sub.review?.decision || sub.review?.feedback) && (
+        <div className={`rounded-lg border p-2 bg-white ${paperTone}`}>
+          <div className="text-[11px] font-semibold">
+            Paper review: {paperMeta?.label ?? sub.review?.decision ?? 'Comment'}
+          </div>
+          {sub.review?.feedback ? (
+            <div className={`${bodyCls} opacity-90`}>{sub.review.feedback}</div>
+          ) : (
+            <div className="mt-1 text-[11px] italic opacity-60">No comment text</div>
+          )}
+        </div>
+      )}
+      {sub.camera_ready_comments && (
+        <div
+          className={`rounded-lg border p-2 bg-white ${
+            cameraNeedsMajor ? 'text-red-800 border-red-400' : 'text-amber-800 border-amber-400'
+          }`}
+        >
+          <div className="text-[11px] font-semibold">
+            Camera-ready review{cameraMeta ? `: ${cameraMeta.label}` : ''}
+          </div>
+          <div className={`${bodyCls} opacity-90`}>{sub.camera_ready_comments}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function formatDate(iso: string) {
   if (!iso) return '';
   const d = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
@@ -1385,7 +1449,12 @@ export default function App() {
         />
 
         {/* View Camera Ready tab: papers whose authors submitted the Phase 2
-            package — Paper Title | Primary Author | Submitted On | Actions | More Actions */}
+            package — Paper Title | Primary Author | Submitted On | Actions |
+            Plagiarism | Review Comments | More Actions.
+            The Review Comments column repeats the paper review decision and
+            feedback (what the author sees in the user portal) plus the
+            camera-ready review comment, so a reviewer never has to leave this
+            tab to know why a paper came back. */}
         {activeTab === 'cameraReady' && (
           <>
             {/* Desktop table */}
@@ -1393,22 +1462,23 @@ export default function App() {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[22%] rounded-tl-xl">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Plagiarism</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%] rounded-tr-xl">More Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%] rounded-tl-xl">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Plagiarism</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[20%]">Review Comments</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%] rounded-tr-xl">More Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-accent/40">
                   {loading ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                      <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
                   ) : visible.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="py-8 text-center text-brand-text/60">
+                      <td colSpan={7} className="py-8 text-center text-brand-text/60">
                         {emptyMessage}
                       </td>
                     </tr>
@@ -1487,6 +1557,9 @@ export default function App() {
                                 <span className="text-xs text-brand-text/50">—</span>
                               )}
                             </div>
+                          </td>
+                          <td className="py-4 px-5 align-top">
+                            <ReviewCommentsSummary sub={sub} compact />
                           </td>
                           <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-br-xl' : ''}`}>
                             <CameraReadyReviewEditor
@@ -1567,6 +1640,13 @@ export default function App() {
                             <Eye className="w-3.5 h-3.5" /> View Paper
                           </button>
                         )}
+                      </div>
+
+                      <div className="mt-4 border-t-2 border-brand-accent/40 pt-3">
+                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">
+                          Review Comments
+                        </div>
+                        <ReviewCommentsSummary sub={sub} />
                       </div>
 
                       <div className="mt-4 border-t-2 border-brand-accent/40 pt-3">

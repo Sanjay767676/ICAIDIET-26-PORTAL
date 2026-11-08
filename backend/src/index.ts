@@ -2379,6 +2379,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               (SELECT COUNT(*) FROM authors a WHERE a.submission_id = s.id) AS author_count,
               (SELECT decision FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_decision,
               (SELECT feedback FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_feedback,
+              (SELECT resubmitted FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_resubmitted,
               (SELECT updated_at FROM reviews r WHERE r.submission_id = s.id ORDER BY r.updated_at DESC LIMIT 1) AS review_updated_at,
               (
                  (? = 1 AND (
@@ -2432,6 +2433,27 @@ const PHASE2_EDITABLE_REVIEW_STATUSES = new Set([
   'ACCEPTED_WITH_MAJOR_CHANGES',
 ]);
 
+// Latest decision recorded by the reviewer for one submission. The paper
+// review round is what the author sees in My Submissions, so it decides
+// whether file editing is still needed (changes requested) or finished
+// (ACCEPTED = the paper is final).
+async function latestReviewFor(db: D1Database, submissionId: string) {
+  const row = (await db
+    .prepare(
+      `SELECT decision, feedback, resubmitted FROM reviews WHERE submission_id = ? ORDER BY updated_at DESC LIMIT 1`
+    )
+    .bind(submissionId)
+    .first()) as { decision?: string | null; feedback?: string | null; resubmitted?: number | null } | null;
+  const decision = (row?.decision || '').toString().toUpperCase();
+  return {
+    decision,
+    feedback: row?.feedback || '',
+    // Resubmitted = the author already answered this decision by uploading
+    // corrected files, so editing is closed again pending re-review.
+    needsChanges: PHASE2_EDITABLE_REVIEW_STATUSES.has(decision) && row?.resubmitted !== 1,
+  };
+}
+
 // ------------------------------------------------------------------
 // User: Replace the files of the user's own submission.
 // Details (title, abstract, track, authors, paper ID) can never be
@@ -2451,20 +2473,6 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
     const editGate = userPortalGate(settings, c.get('clerkEmail') || '', 'edit');
     if (editGate) return c.json(editGate.body, editGate.status);
 
-    // Checked separately from maintenance so an admin can stop file replacement
-    // while still accepting new submissions. 403 rather than 503: the portal is
-    // up, this one action is closed.
-    if (!fileEditsAllowed(settings)) {
-      return c.json(
-        {
-          success: false,
-          error: 'File updates have been closed by the conference team. Please contact us if you need to make a correction.',
-          file_edits_enabled: false,
-        },
-        403
-      );
-    }
-
     const clerkUserId = c.get('clerkUserId') as string;
     const clerkEmail = (c.get('clerkEmail') || '').trim();
     const submissionId = c.req.param('id');
@@ -2482,14 +2490,47 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'You can only edit files of your own submission.' }, 403);
     }
 
+    // A reviewer asking for minor/major changes (on the paper or on the
+    // camera-ready package) reopens these files even while the admin has closed
+    // general file updates — the author cannot act on the feedback otherwise.
+    const latestReview = await latestReviewFor(c.env.DB, String(submissionId));
+    const changesRequested =
+      latestReview.needsChanges || PHASE2_EDITABLE_REVIEW_STATUSES.has(submission.camera_ready_status || '');
+
+    // An accepted paper is final: the reviewer signed it off, so the Edit Files
+    // button is gone and the API refuses replacements too.
+    if (latestReview.decision === 'ACCEPTED' && !changesRequested) {
+      return c.json(
+        {
+          success: false,
+          accepted: true,
+          error:
+            'This paper has been accepted, so its files can no longer be changed. Please contact the conference team if a correction is required.',
+        },
+        403
+      );
+    }
+
+    // Checked separately from maintenance so an admin can stop file replacement
+    // while still accepting new submissions. 403 rather than 503: the portal is
+    // up, this one action is closed.
+    if (!fileEditsAllowed(settings) && !changesRequested) {
+      return c.json(
+        {
+          success: false,
+          error: 'File updates have been closed by the conference team. Please contact us if you need to make a correction.',
+          file_edits_enabled: false,
+        },
+        403
+      );
+    }
+
     // The camera-ready package is final, so the manuscript / plagiarism PDFs are
     // frozen with it: replacing them here would silently change the paper an
     // admin is looking at in the Camera Ready tab. A reviewer's minor/major
     // change request reopens both the package and these files, and re-submitting
     // the package locks them again.
-    const phase2Locked =
-      !!submission.phase2_submitted_at &&
-      !PHASE2_EDITABLE_REVIEW_STATUSES.has(submission.camera_ready_status || '');
+    const phase2Locked = !!submission.phase2_submitted_at && !changesRequested;
     if (phase2Locked) {
       return c.json(
         {
@@ -2740,6 +2781,8 @@ async function preparePhase2Submission(
     phase2_submitted_at: string | null;
     camera_ready_status: string | null;
     camera_ready_reviewed_at: string | null;
+    paper_review_needs_changes?: boolean;
+    camera_review_needs_changes?: boolean;
   } | null;
   if (!submission) {
     return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
@@ -2749,11 +2792,16 @@ async function preparePhase2Submission(
     return { ok: false, res: c.json({ success: false, error: 'You can only upload files for your own submission.' }, 403) };
   }
   // Phase 2 is final once submitted, with one exception: if a reviewer asked
-  // for minor/major changes the author may upload corrected files again.
-  // Re-submitting clears the decision and locks the package until the next
-  // camera-ready review.
+  // for minor/major changes — on the paper review or on the camera-ready
+  // package — the author may upload corrected files again. Re-submitting
+  // clears the camera-ready decision and locks the package until the next
+  // review.
   const reviewStatus = submission.camera_ready_status || '';
-  const editingReopened = PHASE2_EDITABLE_REVIEW_STATUSES.has(reviewStatus);
+  const latestReview = await latestReviewFor(c.env.DB, submissionId);
+  const cameraReviewNeedsChanges = PHASE2_EDITABLE_REVIEW_STATUSES.has(reviewStatus);
+  const editingReopened = cameraReviewNeedsChanges || latestReview.needsChanges;
+  submission.paper_review_needs_changes = latestReview.needsChanges;
+  submission.camera_review_needs_changes = cameraReviewNeedsChanges;
   if (submission.phase2_submitted_at && !editingReopened) {
     return {
       ok: false,
@@ -2922,7 +2970,10 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     const eligible = phase2Open && accepted && paymentApproved;
     // Re-opened only while the reviewer's camera-ready decision asks for
     // minor/major changes; re-submitting clears it and locks the package.
-    const editableAfterReview = PHASE2_EDITABLE_REVIEW_STATUSES.has(submission.camera_ready_status || '');
+    const latestReview = await latestReviewFor(c.env.DB, submissionId);
+    const editableAfterReview =
+      PHASE2_EDITABLE_REVIEW_STATUSES.has(submission.camera_ready_status || '') ||
+      latestReview.needsChanges;
     const reason = !phase2Open
       ? 'The Phase 2 (camera-ready) window is not open yet.'
       : !accepted
@@ -2959,6 +3010,13 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
         status: submission.camera_ready_status || null,
         comments: submission.camera_ready_comments || null,
         reviewed_at: submission.camera_ready_reviewed_at || null,
+      },
+      // The paper-level review round, which also reopens editing when it asks
+      // for minor/major changes.
+      paper_review: {
+        decision: latestReview.decision || null,
+        feedback: latestReview.feedback || null,
+        needs_changes: latestReview.needsChanges,
       },
     });
   } catch (error) {
@@ -3053,14 +3111,25 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     if (!copyrightStored.ok) return copyrightStored.res;
 
     const isResubmission =
-      PHASE2_EDITABLE_REVIEW_STATUSES.has(submission?.camera_ready_status || '') ||
-      !!submission?.camera_ready_reviewed_at;
+      !!submission?.camera_review_needs_changes ||
+      !!submission?.camera_ready_reviewed_at ||
+      !!submission?.paper_review_needs_changes;
     const resubmittedFlag = isResubmission ? 1 : 0;
 
     const now = new Date().toISOString();
     await c.env.DB.prepare(
       `UPDATE submissions SET attendance_mode = ?, phase2_track = ?, phase2_head_count = ?, declaration_confirmed = 1, phase2_submitted_at = ?, camera_ready_status = NULL, camera_ready_comments = NULL, camera_ready_reviewed_at = NULL, camera_ready_reviewed_by = NULL, camera_ready_resubmitted = ?, updated_at = ? WHERE id = ?`
     ).bind(attendance, phase2Track, headCount, now, resubmittedFlag, now, submissionId).run();
+
+    // When the reopen came from the paper review round (not a camera-ready
+    // decision), this resubmission is the author's answer to that review: mark
+    // it resubmitted so editing closes and the paper returns to the reviewer's
+    // queue as an updated version.
+    if (submission?.paper_review_needs_changes && !submission?.camera_review_needs_changes) {
+      await c.env.DB.prepare(
+        `UPDATE reviews SET resubmitted = 1, updated_at = ? WHERE submission_id = ? AND resubmitted = 0`
+      ).bind(now, submissionId).run();
+    }
 
     return c.json({
       success: true,

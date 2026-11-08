@@ -3793,26 +3793,27 @@ Duplicates
               <table className="w-full">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[24%]">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[18%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Submitted On</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Count</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[17%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[11%]">Status</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Info</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[20%]">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[15%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[8%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[7%]">Count</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[15%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[10%]">Status</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[17%]">Review Comments</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider text-left w-[8%]">Info</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-text/10">
                   {loading && (
                     <tr>
-                      <td colSpan={7} className="py-10 text-center text-sm text-brand-text/60 flex items-center justify-center gap-2">
+                      <td colSpan={8} className="py-10 text-center text-sm text-brand-text/60 flex items-center justify-center gap-2">
                         <Loader2 className="w-4 h-4 animate-spin" /> Loading submissions...
                       </td>
                     </tr>
                   )}
                   {!loading && filteredCameraReady.length === 0 && (
                     <tr>
-                      <td colSpan={7} className="py-10 text-center text-sm text-brand-text/60">
+                      <td colSpan={8} className="py-10 text-center text-sm text-brand-text/60">
                         {cameraReadySubmissionsList.length === 0
                           ? 'No Phase 2 submissions yet. Papers appear here once their authors submit the camera-ready package.'
                           : 'No submissions match your search.'}
@@ -3829,6 +3830,13 @@ Duplicates
                         : s.phase2_submitted_at
                           ? { label: 'Submitted', cls: 'bg-amber-100 text-amber-800 border-amber-300' }
                           : null;
+                      // The paper review round (decision + comments) is separate
+                      // from the camera-ready review; the author sees both in the
+                      // user portal, so the admin must see both here too.
+                      const reviewMeta = s.review_decision ? REVIEW_DECISION_META[s.review_decision] : undefined;
+                      const cameraNeedsMajor =
+                        s.camera_ready_status === 'MAJOR_CHANGES' ||
+                        s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES';
                       return (
                         <tr key={s.id} className="hover:bg-brand-bg/30">
                           <td className="py-4 px-5 text-sm align-top">
@@ -3890,18 +3898,43 @@ Duplicates
                           </td>
                           <td className="py-4 px-5 align-top">
                             {cameraDecision ? (
-                              <div>
-                                <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
-                                  {cameraDecision.label}
-                                </span>
-                                {(cameraDecision.label === 'Major Changes' || s.camera_ready_status === 'MAJOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES') && s.camera_ready_comments && (
-                                  <div className="mt-2 text-xs text-red-900 bg-red-50 border border-red-200 rounded-lg p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">
-                                    {s.camera_ready_comments}
+                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
+                                {cameraDecision.label}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-brand-text/50">—</span>
+                            )}
+                          </td>
+                          <td className="py-4 px-5 align-top">
+                            {s.review_decision || s.review_feedback || s.camera_ready_comments ? (
+                              <div className="space-y-1.5">
+                                {(s.review_decision || s.review_feedback) && (
+                                  <div className={`rounded-lg border p-2 ${reviewMeta?.box ?? 'bg-amber-50 border-amber-300'}`}>
+                                    <div className={`text-[11px] font-semibold ${reviewMeta?.text ?? 'text-brand-text'}`}>
+                                      Reviewer: {reviewMeta?.label ?? (s.review_decision || 'Comment')}
+                                    </div>
+                                    {s.review_feedback ? (
+                                      <div className="mt-1 text-[11px] leading-snug text-brand-text/80 whitespace-pre-wrap max-h-24 overflow-y-auto">
+                                        {s.review_feedback}
+                                      </div>
+                                    ) : (
+                                      <div className="mt-1 text-[11px] italic text-brand-text/50">No comment text</div>
+                                    )}
+                                  </div>
+                                )}
+                                {s.camera_ready_comments && (
+                                  <div className={`rounded-lg border p-2 ${cameraNeedsMajor ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'}`}>
+                                    <div className={`text-[11px] font-semibold ${cameraNeedsMajor ? 'text-red-800' : 'text-amber-800'}`}>
+                                      Camera-ready review
+                                    </div>
+                                    <div className="mt-1 text-[11px] leading-snug text-brand-text/80 whitespace-pre-wrap max-h-24 overflow-y-auto">
+                                      {s.camera_ready_comments}
+                                    </div>
                                   </div>
                                 )}
                               </div>
                             ) : (
-                              <span className="text-xs text-brand-text/50">—</span>
+                              <span className="text-xs text-brand-text/40">No comments</span>
                             )}
                           </td>
                           <td className="py-4 px-5 align-top">
@@ -3941,6 +3974,10 @@ Duplicates
                     : s.phase2_submitted_at
                       ? { label: 'Submitted', cls: 'bg-amber-100 text-amber-800 border-amber-300' }
                       : null;
+                  const reviewMeta = s.review_decision ? REVIEW_DECISION_META[s.review_decision] : undefined;
+                  const cameraNeedsMajor =
+                    s.camera_ready_status === 'MAJOR_CHANGES' ||
+                    s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES';
                   return (
                     <div key={s.id} className="bg-white rounded-xl p-4 shadow-sm border border-brand-text/10 space-y-2">
                       <div className="font-semibold text-brand-text">{s.title}</div>
@@ -3966,6 +4003,34 @@ Duplicates
                                 TRACK_LABELS[s.phase2_track] || s.phase2_track.replace(/-/g, ' ')
                               }`
                             : ''}
+                        </div>
+                      )}
+                      {(s.review_decision || s.review_feedback || s.camera_ready_comments) && (
+                        <div className="space-y-1.5 pt-1">
+                          {(s.review_decision || s.review_feedback) && (
+                            <div className={`rounded-lg border p-2 ${reviewMeta?.box ?? 'bg-amber-50 border-amber-300'}`}>
+                              <div className={`text-[11px] font-semibold ${reviewMeta?.text ?? 'text-brand-text'}`}>
+                                Reviewer: {reviewMeta?.label ?? (s.review_decision || 'Comment')}
+                              </div>
+                              {s.review_feedback ? (
+                                <div className="mt-1 text-[11px] leading-snug text-brand-text/80 whitespace-pre-wrap">
+                                  {s.review_feedback}
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-[11px] italic text-brand-text/50">No comment text</div>
+                              )}
+                            </div>
+                          )}
+                          {s.camera_ready_comments && (
+                            <div className={`rounded-lg border p-2 ${cameraNeedsMajor ? 'bg-red-50 border-red-300' : 'bg-amber-50 border-amber-300'}`}>
+                              <div className={`text-[11px] font-semibold ${cameraNeedsMajor ? 'text-red-800' : 'text-amber-800'}`}>
+                                Camera-ready review
+                              </div>
+                              <div className="mt-1 text-[11px] leading-snug text-brand-text/80 whitespace-pre-wrap">
+                                {s.camera_ready_comments}
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
