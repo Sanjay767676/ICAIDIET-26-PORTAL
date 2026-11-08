@@ -133,49 +133,68 @@ function normalizeCameraDecision(status?: string | null): ReviewDecision | null 
 // What the author has been told about this paper: the paper review round
 // (decision + feedback) and the camera-ready review comment. Shown in the
 // Camera Ready tab so comments are readable without opening each editor.
-const REVIEW_TONE: Record<string, string> = {
-  ACCEPTED: 'text-green-800 border-green-400',
-  ACCEPTED_WITH_MINOR_CHANGES: 'text-yellow-800 border-yellow-500',
-  ACCEPTED_WITH_MAJOR_CHANGES: 'text-orange-800 border-orange-500',
-  NOT_ACCEPTED: 'text-red-800 border-red-400',
-};
+// The badge is the exact pill used by the Reviewed / Need Revision tabs
+// (see `decisionMeta` above) so the decision reads identically everywhere.
+function decisionIcon(d: ReviewDecision) {
+  return d === 'ACCEPTED' ? (
+    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+  ) : d === 'NOT_ACCEPTED' ? (
+    <XCircle className="w-3.5 h-3.5 shrink-0" />
+  ) : d === 'ACCEPTED_WITH_MINOR_CHANGES' ? (
+    <PenLine className="w-3.5 h-3.5 shrink-0" />
+  ) : (
+    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+  );
+}
+
+function DecisionPill({ decision, label }: { decision: ReviewDecision; label?: string }) {
+  const meta = decisionMeta(decision);
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 ${meta.cls}`}>
+      {decisionIcon(decision)} {label ? `${label}: ${meta.label}` : meta.label}
+    </span>
+  );
+}
 
 function ReviewCommentsSummary({ sub, compact = false }: { sub: Submission; compact?: boolean }) {
-  const paperMeta = sub.review?.decision ? decisionMeta(sub.review.decision) : undefined;
-  const paperTone = (sub.review?.decision && REVIEW_TONE[sub.review.decision]) || 'text-brand-text border-brand-text/30';
+  const paperDecision = sub.review?.decision;
   const cameraDecision = normalizeCameraDecision(sub.camera_ready_status);
-  const cameraMeta = cameraDecision ? decisionMeta(cameraDecision) : undefined;
-  const cameraNeedsMajor = cameraDecision === 'ACCEPTED_WITH_MAJOR_CHANGES';
-  const bodyCls = compact ? 'mt-1 text-[11px] leading-snug whitespace-pre-wrap max-h-24 overflow-y-auto' : 'mt-1 text-xs leading-snug whitespace-pre-wrap';
+  const bodyCls = compact
+    ? 'mt-1 text-[11px] leading-snug whitespace-pre-wrap max-h-24 overflow-y-auto text-brand-text/70'
+    : 'mt-1 text-xs leading-snug whitespace-pre-wrap text-brand-text/70';
 
-  if (!sub.review?.decision && !sub.review?.feedback && !sub.camera_ready_comments) {
+  if (!paperDecision && !sub.review?.feedback && !sub.camera_ready_comments) {
     return null;
   }
 
   return (
-    <div className="space-y-1.5">
-      {(sub.review?.decision || sub.review?.feedback) && (
-        <div className={`rounded-lg border p-2 bg-white ${paperTone}`}>
-          <div className="text-[11px] font-semibold">
-            Paper review: {paperMeta?.label ?? sub.review?.decision ?? 'Comment'}
-          </div>
+    <div className="space-y-2">
+      {(paperDecision || sub.review?.feedback) && (
+        <div>
+          {paperDecision ? (
+            <DecisionPill decision={paperDecision} label="Paper review" />
+          ) : (
+            <span className="inline-block text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 border-brand-text/15 text-brand-text/70">
+              Paper review
+            </span>
+          )}
           {sub.review?.feedback ? (
-            <div className={`${bodyCls} opacity-90`}>{sub.review.feedback}</div>
-          ) : sub.review?.decision && sub.review.decision !== 'ACCEPTED' ? (
-            <div className="mt-1 text-[11px] italic opacity-60">No comment text</div>
+            <div className={bodyCls}>{sub.review.feedback}</div>
+          ) : paperDecision && paperDecision !== 'ACCEPTED' ? (
+            <div className="mt-1 text-[11px] italic text-brand-text/50">No comment text</div>
           ) : null}
         </div>
       )}
       {sub.camera_ready_comments && (
-        <div
-          className={`rounded-lg border p-2 bg-white ${
-            cameraNeedsMajor ? 'text-red-800 border-red-400' : 'text-amber-800 border-amber-400'
-          }`}
-        >
-          <div className="text-[11px] font-semibold">
-            Camera-ready review{cameraMeta ? `: ${cameraMeta.label}` : ''}
-          </div>
-          <div className={`${bodyCls} opacity-90`}>{sub.camera_ready_comments}</div>
+        <div>
+          {cameraDecision ? (
+            <DecisionPill decision={cameraDecision} label="Camera ready" />
+          ) : (
+            <span className="inline-block text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 border-brand-text/15 text-brand-text/70">
+              Camera ready review
+            </span>
+          )}
+          <div className={bodyCls}>{sub.camera_ready_comments}</div>
         </div>
       )}
     </div>
