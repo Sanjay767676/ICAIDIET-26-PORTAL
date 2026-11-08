@@ -37,7 +37,6 @@ interface MySubmission {
   ai_plagiarism_file?: string | null;
   review_decision?: string | null;
   review_feedback?: string | null;
-  review_resubmitted?: number | null;
   review_updated_at?: string | null;
   registration_type?: string | null;
   author_type?: string | null;
@@ -181,7 +180,7 @@ function reviewBanner(sub: MySubmission) {
   const minor = decision === 'ACCEPTED_WITH_MINOR_CHANGES';
   const major = decision === 'ACCEPTED_WITH_MAJOR_CHANGES';
   const rejected = decision === 'NOT_ACCEPTED';
-  const needsChanges = (minor || major || rejected) && sub.review_resubmitted !== 1;
+  const needsChanges = minor || major || rejected;
   const decisionMeta = REVIEW_DECISION_META[decision];
   const heading = decisionMeta
     ? decisionMeta.label
@@ -203,18 +202,13 @@ function reviewBanner(sub: MySubmission) {
           Review Status: {heading}
         </span>
       </div>
-      {sub.review_feedback && (
+      {needsChanges && sub.review_feedback && (
         <p className="text-sm text-black/80 mt-2 leading-relaxed whitespace-pre-wrap">{sub.review_feedback}</p>
       )}
       {needsChanges && (
         <p className="text-xs text-black/60 mt-2">
           Please correct the paper based on the reviewer feedback, then use "Edit Files" to upload the revised
           files.
-        </p>
-      )}
-      {accepted && (
-        <p className="text-xs text-black/60 mt-2">
-          Your paper has been accepted by the reviewer. The paper files are final, so editing is closed.
         </p>
       )}
       {sub.review_updated_at && (
@@ -991,42 +985,6 @@ function initialFilesLocked(sub: MySubmission) {
   );
 }
 
-// Reviewer decisions that ask the author to fix something — on the paper or on
-// the camera-ready package. They reopen the file editors even when the admin has
-// closed general file updates. Mirrors PHASE2_EDITABLE_REVIEW_STATUSES in the
-// backend.
-const CHANGES_REQUESTED_DECISIONS = new Set([
-  'MINOR_CHANGES',
-  'MAJOR_CHANGES',
-  'ACCEPTED_WITH_MINOR_CHANGES',
-  'ACCEPTED_WITH_MAJOR_CHANGES',
-]);
-
-function changesRequested(sub: MySubmission) {
-  const paperNeedsChanges =
-    sub.review_resubmitted !== 1 &&
-    CHANGES_REQUESTED_DECISIONS.has((sub.review_decision || '').toUpperCase());
-  const cameraNeedsChanges = CHANGES_REQUESTED_DECISIONS.has(
-    (sub.camera_ready_status || '').toUpperCase()
-  );
-  return paperNeedsChanges || cameraNeedsChanges;
-}
-
-// ACCEPTED means the reviewer signed the paper off, so it is final from the
-// author's side and the Edit Files option is hidden.
-function acceptedByReviewer(sub: MySubmission) {
-  if (changesRequested(sub)) return false;
-  return (
-    (sub.review_decision || '').toUpperCase() === 'ACCEPTED' ||
-    (sub.camera_ready_status || '').toUpperCase() === 'ACCEPTED'
-  );
-}
-
-function canEditFiles(sub: MySubmission, fileEditsEnabled: boolean) {
-  if (initialFilesLocked(sub) || acceptedByReviewer(sub)) return false;
-  return fileEditsEnabled || changesRequested(sub);
-}
-
 // Payment form wrapper. Authors with more than one accepted paper pick which
 // one this payment settles, so the amount received always maps to one paper.
 // The inner form is keyed on the chosen id so switching papers resets the
@@ -1608,14 +1566,10 @@ export function MySubmissions({
                       )}
                     </div>
                     <div className="shrink-0">
-                      {!maintenanceMode && canEditFiles(sub, fileEditsEnabled) && (
+                      {!maintenanceMode && fileEditsEnabled && !initialFilesLocked(sub) && (
                         <button
                           onClick={() => setEditing(sub)}
-                          className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all shadow-sm hover:shadow ${
-                            changesRequested(sub) && !fileEditsEnabled
-                              ? 'bg-yellow-600 hover:bg-yellow-700'
-                              : 'bg-brand-text hover:bg-brand-accent'
-                          }`}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-brand-text hover:bg-brand-accent transition-all shadow-sm hover:shadow"
                         >
                           <Pencil className="w-3.5 h-3.5" /> Edit Files
                         </button>
@@ -1626,12 +1580,11 @@ export function MySubmissions({
                   {/* Camera-ready submitted and not sent back for changes: the
                       paper files are final, so the Edit Files button is gone and
                       this explains why. */}
-                  {!maintenanceMode && initialFilesLocked(sub) && !changesRequested(sub) && (
+                  {!maintenanceMode && initialFilesLocked(sub) && (
                     <div className="mt-3 text-xs text-stone-700 bg-stone-100 border border-stone-300 rounded-lg p-2.5">
-                      {acceptedByReviewer(sub)
-                        ? 'Your paper has been accepted and your camera-ready submission is final, so the paper files can no longer be changed.'
-                        : 'Your camera-ready submission is final, so the paper files can no longer be changed.'}{' '}
-                      The organizers will reopen them if the reviewer asks for minor or major changes.
+                      Your camera-ready submission is final, so the paper files can no longer be
+                      changed. The organizers will reopen them if the reviewer asks for minor or
+                      major changes.
                     </div>
                   )}
 
@@ -1644,15 +1597,7 @@ export function MySubmissions({
                     </div>
                   )}
 
-                  {!maintenanceMode && !fileEditsEnabled && changesRequested(sub) && (
-                    <div className="mt-3 text-xs text-yellow-900 bg-yellow-50 border border-yellow-300 rounded-lg p-2.5">
-                      The reviewer asked for changes to this paper, so file editing is open for it even
-                      though file updates are otherwise closed. Use <span className="font-semibold">Edit Files</span> to
-                      upload the corrected manuscript and plagiarism report.
-                    </div>
-                  )}
-
-                  {!maintenanceMode && !fileEditsEnabled && !changesRequested(sub) && !acceptedByReviewer(sub) && (
+                  {!maintenanceMode && !fileEditsEnabled && (
                     <div className="mt-3 text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg p-2.5">
                       File updates are closed for now. If you need to correct your paper, please contact the
                       conference team.
@@ -1908,7 +1853,7 @@ export function MySubmissions({
 
       {/* Guarded as well as the button: the endpoint is the real gate (it
           returns 403/409), this just avoids opening a form that cannot submit. */}
-      {editing && canEditFiles(editing, fileEditsEnabled) && (
+      {editing && fileEditsEnabled && !initialFilesLocked(editing) && (
         <EditFilesModal
           sub={editing}
           getToken={getToken}

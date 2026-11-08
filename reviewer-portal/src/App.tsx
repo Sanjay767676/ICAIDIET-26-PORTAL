@@ -118,89 +118,6 @@ function UpdatedBadge() {
   );
 }
 
-// Camera-ready statuses are stored as ACCEPTED / MINOR_CHANGES / MAJOR_CHANGES /
-// NOT_ACCEPTED (with some rows also carrying the ACCEPTED_WITH_* spelling), so
-// map them onto the same four review decisions before labelling them.
-function normalizeCameraDecision(status?: string | null): ReviewDecision | null {
-  if (!status) return null;
-  if (status === 'ACCEPTED') return 'ACCEPTED';
-  if (status === 'MINOR_CHANGES' || status === 'ACCEPTED_WITH_MINOR_CHANGES') return 'ACCEPTED_WITH_MINOR_CHANGES';
-  if (status === 'MAJOR_CHANGES' || status === 'ACCEPTED_WITH_MAJOR_CHANGES') return 'ACCEPTED_WITH_MAJOR_CHANGES';
-  if (status === 'NOT_ACCEPTED' || status === 'REJECTED') return 'NOT_ACCEPTED';
-  return null;
-}
-
-// What the author has been told about this paper: the paper review round
-// (decision + feedback) and the camera-ready review comment. Shown in the
-// Camera Ready tab so comments are readable without opening each editor.
-// The badge is the exact pill used by the Reviewed / Need Revision tabs
-// (see `decisionMeta` above) so the decision reads identically everywhere.
-function decisionIcon(d: ReviewDecision) {
-  return d === 'ACCEPTED' ? (
-    <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-  ) : d === 'NOT_ACCEPTED' ? (
-    <XCircle className="w-3.5 h-3.5 shrink-0" />
-  ) : d === 'ACCEPTED_WITH_MINOR_CHANGES' ? (
-    <PenLine className="w-3.5 h-3.5 shrink-0" />
-  ) : (
-    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-  );
-}
-
-function DecisionPill({ decision, label }: { decision: ReviewDecision; label?: string }) {
-  const meta = decisionMeta(decision);
-  return (
-    <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 ${meta.cls}`}>
-      {decisionIcon(decision)} {label ? `${label}: ${meta.label}` : meta.label}
-    </span>
-  );
-}
-
-function ReviewCommentsSummary({ sub, compact = false }: { sub: Submission; compact?: boolean }) {
-  const paperDecision = sub.review?.decision;
-  const cameraDecision = normalizeCameraDecision(sub.camera_ready_status);
-  const bodyCls = compact
-    ? 'mt-1 text-[11px] leading-snug whitespace-pre-wrap max-h-24 overflow-y-auto text-brand-text/70'
-    : 'mt-1 text-xs leading-snug whitespace-pre-wrap text-brand-text/70';
-
-  if (!paperDecision && !sub.review?.feedback && !sub.camera_ready_comments) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-2">
-      {(paperDecision || sub.review?.feedback) && (
-        <div>
-          {paperDecision ? (
-            <DecisionPill decision={paperDecision} label="Paper review" />
-          ) : (
-            <span className="inline-block text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 border-brand-text/15 text-brand-text/70">
-              Paper review
-            </span>
-          )}
-          {sub.review?.feedback ? (
-            <div className={bodyCls}>{sub.review.feedback}</div>
-          ) : paperDecision && paperDecision !== 'ACCEPTED' ? (
-            <div className="mt-1 text-[11px] italic text-brand-text/50">No comment text</div>
-          ) : null}
-        </div>
-      )}
-      {sub.camera_ready_comments && (
-        <div>
-          {cameraDecision ? (
-            <DecisionPill decision={cameraDecision} label="Camera ready" />
-          ) : (
-            <span className="inline-block text-xs font-medium px-2.5 py-1.5 rounded-lg border-2 border-brand-text/15 text-brand-text/70">
-              Camera ready review
-            </span>
-          )}
-          <div className={bodyCls}>{sub.camera_ready_comments}</div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function formatDate(iso: string) {
   if (!iso) return '';
   const d = new Date(iso.endsWith('Z') ? iso : `${iso}Z`);
@@ -1223,18 +1140,6 @@ export default function App() {
       return matchSearch && matchTrack && matchPaper;
     });
 
-  // Camera Ready tab ordering: papers still to look at first, accepted ones at
-  // the bottom. A paper is "accepted" when the camera-ready review says so, or
-  // (before any camera-ready decision) when the paper review was accepted.
-  const cameraReadyRank = (s: Submission) => {
-    const accepted =
-      s.camera_ready_status === 'ACCEPTED' ||
-      (!s.camera_ready_status && s.review?.decision === 'ACCEPTED');
-    if (accepted) return 3;
-    if (s.camera_ready_resubmitted === 1) return 0;
-    return !s.camera_ready_status ? 1 : 2;
-  };
-
   const baseVisible = (activeTab === 'pending'
     ? submissions.filter((s) => !s.review)
     : activeTab === 'notAccepted'
@@ -1245,8 +1150,8 @@ export default function App() {
     .slice()
     .sort((a, b) => {
       if (activeTab === 'cameraReady') {
-        const rankA = cameraReadyRank(a);
-        const rankB = cameraReadyRank(b);
+        const rankA = a.camera_ready_status === 'ACCEPTED' ? 3 : (a.camera_ready_resubmitted === 1 ? 0 : (!a.camera_ready_status ? 1 : 2));
+        const rankB = b.camera_ready_status === 'ACCEPTED' ? 3 : (b.camera_ready_resubmitted === 1 ? 0 : (!b.camera_ready_status ? 1 : 2));
         if (rankA !== rankB) return rankA - rankB;
         return (b.phase2_submitted_at || '').localeCompare(a.phase2_submitted_at || '');
       }
@@ -1480,11 +1385,7 @@ export default function App() {
         />
 
         {/* View Camera Ready tab: papers whose authors submitted the Phase 2
-            package — Paper Title | Primary Author | Submitted On | Actions |
-            Plagiarism | More Actions. The More Actions cell shows the paper
-            review decision and its comments above the camera-ready review
-            editor, so a reviewer never has to leave this tab to know why a
-            paper came back. */}
+            package — Paper Title | Primary Author | Submitted On | Actions | More Actions */}
         {activeTab === 'cameraReady' && (
           <>
             {/* Desktop table */}
@@ -1588,17 +1489,14 @@ export default function App() {
                             </div>
                           </td>
                           <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-br-xl' : ''}`}>
-                            <div className="space-y-2">
-                              <ReviewCommentsSummary sub={sub} compact />
-                              <CameraReadyReviewEditor
-                                sub={sub}
-                                token={token}
-                                onSaved={(subId, review, fallbackComments) =>
-                                  applyCameraReadyReview(subId, review, fallbackComments)
-                                }
-                                onError={setError}
-                              />
-                            </div>
+                            <CameraReadyReviewEditor
+                              sub={sub}
+                              token={token}
+                              onSaved={(subId, review, fallbackComments) =>
+                                applyCameraReadyReview(subId, review, fallbackComments)
+                              }
+                              onError={setError}
+                            />
                           </td>
                         </tr>
                       );
@@ -1671,8 +1569,7 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="mt-4 border-t-2 border-brand-accent/40 pt-3 space-y-3">
-                        <ReviewCommentsSummary sub={sub} />
+                      <div className="mt-4 border-t-2 border-brand-accent/40 pt-3">
                         <CameraReadyReviewEditor
                           sub={sub}
                           token={token}

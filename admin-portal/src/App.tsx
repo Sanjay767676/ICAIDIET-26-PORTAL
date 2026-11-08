@@ -109,6 +109,18 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
   REVISION_REQUIRED: { label: 'Revision Required', cls: 'bg-purple-100 text-purple-800' },
 };
 
+// Reviewer-side decisions, shown in the Status column of the Camera Ready tab
+// (per the requirement, that column carries the review status, not payment).
+const PHASE2_REVIEW_META: Record<string, { label: string; cls: string }> = {
+  ACCEPTED: { label: 'Accepted', cls: 'bg-green-100 text-green-800 border-green-300' },
+  ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
+  ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+  REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800 border-red-300' },
+  // The reviewer's camera-ready decision (separate from the paper decision).
+  MINOR_CHANGES: { label: 'Camera Ready: Minor Changes', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
+  MAJOR_CHANGES: { label: 'Camera Ready: Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+};
+
 // The eight conference tracks, keyed exactly as stored in the database.
 const TRACK_LABELS: Record<string, string> = {
   'ai-intelligent-systems': 'Artificial Intelligence & Intelligent Systems',
@@ -146,10 +158,6 @@ const REVIEW_DECISION_META: Record<string, { label: string; box: string; text: s
   ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', box: 'bg-yellow-50 border-yellow-300', text: 'text-yellow-800' },
   ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', box: 'bg-orange-50 border-orange-300', text: 'text-orange-800' },
   NOT_ACCEPTED: { label: 'Not Accepted', box: 'bg-red-50 border-red-300', text: 'text-red-800' },
-  // The camera-ready review round is stored with its own spelling
-  // (MINOR_CHANGES / MAJOR_CHANGES); map it onto the same badge.
-  MINOR_CHANGES: { label: 'Minor Changes', box: 'bg-yellow-50 border-yellow-300', text: 'text-yellow-800' },
-  MAJOR_CHANGES: { label: 'Major Changes', box: 'bg-orange-50 border-orange-300', text: 'text-orange-800' },
 };
 
 function reviewBadge(decision?: string | null, updatedAt?: string | null) {
@@ -3814,13 +3822,13 @@ Duplicates
                   {!loading &&
                     filteredCameraReady.map((s) => {
                       const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
-                      // Same Status rendering as the Accepted / Minor / Major
-                      // tabs: the reviewer's decision badge with their comments
-                      // underneath. A separate camera-ready decision (if the
-                      // reviewer already reviewed the camera-ready package) is
-                      // shown under it, because it is a different round.
-                      const hasPaperReview = !!(s.review_decision || s.review_feedback);
-                      const hasCameraReview = !!s.camera_ready_status;
+                      // Camera Ready tab shows the camera-ready review status only.
+                      // Until the reviewer updates it, show "Submitted".
+                      const cameraDecision = s.camera_ready_status
+                        ? PHASE2_REVIEW_META[s.camera_ready_status]
+                        : s.phase2_submitted_at
+                          ? { label: 'Submitted', cls: 'bg-amber-100 text-amber-800 border-amber-300' }
+                          : null;
                       return (
                         <tr key={s.id} className="hover:bg-brand-bg/30">
                           <td className="py-4 px-5 text-sm align-top">
@@ -3881,46 +3889,19 @@ Duplicates
                             </div>
                           </td>
                           <td className="py-4 px-5 align-top">
-                            {hasPaperReview ? (
-                              <>
-                                {reviewBadge(s.review_decision, s.review_updated_at)}
-                                {s.review_resubmitted === 1 && (
-                                  <div className="mt-1.5"><UpdatedBadge /></div>
-                                )}
-                                {s.review_feedback && (
-                                  <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5 max-h-24 overflow-y-auto">
-                                    {s.review_feedback}
-                                  </p>
-                                )}
-                              </>
-                            ) : hasCameraReview ? (
-                              <>
-                                {reviewBadge(s.camera_ready_status, null)}
-                                {s.camera_ready_comments && (
-                                  <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5 max-h-24 overflow-y-auto">
+                            {cameraDecision ? (
+                              <div>
+                                <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
+                                  {cameraDecision.label}
+                                </span>
+                                {(cameraDecision.label === 'Major Changes' || s.camera_ready_status === 'MAJOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES') && s.camera_ready_comments && (
+                                  <div className="mt-2 text-xs text-red-900 bg-red-50 border border-red-200 rounded-lg p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">
                                     {s.camera_ready_comments}
-                                  </p>
+                                  </div>
                                 )}
-                              </>
-                            ) : s.phase2_submitted_at ? (
-                              <div className="rounded-lg border px-2.5 py-1.5 bg-amber-50 border-amber-300">
-                                <div className="text-xs font-semibold text-amber-800">Submitted</div>
                               </div>
                             ) : (
                               <span className="text-xs text-brand-text/50">—</span>
-                            )}
-                            {hasPaperReview && hasCameraReview && (
-                              <div className="mt-2 pt-2 border-t border-brand-text/10">
-                                <div className="text-[10px] uppercase tracking-wide text-brand-text/50 font-semibold mb-1">
-                                  Camera-ready review
-                                </div>
-                                {reviewBadge(s.camera_ready_status, null)}
-                                {s.camera_ready_comments && (
-                                  <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5 max-h-24 overflow-y-auto">
-                                    {s.camera_ready_comments}
-                                  </p>
-                                )}
-                              </div>
                             )}
                           </td>
                           <td className="py-4 px-5 align-top">
@@ -3955,8 +3936,11 @@ Duplicates
               {!loading &&
                 filteredCameraReady.map((s) => {
                   const primary = (s.authors || []).find((a) => a.is_primary) || (s.authors || [])[0];
-                  const hasPaperReview = !!(s.review_decision || s.review_feedback);
-                  const hasCameraReview = !!s.camera_ready_status;
+                  const cameraDecision = s.camera_ready_status
+                    ? PHASE2_REVIEW_META[s.camera_ready_status]
+                    : s.phase2_submitted_at
+                      ? { label: 'Submitted', cls: 'bg-amber-100 text-amber-800 border-amber-300' }
+                      : null;
                   return (
                     <div key={s.id} className="bg-white rounded-xl p-4 shadow-sm border border-brand-text/10 space-y-2">
                       <div className="font-semibold text-brand-text">{s.title}</div>
@@ -3984,48 +3968,6 @@ Duplicates
                             : ''}
                         </div>
                       )}
-                      {hasPaperReview ? (
-                        <div className="space-y-1.5 pt-1">
-                          <div className="text-xs text-brand-text/60">Status</div>
-                          {reviewBadge(s.review_decision, s.review_updated_at)}
-                          {s.review_resubmitted === 1 && <UpdatedBadge />}
-                          {s.review_feedback && (
-                            <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap">
-                              {s.review_feedback}
-                            </p>
-                          )}
-                        </div>
-                      ) : hasCameraReview ? (
-                        <div className="space-y-1.5 pt-1">
-                          <div className="text-xs text-brand-text/60">Status</div>
-                          {reviewBadge(s.camera_ready_status, null)}
-                          {s.camera_ready_comments && (
-                            <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap">
-                              {s.camera_ready_comments}
-                            </p>
-                          )}
-                        </div>
-                      ) : s.phase2_submitted_at ? (
-                        <div className="pt-1">
-                          <div className="text-xs text-brand-text/60 mb-1">Status</div>
-                          <div className="rounded-lg border px-2.5 py-1.5 bg-amber-50 border-amber-300 inline-block">
-                            <div className="text-xs font-semibold text-amber-800">Submitted</div>
-                          </div>
-                        </div>
-                      ) : null}
-                      {hasPaperReview && hasCameraReview && (
-                        <div className="pt-1">
-                          <div className="text-[10px] uppercase tracking-wide text-brand-text/50 font-semibold mb-1">
-                            Camera-ready review
-                          </div>
-                          {reviewBadge(s.camera_ready_status, null)}
-                          {s.camera_ready_comments && (
-                            <p className="text-xs text-brand-text/70 leading-relaxed whitespace-pre-wrap mt-1.5">
-                              {s.camera_ready_comments}
-                            </p>
-                          )}
-                        </div>
-                      )}
                       <div className="flex flex-wrap items-center gap-1.5 pt-1">
                         <button
                           onClick={() => openPdf(s.id, 'camera_ready', s.camera_ready_file || 'camera-ready.pdf')}
@@ -4047,6 +3989,11 @@ Duplicates
                         >
                           View Info
                         </button>
+                        {cameraDecision && (
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
+                            {cameraDecision.label}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );

@@ -52,13 +52,6 @@ interface Phase2Status {
     comments: string | null;
     reviewed_at: string | null;
   } | null;
-  // Latest paper-level review round. When it asks for minor/major changes it
-  // also reopens the Phase 2 package for resubmission.
-  paper_review?: {
-    decision: string | null;
-    feedback: string | null;
-    needs_changes: boolean;
-  } | null;
 }
 
 interface Phase2PageProps {
@@ -342,14 +335,6 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
     </div>
   );
 
-  const cameraStatus = status?.camera_ready_review?.status || null;
-  const cameraNeedsChanges =
-    cameraStatus === 'MINOR_CHANGES' ||
-    cameraStatus === 'MAJOR_CHANGES' ||
-    cameraStatus === 'ACCEPTED_WITH_MINOR_CHANGES' ||
-    cameraStatus === 'ACCEPTED_WITH_MAJOR_CHANGES';
-  const paperNeedsChanges = !!status?.paper_review?.needs_changes;
-
   return (
     <div className="container mx-auto px-4 py-10 max-w-3xl">
       <button
@@ -495,32 +480,7 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
               the comments when minor changes were requested (the author is
               prompted to update the files using the form below). */}
           {status.submitted && (
-            <div className="mt-8 space-y-4">
-              {/* Paper-level review asking for changes also reopens this
-                  package, so show what the reviewer asked for. */}
-              {paperNeedsChanges && !cameraNeedsChanges && (
-                <div className="rounded-2xl border-2 border-orange-400 bg-orange-50 p-4">
-                  <div className="font-bold text-orange-900 text-sm">
-                    Reviewer Requested Changes
-                    {status.paper_review?.decision === 'ACCEPTED_WITH_MAJOR_CHANGES'
-                      ? ' · Major'
-                      : status.paper_review?.decision === 'ACCEPTED_WITH_MINOR_CHANGES'
-                      ? ' · Minor'
-                      : ''}
-                  </div>
-                  <p className="text-xs text-orange-800 mt-0.5 leading-relaxed">
-                    Editing is reopened for this paper. Update the camera-ready manuscript and
-                    copyright form below, and use <span className="font-semibold">Edit Files</span> in
-                    My Submissions if the manuscript or plagiarism reports also need correcting, then
-                    submit the Phase 2 form again.
-                  </p>
-                  {status.paper_review?.feedback && (
-                    <div className="mt-2.5 text-sm bg-white border border-orange-200 rounded-xl p-3 whitespace-pre-wrap text-orange-900">
-                      {status.paper_review.feedback}
-                    </div>
-                  )}
-                </div>
-              )}
+            <div className="mt-8">
               {status.camera_ready_review?.status === 'ACCEPTED' ? (
                 <div className="rounded-2xl border-2 border-green-300 bg-green-50 p-4 flex items-start gap-3">
                   <CheckCircle2 className="w-5 h-5 text-green-700 shrink-0 mt-0.5" />
