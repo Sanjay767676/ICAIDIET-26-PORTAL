@@ -149,7 +149,7 @@ function ReviewCommentsSummary({ sub, compact = false }: { sub: Submission; comp
   const bodyCls = compact ? 'mt-1 text-[11px] leading-snug whitespace-pre-wrap max-h-24 overflow-y-auto' : 'mt-1 text-xs leading-snug whitespace-pre-wrap';
 
   if (!sub.review?.decision && !sub.review?.feedback && !sub.camera_ready_comments) {
-    return <span className="text-xs text-brand-text/40">No comments</span>;
+    return null;
   }
 
   return (
@@ -161,9 +161,9 @@ function ReviewCommentsSummary({ sub, compact = false }: { sub: Submission; comp
           </div>
           {sub.review?.feedback ? (
             <div className={`${bodyCls} opacity-90`}>{sub.review.feedback}</div>
-          ) : (
+          ) : sub.review?.decision && sub.review.decision !== 'ACCEPTED' ? (
             <div className="mt-1 text-[11px] italic opacity-60">No comment text</div>
-          )}
+          ) : null}
         </div>
       )}
       {sub.camera_ready_comments && (
@@ -1204,6 +1204,18 @@ export default function App() {
       return matchSearch && matchTrack && matchPaper;
     });
 
+  // Camera Ready tab ordering: papers still to look at first, accepted ones at
+  // the bottom. A paper is "accepted" when the camera-ready review says so, or
+  // (before any camera-ready decision) when the paper review was accepted.
+  const cameraReadyRank = (s: Submission) => {
+    const accepted =
+      s.camera_ready_status === 'ACCEPTED' ||
+      (!s.camera_ready_status && s.review?.decision === 'ACCEPTED');
+    if (accepted) return 3;
+    if (s.camera_ready_resubmitted === 1) return 0;
+    return !s.camera_ready_status ? 1 : 2;
+  };
+
   const baseVisible = (activeTab === 'pending'
     ? submissions.filter((s) => !s.review)
     : activeTab === 'notAccepted'
@@ -1214,8 +1226,8 @@ export default function App() {
     .slice()
     .sort((a, b) => {
       if (activeTab === 'cameraReady') {
-        const rankA = a.camera_ready_status === 'ACCEPTED' ? 3 : (a.camera_ready_resubmitted === 1 ? 0 : (!a.camera_ready_status ? 1 : 2));
-        const rankB = b.camera_ready_status === 'ACCEPTED' ? 3 : (b.camera_ready_resubmitted === 1 ? 0 : (!b.camera_ready_status ? 1 : 2));
+        const rankA = cameraReadyRank(a);
+        const rankB = cameraReadyRank(b);
         if (rankA !== rankB) return rankA - rankB;
         return (b.phase2_submitted_at || '').localeCompare(a.phase2_submitted_at || '');
       }
@@ -1450,11 +1462,10 @@ export default function App() {
 
         {/* View Camera Ready tab: papers whose authors submitted the Phase 2
             package — Paper Title | Primary Author | Submitted On | Actions |
-            Plagiarism | Review Comments | More Actions.
-            The Review Comments column repeats the paper review decision and
-            feedback (what the author sees in the user portal) plus the
-            camera-ready review comment, so a reviewer never has to leave this
-            tab to know why a paper came back. */}
+            Plagiarism | More Actions. The More Actions cell shows the paper
+            review decision and its comments above the camera-ready review
+            editor, so a reviewer never has to leave this tab to know why a
+            paper came back. */}
         {activeTab === 'cameraReady' && (
           <>
             {/* Desktop table */}
@@ -1462,23 +1473,22 @@ export default function App() {
               <table className="w-full text-left border-collapse table-fixed">
                 <thead>
                   <tr className="bg-brand-bg/60 border-b-2 border-brand-accent">
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%] rounded-tl-xl">Paper Title</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%]">Primary Author</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[10%]">Submitted On</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[14%]">Actions</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Plagiarism</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[20%]">Review Comments</th>
-                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[13%] rounded-tr-xl">More Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[22%] rounded-tl-xl">Paper Title</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Primary Author</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[12%]">Submitted On</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[18%]">Actions</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%]">Plagiarism</th>
+                    <th className="py-4 px-5 font-semibold text-sm text-brand-text uppercase tracking-wider w-[16%] rounded-tr-xl">More Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-brand-accent/40">
                   {loading ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
+                      <td colSpan={6} className="py-8 text-center text-brand-text/60">Loading submissions...</td>
                     </tr>
                   ) : visible.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-brand-text/60">
+                      <td colSpan={6} className="py-8 text-center text-brand-text/60">
                         {emptyMessage}
                       </td>
                     </tr>
@@ -1558,18 +1568,18 @@ export default function App() {
                               )}
                             </div>
                           </td>
-                          <td className="py-4 px-5 align-top">
-                            <ReviewCommentsSummary sub={sub} compact />
-                          </td>
                           <td className={`py-4 px-5 align-top ${idx === visible.length - 1 ? 'rounded-br-xl' : ''}`}>
-                            <CameraReadyReviewEditor
-                              sub={sub}
-                              token={token}
-                              onSaved={(subId, review, fallbackComments) =>
-                                applyCameraReadyReview(subId, review, fallbackComments)
-                              }
-                              onError={setError}
-                            />
+                            <div className="space-y-2">
+                              <ReviewCommentsSummary sub={sub} compact />
+                              <CameraReadyReviewEditor
+                                sub={sub}
+                                token={token}
+                                onSaved={(subId, review, fallbackComments) =>
+                                  applyCameraReadyReview(subId, review, fallbackComments)
+                                }
+                                onError={setError}
+                              />
+                            </div>
                           </td>
                         </tr>
                       );
@@ -1642,14 +1652,8 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="mt-4 border-t-2 border-brand-accent/40 pt-3">
-                        <div className="text-xs text-brand-text/50 font-medium uppercase tracking-wide mb-1.5">
-                          Review Comments
-                        </div>
+                      <div className="mt-4 border-t-2 border-brand-accent/40 pt-3 space-y-3">
                         <ReviewCommentsSummary sub={sub} />
-                      </div>
-
-                      <div className="mt-4 border-t-2 border-brand-accent/40 pt-3">
                         <CameraReadyReviewEditor
                           sub={sub}
                           token={token}
