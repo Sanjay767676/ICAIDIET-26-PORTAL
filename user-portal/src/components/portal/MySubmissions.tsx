@@ -1569,13 +1569,38 @@ export function MySubmissions({
                       )}
                     </div>
                     <div className="shrink-0">
-                      {!maintenanceMode && fileEditsEnabled && !initialFilesLocked(sub) && (
-                        <button
-                          onClick={() => setEditing(sub)}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-brand-text hover:bg-brand-accent transition-all shadow-sm hover:shadow"
-                        >
-                          <Pencil className="w-3.5 h-3.5" /> Edit Files
-                        </button>
+                      {!initialFilesLocked(sub) && (
+                        maintenanceMode ? (
+                          <button
+                            type="button"
+                            disabled
+                            title={
+                              maintenanceUntil
+                                ? `File updates are disabled during maintenance (expected back online ${new Date(maintenanceUntil).toLocaleString()})`
+                                : 'File updates are disabled during maintenance'
+                            }
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-stone-400 bg-stone-200 cursor-not-allowed shadow-none"
+                          >
+                            <Pencil className="w-3.5 h-3.5" /> Edit Files
+                          </button>
+                        ) : !fileEditsEnabled ? (
+                          <button
+                            type="button"
+                            disabled
+                            title="File updates are currently closed"
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-stone-400 bg-stone-200 cursor-not-allowed shadow-none"
+                          >
+                            <Pencil className="w-3.5 h-3.5" /> Edit Files
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setEditing(sub)}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-brand-text hover:bg-brand-accent transition-all shadow-sm hover:shadow"
+                          >
+                            <Pencil className="w-3.5 h-3.5" /> Edit Files
+                          </button>
+                        )
                       )}
                     </div>
                   </div>
