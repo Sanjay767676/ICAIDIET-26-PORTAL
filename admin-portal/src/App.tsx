@@ -2466,6 +2466,7 @@ export default function App() {
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
   const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'cameraReady' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [paymentViewMode, setPaymentViewMode] = useState<'list' | 'dashboard'>('list');
+  const [paymentPhase2SubFilter, setPaymentPhase2SubFilter] = useState<'all' | 'pending' | 'submitted'>('all');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
@@ -3276,11 +3277,14 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
 const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && s.payment_status !== 'APPROVED');
     const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES' && s.payment_status !== 'APPROVED');
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
-    // Payments tab = accepted papers whose payment was approved, EXCLUDING the
-    // ones that have already submitted the Phase 2 package. Setting
-    // phase2_submitted_at moves a paper out of here and into Camera Ready, so a
-    // paper never sits in both tabs at once.
-    const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED' && !s.phase2_submitted_at);
+    // All papers whose payment was approved by admin (total conference paid registrations).
+    const allApprovedPaymentsList = submissions.filter(s => s.payment_status === 'APPROVED');
+    // Payments list tab: filtered by Phase 2 status if admin selects a pill ('all' by default)
+    const paymentsSubmissionsList = allApprovedPaymentsList.filter(s => {
+      if (paymentPhase2SubFilter === 'pending') return !s.phase2_submitted_at;
+      if (paymentPhase2SubFilter === 'submitted') return !!s.phase2_submitted_at;
+      return true;
+    });
     // The Camera Ready tab holds exactly the papers that have submitted the
     // Phase 2 package (camera-ready + copyright + attendance + declaration).
     const cameraReadySubmissionsList = submissions.filter(s => !!s.phase2_submitted_at);
@@ -3332,7 +3336,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
       (s) => s.attendance_mode === 'ONLINE'
     ).length;
     
-    const paymentDates = Array.from(new Set(paymentsSubmissionsList.map(s => {
+    const paymentDates = Array.from(new Set(allApprovedPaymentsList.map(s => {
       if (!s.payment_submitted_at) return '';
       return s.payment_submitted_at.split('T')[0];
     }).filter(Boolean))).sort((a, b) => b.localeCompare(a));
@@ -3484,9 +3488,9 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'payments' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
                 >
                   Payments
-                  {paymentsSubmissionsList.length > 0 && (
+                  {allApprovedPaymentsList.length > 0 && (
                     <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'payments' ? 'bg-green-500 text-white' : 'bg-green-600 text-white'}`}>
-                      {paymentsSubmissionsList.length}
+                      {allApprovedPaymentsList.length}
                     </span>
                   )}
                 </button>
@@ -3662,32 +3666,70 @@ Duplicates
 
         {activeTab === 'payments' && (
           <div className="space-y-4">
-            <div className="flex border-b border-brand-text/10 mb-4">
-              <button
-                onClick={() => setPaymentViewMode('list')}
-                className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-                  paymentViewMode === 'list'
-                    ? 'border-brand-accent text-brand-text'
-                    : 'border-transparent text-brand-text/60 hover:text-brand-text'
-                }`}
-              >
-                Payments List
-              </button>
-              <button
-                onClick={() => setPaymentViewMode('dashboard')}
-                className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
-                  paymentViewMode === 'dashboard'
-                    ? 'border-brand-accent text-brand-text'
-                    : 'border-transparent text-brand-text/60 hover:text-brand-text'
-                }`}
-              >
-                Dashboard
-              </button>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-brand-text/10 mb-4 pb-2">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPaymentViewMode('list')}
+                  className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                    paymentViewMode === 'list'
+                      ? 'border-brand-accent text-brand-text'
+                      : 'border-transparent text-brand-text/60 hover:text-brand-text'
+                  }`}
+                >
+                  Payments List
+                </button>
+                <button
+                  onClick={() => setPaymentViewMode('dashboard')}
+                  className={`px-4 py-2 text-sm font-semibold border-b-2 transition-colors ${
+                    paymentViewMode === 'dashboard'
+                      ? 'border-brand-accent text-brand-text'
+                      : 'border-transparent text-brand-text/60 hover:text-brand-text'
+                  }`}
+                >
+                  Dashboard
+                </button>
+              </div>
+
+              {paymentViewMode === 'list' && (
+                <div className="flex items-center gap-1.5 text-xs">
+                  <span className="text-brand-text/60 font-medium mr-1">Phase 2:</span>
+                  <button
+                    onClick={() => setPaymentPhase2SubFilter('all')}
+                    className={`px-2.5 py-1 rounded-full font-medium transition-colors ${
+                      paymentPhase2SubFilter === 'all'
+                        ? 'bg-brand-text text-white'
+                        : 'bg-stone-100 text-brand-text/70 hover:bg-stone-200'
+                    }`}
+                  >
+                    All ({allApprovedPaymentsList.length})
+                  </button>
+                  <button
+                    onClick={() => setPaymentPhase2SubFilter('pending')}
+                    className={`px-2.5 py-1 rounded-full font-medium transition-colors ${
+                      paymentPhase2SubFilter === 'pending'
+                        ? 'bg-brand-text text-white'
+                        : 'bg-stone-100 text-brand-text/70 hover:bg-stone-200'
+                    }`}
+                  >
+                    Pending Phase 2 ({allApprovedPaymentsList.filter(s => !s.phase2_submitted_at).length})
+                  </button>
+                  <button
+                    onClick={() => setPaymentPhase2SubFilter('submitted')}
+                    className={`px-2.5 py-1 rounded-full font-medium transition-colors ${
+                      paymentPhase2SubFilter === 'submitted'
+                        ? 'bg-brand-text text-white'
+                        : 'bg-stone-100 text-brand-text/70 hover:bg-stone-200'
+                    }`}
+                  >
+                    Phase 2 Submitted ({allApprovedPaymentsList.filter(s => !!s.phase2_submitted_at).length})
+                  </button>
+                </div>
+              )}
             </div>
 
             {paymentViewMode === 'dashboard' ? (
               <div className="rounded-2xl p-4 sm:p-6 mb-6 min-h-[500px]">
-                <PaymentDashboard payments={paymentsSubmissionsList} />
+                <PaymentDashboard payments={allApprovedPaymentsList} />
               </div>
             ) : (
               <SubmissionListing
