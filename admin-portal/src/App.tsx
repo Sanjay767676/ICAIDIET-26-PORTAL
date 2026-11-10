@@ -113,12 +113,12 @@ const STATUS_META: Record<string, { label: string; cls: string }> = {
 // (per the requirement, that column carries the review status, not payment).
 const PHASE2_REVIEW_META: Record<string, { label: string; cls: string }> = {
   ACCEPTED: { label: 'Accepted', cls: 'bg-green-100 text-green-800 border-green-300' },
-  ACCEPTED_WITH_MINOR_CHANGES: { label: 'Accepted with Minor Changes', cls: 'bg-yellow-100 text-yellow-800 border-yellow-300' },
-  ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Accepted with Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+  ACCEPTED_WITH_MINOR_CHANGES: { label: 'Minor Changes', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
+  ACCEPTED_WITH_MAJOR_CHANGES: { label: 'Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+  MINOR_CHANGES: { label: 'Minor Changes', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
+  MAJOR_CHANGES: { label: 'Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
+  NOT_ACCEPTED: { label: 'Not Accepted', cls: 'bg-red-100 text-red-800 border-red-300' },
   REJECTED: { label: 'Rejected', cls: 'bg-red-100 text-red-800 border-red-300' },
-  // The reviewer's camera-ready decision (separate from the paper decision).
-  MINOR_CHANGES: { label: 'Camera Ready: Minor Changes', cls: 'bg-amber-100 text-amber-800 border-amber-300' },
-  MAJOR_CHANGES: { label: 'Camera Ready: Major Changes', cls: 'bg-orange-100 text-orange-800 border-orange-300' },
 };
 
 // The eight conference tracks, keyed exactly as stored in the database.
@@ -1334,7 +1334,7 @@ function MoreInfoModal({
           {(sub.review_decision || sub.review_feedback) && (
             <div>
               <div className="flex items-center gap-1.5 text-xs text-brand-text/50 uppercase tracking-wide font-medium mb-2">
-                <FileText className="w-3.5 h-3.5" /> Review Feedback
+                <FileText className="w-3.5 h-3.5" /> Phase 1 Review Feedback
               </div>
               <div
                 className={`rounded-xl border p-3 ${REVIEW_DECISION_META[sub.review_decision]?.box ?? 'bg-amber-50 border-amber-300'
@@ -1351,6 +1351,37 @@ function MoreInfoModal({
                 {sub.review_feedback && (
                   <p className="text-sm text-brand-text/80 leading-relaxed whitespace-pre-wrap mt-1.5">
                     {sub.review_feedback}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {(sub.camera_ready_status || sub.camera_ready_comments) && (
+            <div>
+              <div className="flex items-center gap-1.5 text-xs text-brand-text/50 uppercase tracking-wide font-medium mb-2">
+                <FileText className="w-3.5 h-3.5" /> Camera-Ready Review
+              </div>
+              <div
+                className={`rounded-xl border p-3 ${
+                  (sub.camera_ready_status === 'ACCEPTED')
+                    ? 'bg-green-50 border-green-300'
+                    : (sub.camera_ready_status === 'MINOR_CHANGES' || sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES')
+                    ? 'bg-amber-50 border-amber-300'
+                    : 'bg-red-50 border-red-300'
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2 font-semibold text-brand-text">
+                  <span>{PHASE2_REVIEW_META[sub.camera_ready_status || '']?.label ?? sub.camera_ready_status ?? 'Submitted'}</span>
+                  {sub.camera_ready_reviewed_at && (
+                    <span className="text-[11px] text-brand-text/50 font-medium ml-auto">
+                      {formatDateTime(sub.camera_ready_reviewed_at)}
+                    </span>
+                  )}
+                </div>
+                {sub.camera_ready_comments && (
+                  <p className="text-sm text-brand-text/80 leading-relaxed whitespace-pre-wrap mt-1.5">
+                    {sub.camera_ready_comments}
                   </p>
                 )}
               </div>
@@ -3894,8 +3925,15 @@ Duplicates
                                 <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
                                   {cameraDecision.label}
                                 </span>
-                                {(cameraDecision.label === 'Major Changes' || s.camera_ready_status === 'MAJOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES') && s.camera_ready_comments && (
+                                {(s.camera_ready_status === 'MINOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES') && s.camera_ready_comments && (
+                                  <div className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                    <div className="font-semibold text-amber-800 mb-0.5">Reviewer Comments:</div>
+                                    {s.camera_ready_comments}
+                                  </div>
+                                )}
+                                {(s.camera_ready_status === 'MAJOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES' || s.camera_ready_status === 'NOT_ACCEPTED' || s.camera_ready_status === 'REJECTED') && s.camera_ready_comments && (
                                   <div className="mt-2 text-xs text-red-900 bg-red-50 border border-red-200 rounded-lg p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                    <div className="font-semibold text-red-800 mb-0.5">Reviewer Comments:</div>
                                     {s.camera_ready_comments}
                                   </div>
                                 )}
@@ -3990,9 +4028,23 @@ Duplicates
                           View Info
                         </button>
                         {cameraDecision && (
-                          <span className={`px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
-                            {cameraDecision.label}
-                          </span>
+                          <div className="w-full mt-2">
+                            <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-semibold border ${cameraDecision.cls}`}>
+                              {cameraDecision.label}
+                            </span>
+                            {(s.camera_ready_status === 'MINOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES') && s.camera_ready_comments && (
+                              <div className="mt-2 text-xs text-amber-900 bg-amber-50 border border-amber-200 rounded-lg p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                <div className="font-semibold text-amber-800 mb-0.5">Reviewer Comments:</div>
+                                {s.camera_ready_comments}
+                              </div>
+                            )}
+                            {(s.camera_ready_status === 'MAJOR_CHANGES' || s.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES' || s.camera_ready_status === 'NOT_ACCEPTED' || s.camera_ready_status === 'REJECTED') && s.camera_ready_comments && (
+                              <div className="mt-2 text-xs text-red-900 bg-red-50 border border-red-200 rounded-lg p-2 whitespace-pre-wrap max-h-32 overflow-y-auto">
+                                <div className="font-semibold text-red-800 mb-0.5">Reviewer Comments:</div>
+                                {s.camera_ready_comments}
+                              </div>
+                            )}
+                          </div>
                         )}
                       </div>
                     </div>

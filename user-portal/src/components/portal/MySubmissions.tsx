@@ -1495,7 +1495,10 @@ export function MySubmissions({
 
             return (
               <div key={sub.id} className="space-y-4">
-                {/* Top Box (Paper Card Layout matching Excalidraw mockup) */}
+                {/* Top Box (Paper Card Layout matching Excalidraw mockup).
+                    Hidden once the author's payment is approved by admin so they move
+                    straight to Phase 2 (Camera Ready) without Phase 1 confusion. */}
+                {!isPaymentDone && (
                 <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-black">
                   {/* Top row: Title & Authors on Left, Paper Status on Right */}
                   <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-stone-200">
@@ -1604,28 +1607,96 @@ export function MySubmissions({
                     </div>
                   )}
                 </div>
+                )}
 
                 {/* Phase 2 slot: below the submission details, above the payment
                     box. The Move to Phase 2 button shows only while the admin
                     switch is on AND this paper is accepted AND its payment is
                     approved AND registration type is Conference with Scopus proceedings. */}
-                {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && sub.registration_type === 'Conference with Scopus proceedings' && !sub.phase2_submitted_at && (
-                  <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-center flex flex-col items-center">
-                    <h4 className="text-lg sm:text-xl font-bold font-serif text-brand-text mb-2">
-                      Phase 2 — Camera Ready & Copyright
-                    </h4>
-                    <p className="text-sm text-black/70 max-w-xl mx-auto leading-relaxed mb-5 font-normal">
-                      Your paper is accepted and your payment is approved. Submit your camera-ready
-                      manuscript, the signed copyright form, and the declaration to complete your
-                      camera-ready phase.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => onPhase2?.(sub.id)}
-                      className="inline-flex items-center gap-2 px-8 py-4 bg-black text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-gray-800 transition-all shadow-xl hover:shadow-lg hover:-translate-y-0.5"
-                    >
-                      Move to Phase 2 <ChevronRight className="w-4 h-4" />
-                    </button>
+                {phase2Enabled && isSubAccepted && isPaymentDone && sub.registration_type === 'Conference with Scopus proceedings' && !sub.phase2_submitted_at && (
+                  <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-black">
+                    {/* Top row: Title & Authors on Left, Badges on Right */}
+                    <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-stone-200">
+                      <div className="min-w-0 max-w-2xl">
+                        <h3 className="font-serif text-xl sm:text-2xl font-bold leading-tight text-black">
+                          {sub.title}
+                        </h3>
+                        <div className="text-sm font-medium text-black/70 mt-1.5 flex flex-wrap items-center gap-2">
+                          <span>{sub.author_name || 'Author'}</span>
+                          <span className="text-stone-300">•</span>
+                          <span className="text-xs bg-stone-100 px-2.5 py-0.5 rounded-md font-mono text-stone-700">
+                            {sub.paper_id || sub.submission_code}
+                          </span>
+                          {sub.author_count ? (
+                            <>
+                              <span className="text-stone-300">•</span>
+                              <span className="text-xs text-black/60">Authors: {sub.author_count}</span>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {statusBadge(sub.status)}
+                        {paymentBadge(sub)}
+                      </div>
+                    </div>
+
+                    <div className="text-center flex flex-col items-center pt-6 pb-2">
+                      <h4 className="text-lg sm:text-xl font-bold font-serif text-brand-text mb-2">
+                        Phase 2 — Camera Ready & Copyright
+                      </h4>
+                      <p className="text-sm text-black/70 max-w-xl mx-auto leading-relaxed mb-5 font-normal">
+                        Your paper is accepted and your payment is approved. Submit your camera-ready
+                        manuscript, the signed copyright form, and the declaration to complete your
+                        camera-ready phase.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => onPhase2?.(sub.id)}
+                        className="inline-flex items-center gap-2 px-8 py-4 bg-black text-white rounded-xl font-semibold text-sm sm:text-base hover:bg-gray-800 transition-all shadow-xl hover:shadow-lg hover:-translate-y-0.5"
+                      >
+                        Move to Phase 2 <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Paid & approved, but not Scopus proceedings (e.g. Conference alone) */}
+                {isPaymentDone && sub.registration_type !== 'Conference with Scopus proceedings' && !sub.phase2_submitted_at && (
+                  <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-black">
+                    <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-stone-200">
+                      <div className="min-w-0 max-w-2xl">
+                        <h3 className="font-serif text-xl sm:text-2xl font-bold leading-tight text-black">
+                          {sub.title}
+                        </h3>
+                        <div className="text-sm font-medium text-black/70 mt-1.5 flex flex-wrap items-center gap-2">
+                          <span>{sub.author_name || 'Author'}</span>
+                          <span className="text-stone-300">•</span>
+                          <span className="text-xs bg-stone-100 px-2.5 py-0.5 rounded-md font-mono text-stone-700">
+                            {sub.paper_id || sub.submission_code}
+                          </span>
+                          {sub.author_count ? (
+                            <>
+                              <span className="text-stone-300">•</span>
+                              <span className="text-xs text-black/60">Authors: {sub.author_count}</span>
+                            </>
+                          ) : null}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {statusBadge(sub.status)}
+                        {paymentBadge(sub)}
+                      </div>
+                    </div>
+                    <div className="mt-4 flex items-start gap-2.5 rounded-xl border border-green-300 bg-green-50 p-4">
+                      <CheckCircle2 className="w-5 h-5 text-green-700 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-sm font-bold text-green-900">Registration Confirmed</div>
+                        <div className="text-xs text-green-800 mt-1 leading-relaxed">
+                          Your registration for <strong>{sub.registration_type || 'Conference Presentation'}</strong> has been approved. Camera-ready proceedings submission is not required for this registration type.
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 )}
 
@@ -1641,6 +1712,34 @@ export function MySubmissions({
                     the submitted files and submission status. */}
                 {sub.phase2_submitted_at && (
                   <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-black">
+                    {/* When Phase 1 card is hidden (payment approved), show paper title header here */}
+                    {isPaymentDone && (
+                      <div className="flex items-start justify-between gap-4 flex-wrap pb-4 mb-4 border-b border-stone-200">
+                        <div className="min-w-0 max-w-2xl">
+                          <h3 className="font-serif text-xl sm:text-2xl font-bold leading-tight text-black">
+                            {sub.title}
+                          </h3>
+                          <div className="text-sm font-medium text-black/70 mt-1.5 flex flex-wrap items-center gap-2">
+                            <span>{sub.author_name || 'Author'}</span>
+                            <span className="text-stone-300">•</span>
+                            <span className="text-xs bg-stone-100 px-2.5 py-0.5 rounded-md font-mono text-stone-700">
+                              {sub.paper_id || sub.submission_code}
+                            </span>
+                            {sub.author_count ? (
+                              <>
+                                <span className="text-stone-300">•</span>
+                                <span className="text-xs text-black/60">Authors: {sub.author_count}</span>
+                              </>
+                            ) : null}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {statusBadge(sub.status)}
+                          {paymentBadge(sub)}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="flex items-center justify-between gap-3 flex-wrap pb-3 border-b border-stone-200">
                       <h4 className="text-lg sm:text-xl font-bold font-serif text-brand-text">
                         Phase 2 Submission
@@ -1741,6 +1840,20 @@ export function MySubmissions({
                         </div>
                         {sub.camera_ready_comments && (
                           <div className="mt-2 text-xs text-orange-900 bg-white border border-orange-200 rounded-lg p-2.5 whitespace-pre-wrap">
+                            {sub.camera_ready_comments}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {(sub.camera_ready_status === 'NOT_ACCEPTED' ||
+                      sub.camera_ready_status === 'REJECTED') && (
+                      <div className="mt-3 rounded-xl border border-red-400 bg-red-50 p-3">
+                        <div className="text-xs font-bold text-red-900">Camera-Ready Not Accepted</div>
+                        <div className="text-[11px] text-red-800 mt-0.5">
+                          Your Phase 2 submission was not accepted by the reviewer.
+                        </div>
+                        {sub.camera_ready_comments && (
+                          <div className="mt-2 text-xs text-red-900 bg-white border border-red-200 rounded-lg p-2.5 whitespace-pre-wrap">
                             {sub.camera_ready_comments}
                           </div>
                         )}
