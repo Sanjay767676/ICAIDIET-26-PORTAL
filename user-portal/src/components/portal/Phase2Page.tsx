@@ -40,6 +40,8 @@ interface Phase2Status {
     declaration_confirmed: boolean;
     camera_ready_file: string | null;
     copyright_form_file: string | null;
+    plagiarism_file?: string | null;
+    ai_plagiarism_file?: string | null;
   } | null;
   // Set by a reviewer from the reviewer portal's "View Camera Ready" tab.
   // ACCEPTED = approved; MINOR_CHANGES = comments explain what to fix.
@@ -84,6 +86,8 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
   const [headCount, setHeadCount] = useState('');
   const [cameraReady, setCameraReady] = useState<File | null>(null);
   const [copyrightForm, setCopyrightForm] = useState<File | null>(null);
+  const [similarityReport, setSimilarityReport] = useState<File | null>(null);
+  const [aiPlagReport, setAiPlagReport] = useState<File | null>(null);
   const [declared, setDeclared] = useState(false);
   const [formError, setFormError] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -235,7 +239,8 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
       setFormError('Please attach the signed copyright form as a PDF file.');
       return;
     }
-    for (const f of [cameraReady, copyrightForm]) {
+    for (const f of [cameraReady, copyrightForm, similarityReport, aiPlagReport]) {
+      if (!f) continue;
       const isPdf = f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf');
       if (!isPdf) {
         setFormError(`"${f.name}" is not a PDF file. Only PDF uploads are allowed.`);
@@ -264,6 +269,8 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
       fd.append('declaration', 'true');
       fd.append('camera_ready', cameraReady);
       fd.append('copyright_form', copyrightForm);
+      if (similarityReport) fd.append('plagiarism_file', similarityReport);
+      if (aiPlagReport) fd.append('ai_plagiarism_file', aiPlagReport);
       const res = await fetch(`${API_URL}/api/submissions/${submissionId}/phase2`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
@@ -596,6 +603,24 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
                     ok: !!status.phase2.copyright_form_file,
                     name: status.phase2.copyright_form_file,
                   },
+                  ...(status.phase2.plagiarism_file
+                    ? [
+                        {
+                          label: 'Similarity Report',
+                          ok: true,
+                          name: status.phase2.plagiarism_file,
+                        },
+                      ]
+                    : []),
+                  ...(status.phase2.ai_plagiarism_file
+                    ? [
+                        {
+                          label: 'AI Plagiarism Report',
+                          ok: true,
+                          name: status.phase2.ai_plagiarism_file,
+                        },
+                      ]
+                    : []),
                   {
                     label: 'Mode of Attending',
                     ok: !!status.phase2.attendance_mode,
@@ -759,7 +784,9 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
                 </div>
               )}
 
-              {/* The two compulsory PDF uploads */}
+              {/* PDF uploads: Camera-Ready and Copyright Form are compulsory.
+                  When reviewer asks for minor or major changes, Similarity Report
+                  and AI Plagiarism Report fields are also shown. */}
               <div className="space-y-3 mb-5">
                 {fileRow(
                   'Camera-Ready Manuscript *',
@@ -772,6 +799,25 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
                   copyrightForm,
                   setCopyrightForm,
                   'The signed copyright form. PDF only, up to 10MB.'
+                )}
+                {(status.camera_ready_review?.status === 'MINOR_CHANGES' ||
+                  status.camera_ready_review?.status === 'ACCEPTED_WITH_MINOR_CHANGES' ||
+                  status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                  status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES') && (
+                  <>
+                    {fileRow(
+                      'Similarity Report',
+                      similarityReport,
+                      setSimilarityReport,
+                      'The updated similarity / plagiarism check report. PDF only, up to 10MB.'
+                    )}
+                    {fileRow(
+                      'AI Plag Report',
+                      aiPlagReport,
+                      setAiPlagReport,
+                      'The updated AI content detection report. PDF only, up to 10MB.'
+                    )}
+                  </>
                 )}
               </div>
 

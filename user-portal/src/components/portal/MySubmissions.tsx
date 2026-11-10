@@ -1773,6 +1773,12 @@ export function MySubmissions({
                       {[
                         { label: 'Camera-Ready Manuscript', ok: !!sub.camera_ready_file, name: sub.camera_ready_file },
                         { label: 'Copyright Form', ok: !!sub.copyright_form_file, name: sub.copyright_form_file },
+                        ...(sub.plagiarism_file
+                          ? [{ label: 'Similarity Report', ok: true, name: sub.plagiarism_file }]
+                          : []),
+                        ...(sub.ai_plagiarism_file
+                          ? [{ label: 'AI Plagiarism Report', ok: true, name: sub.ai_plagiarism_file }]
+                          : []),
                         {
                           label: 'Mode of Attending',
                           ok: !!sub.attendance_mode,

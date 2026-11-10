@@ -2663,11 +2663,13 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
 // The downloadable template PDFs (camera-ready template + copyright form)
 // live in their own R2 bucket (PHASE2_BUCKET, bucket "Phase2").
 // ------------------------------------------------------------------
-type FinalFileType = 'COPYRIGHT_FORM' | 'CAMERA_READY';
+type FinalFileType = 'COPYRIGHT_FORM' | 'CAMERA_READY' | 'PLAGIARISM' | 'AI_PLAGIARISM';
 
 const FINAL_FILE_LABELS: Record<FinalFileType, string> = {
   COPYRIGHT_FORM: 'copyright form',
   CAMERA_READY: 'camera-ready manuscript',
+  PLAGIARISM: 'similarity report',
+  AI_PLAGIARISM: 'AI plagiarism report',
 };
 
 // Template kinds served from PHASE2_BUCKET. Both templates are Word documents
@@ -2829,7 +2831,14 @@ async function storeFinalFile(
     return { ok: false, res: c.json({ success: false, error: check.reason || 'Invalid file.' }, 400) };
   }
 
-  const prefix = fileType === 'COPYRIGHT_FORM' ? 'COPYRIGHT' : 'CAMERA-READY';
+  const prefix =
+    fileType === 'COPYRIGHT_FORM'
+      ? 'COPYRIGHT'
+      : fileType === 'PLAGIARISM'
+      ? 'PLAGIARISM'
+      : fileType === 'AI_PLAGIARISM'
+      ? 'AI_PLAGIARISM'
+      : 'CAMERA-READY';
   const newKey = `submissions/${submissionId}-${prefix}-${sanitizeFilename(file.name)}-${Date.now().toString(36)}`;
   const now = new Date().toISOString();
   const mime = file.type || 'application/octet-stream';
@@ -2898,7 +2907,11 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file,
               (SELECT original_filename FROM submission_files
-               WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file
+               WHERE submission_id = s.id AND file_type = 'COPYRIGHT_FORM' LIMIT 1) AS copyright_form_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
+              (SELECT original_filename FROM submission_files
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file
        FROM submissions s WHERE s.id = ? AND s.deleted_at IS NULL`
     ).bind(submissionId).first() as {
       id: string; user_id: string; author_email: string; title: string | null; submission_code: string | null; status: string; payment_status: string | null;
@@ -2953,6 +2966,8 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
             declaration_confirmed: !!submission.declaration_confirmed,
             camera_ready_file: submission.camera_ready_file || null,
             copyright_form_file: submission.copyright_form_file || null,
+            plagiarism_file: (submission as any).plagiarism_file || null,
+            ai_plagiarism_file: (submission as any).ai_plagiarism_file || null,
           }
         : null,
       camera_ready_review: {
@@ -3052,6 +3067,32 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     // file is then replaced in place.
     if (!copyrightStored.ok) return copyrightStored.res;
 
+    // Optional Similarity Report & AI Plagiarism Report (re-submitted if reviewer requested changes)
+    let plagiarismFilename: string | null = null;
+    let aiPlagiarismFilename: string | null = null;
+
+    const plagiarismFile = formData['plagiarism_file'] as File | undefined;
+    if (plagiarismFile && typeof (plagiarismFile as any).name === 'string' && (plagiarismFile as any).size > 0) {
+      const plagCheck = validateFile(plagiarismFile);
+      if (!plagCheck.ok) {
+        return c.json({ success: false, error: plagCheck.reason || 'Invalid similarity report file.' }, 400);
+      }
+      const plagStored = await storeFinalFile(c, submissionId, 'PLAGIARISM', plagiarismFile);
+      if (!plagStored.ok) return plagStored.res;
+      plagiarismFilename = plagStored.file.original_filename;
+    }
+
+    const aiPlagiarismFile = formData['ai_plagiarism_file'] as File | undefined;
+    if (aiPlagiarismFile && typeof (aiPlagiarismFile as any).name === 'string' && (aiPlagiarismFile as any).size > 0) {
+      const aiPlagCheck = validateFile(aiPlagiarismFile);
+      if (!aiPlagCheck.ok) {
+        return c.json({ success: false, error: aiPlagCheck.reason || 'Invalid AI plagiarism report file.' }, 400);
+      }
+      const aiPlagStored = await storeFinalFile(c, submissionId, 'AI_PLAGIARISM', aiPlagiarismFile);
+      if (!aiPlagStored.ok) return aiPlagStored.res;
+      aiPlagiarismFilename = aiPlagStored.file.original_filename;
+    }
+
     const isResubmission =
       PHASE2_EDITABLE_REVIEW_STATUSES.has(submission?.camera_ready_status || '') ||
       !!submission?.camera_ready_reviewed_at;
@@ -3073,6 +3114,8 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
         declaration_confirmed: true,
         camera_ready_file: cameraStored.file.original_filename,
         copyright_form_file: copyrightStored.file.original_filename,
+        plagiarism_file: plagiarismFilename,
+        ai_plagiarism_file: aiPlagiarismFilename,
       },
       camera_ready_review: {
         status: null,

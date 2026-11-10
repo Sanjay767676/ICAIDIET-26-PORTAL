@@ -1561,10 +1561,26 @@ export default function App() {
                         </button>
                         {sub.manuscript_file && (
                           <button
-                            onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || sub.title)}
+                            onClick={() => openPdf(sub.id, 'paper', sub.manuscript_file || `${sub.title} — Manuscript`)}
                             className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
                           >
                             <Eye className="w-3.5 h-3.5" /> View Paper
+                          </button>
+                        )}
+                        {sub.plagiarism_file && (
+                          <button
+                            onClick={() => openPdf(sub.id, 'plagiarism', sub.plagiarism_file || `${sub.title} — Plagiarism Report`)}
+                            className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> View Plag.
+                          </button>
+                        )}
+                        {sub.ai_plagiarism_file && (
+                          <button
+                            onClick={() => openPdf(sub.id, 'ai_plagiarism', sub.ai_plagiarism_file || `${sub.title} — AI Plagiarism Report`)}
+                            className="flex items-center gap-1.5 text-brand-text font-medium text-xs hover:underline"
+                          >
+                            <Eye className="w-3.5 h-3.5" /> View AI Plag.
                           </button>
                         )}
                       </div>
