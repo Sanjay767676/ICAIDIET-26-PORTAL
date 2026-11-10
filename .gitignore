@@ -24,6 +24,9 @@ user-portal/assets/
 backup/
 *.sql
 !backend/migrations/*.sql
+backend/backup_*.sql
+# Generated analysis reports (Excel) — contain author names, emails and payment data.
+backend/analysis/
 __pycache__/
 *.py[cod]
 backend/scripts/*.json
