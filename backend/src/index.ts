@@ -2724,8 +2724,6 @@ async function preparePhase2Submission(
       ),
     };
   }
-  const editGate = userPortalGate(settings, c.get('clerkEmail') || '', 'edit');
-  if (editGate) return { ok: false, res: c.json(editGate.body, editGate.status) };
 
   const clerkUserId = c.get('clerkUserId') as string;
   const clerkEmail = (c.get('clerkEmail') || '').trim();
