@@ -1744,9 +1744,30 @@ export function MySubmissions({
                       <h4 className="text-lg sm:text-xl font-bold font-serif text-brand-text">
                         Phase 2 Submission
                       </h4>
-                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Submitted
-                      </span>
+                      {sub.camera_ready_status === 'ACCEPTED' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Accepted
+                        </span>
+                      ) : sub.camera_ready_status === 'MINOR_CHANGES' ||
+                        sub.camera_ready_status === 'ACCEPTED_WITH_MINOR_CHANGES' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                          <AlertCircle className="w-3.5 h-3.5" /> Minor Changes
+                        </span>
+                      ) : sub.camera_ready_status === 'MAJOR_CHANGES' ||
+                        sub.camera_ready_status === 'ACCEPTED_WITH_MAJOR_CHANGES' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">
+                          <AlertCircle className="w-3.5 h-3.5" /> Major Changes
+                        </span>
+                      ) : sub.camera_ready_status === 'NOT_ACCEPTED' ||
+                        sub.camera_ready_status === 'REJECTED' ? (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
+                          <XCircle className="w-3.5 h-3.5" /> Not Accepted
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-300">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-stone-500" /> Submitted
+                        </span>
+                      )}
                     </div>
                     <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50/80 p-3.5 space-y-2 text-sm">
                       {[

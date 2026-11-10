@@ -8,6 +8,8 @@ import {
   Upload,
   Wifi,
   MapPin,
+  AlertCircle,
+  XCircle,
 } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
 import { CONFERENCE_TRACKS } from '../../data/conferenceTracks';
@@ -557,9 +559,30 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
                 <h3 className="text-lg sm:text-xl font-bold font-serif text-brand-text">
                   Your Phase 2 Submission
                 </h3>
-                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
-                  <CheckCircle2 className="w-3.5 h-3.5" /> Submitted
-                </span>
+                {status.camera_ready_review?.status === 'ACCEPTED' ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-green-100 text-green-800 border border-green-300">
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Accepted
+                  </span>
+                ) : status.camera_ready_review?.status === 'MINOR_CHANGES' ||
+                  status.camera_ready_review?.status === 'ACCEPTED_WITH_MINOR_CHANGES' ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-100 text-amber-800 border border-amber-300">
+                    <AlertCircle className="w-3.5 h-3.5" /> Minor Changes
+                  </span>
+                ) : status.camera_ready_review?.status === 'MAJOR_CHANGES' ||
+                  status.camera_ready_review?.status === 'ACCEPTED_WITH_MAJOR_CHANGES' ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-orange-100 text-orange-800 border border-orange-300">
+                    <AlertCircle className="w-3.5 h-3.5" /> Major Changes
+                  </span>
+                ) : status.camera_ready_review?.status === 'NOT_ACCEPTED' ||
+                  status.camera_ready_review?.status === 'REJECTED' ? (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-800 border border-red-300">
+                    <XCircle className="w-3.5 h-3.5" /> Not Accepted
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-700 border border-stone-300">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-stone-500" /> Submitted
+                  </span>
+                )}
               </div>
               <div className="mt-3 rounded-xl border border-stone-200 bg-stone-50/80 p-3.5 space-y-2 text-sm">
                 {[
