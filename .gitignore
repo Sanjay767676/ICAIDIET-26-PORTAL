@@ -24,7 +24,16 @@ user-portal/assets/
 backup/
 *.sql
 !backend/migrations/*.sql
+# Any backup file/folder, wherever it lives (dumps, JSON exports, copies).
 backend/backup_*.sql
+*backup*/
+backup_*/
+*_backup.*
+*backup_*.*
+*.bak
+*.old
+*.orig
+*~
 # Generated analysis reports (Excel) — contain author names, emails and payment data.
 backend/analysis/
 __pycache__/
@@ -32,3 +41,10 @@ __pycache__/
 backend/scripts/*.json
 backend/scripts/*.sqlite
 backend/scripts/*.txt
+# Local one-off Python helpers: they read PII dumps / production exports and
+# hardcode local paths, so they stay on the machine that generated them.
+backend/scripts/*.py
+
+# Proceedings build output: camera-ready author PDFs, combined PDF/DOCX batches
+# and generated books. Private author material, never commit it.
+proceedings/
