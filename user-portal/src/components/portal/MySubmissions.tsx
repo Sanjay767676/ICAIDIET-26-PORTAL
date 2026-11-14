@@ -50,6 +50,10 @@ interface MySubmission {
   fee_amount?: string | null;
   fee_tier?: string | null;
   can_pay?: boolean | number;
+  // Set by the organizers when a paper may move to Phase 2 without an approved
+  // registration payment (e.g. invited or organizer papers). payment_status is
+  // left untouched so the Payments tab keeps the real state.
+  phase2_payment_waived?: boolean | number;
   // Phase 2 (camera-ready + copyright). phase2_submitted_at is set once the
   // author submits the Phase 2 package — that is also what moves the paper
   // into the admin's Camera Ready tab, and here it swaps the Move to Phase 2
@@ -1485,12 +1489,17 @@ export function MySubmissions({
             // button, so nobody can pay twice or resubmit an approved payment.
             const paymentAccessGranted = Boolean(sub.can_pay) || registrationOpen;
             const isPaymentApproved = sub.payment_status === 'APPROVED';
+            // Phase 2 unlocks when the payment is approved OR the organizers
+            // waived the payment for this paper. A waiver shows the same
+            // camera-ready slot but never fakes a payment status.
+            const paymentWaived = Boolean(sub.phase2_payment_waived);
+            const paymentSatisfied = isPaymentDone || paymentWaived;
             const isPaymentOpen =
               (expandedPaymentIds[sub.id] ||
                 isPaymentDone ||
                 !!sub.payment_proof_url) && paymentAccessGranted && isSubAccepted;
             const isPhase2Shown =
-              (phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED') ||
+              (phase2Enabled && isSubAccepted && (isPaymentApproved || paymentWaived)) ||
               !!sub.phase2_submitted_at;
 
             return (
@@ -1498,7 +1507,7 @@ export function MySubmissions({
                 {/* Top Box (Paper Card Layout matching Excalidraw mockup).
                     Hidden once the author's payment is approved by admin so they move
                     straight to Phase 2 (Camera Ready) without Phase 1 confusion. */}
-                {!isPaymentDone && (
+                {!paymentSatisfied && (
                 <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-black">
                   {/* Top row: Title & Authors on Left, Paper Status on Right */}
                   <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-stone-200">
@@ -1638,7 +1647,7 @@ export function MySubmissions({
                     box. The Move to Phase 2 button shows only while the admin
                     switch is on AND this paper is accepted AND its payment is
                     approved AND registration type is Conference with Scopus proceedings. */}
-                {phase2Enabled && isSubAccepted && isPaymentDone && sub.registration_type === 'Conference with Scopus proceedings' && !sub.phase2_submitted_at && (
+                {phase2Enabled && isSubAccepted && paymentSatisfied && (sub.registration_type === 'Conference with Scopus proceedings' || paymentWaived) && !sub.phase2_submitted_at && (
                   <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-black">
                     {/* Top row: Title & Authors on Left, Badges on Right */}
                     <div className="flex items-start justify-between gap-4 flex-wrap pb-4 border-b border-stone-200">
@@ -1671,9 +1680,9 @@ export function MySubmissions({
                         Phase 2 — Camera Ready & Copyright
                       </h4>
                       <p className="text-sm text-black/70 max-w-xl mx-auto leading-relaxed mb-5 font-normal">
-                        Your paper is accepted and your payment is approved. Submit your camera-ready
-                        manuscript, the signed copyright form, and the declaration to complete your
-                        camera-ready phase.
+                        {paymentWaived
+                          ? 'Your paper is accepted. Submit your camera-ready manuscript, the signed copyright form, and the declaration to complete your camera-ready phase.'
+                          : 'Your paper is accepted and your payment is approved. Submit your camera-ready manuscript, the signed copyright form, and the declaration to complete your camera-ready phase.'}
                       </p>
                       <button
                         type="button"
@@ -1737,8 +1746,8 @@ export function MySubmissions({
                     the submitted files and submission status. */}
                 {sub.phase2_submitted_at && (
                   <div className="bg-white rounded-2xl p-6 sm:p-7 shadow-lg border-2 border-yellow-400 text-black">
-                    {/* When Phase 1 card is hidden (payment approved), show paper title header here */}
-                    {isPaymentDone && (
+                    {/* When Phase 1 card is hidden (payment approved or waived), show paper title header here */}
+                    {paymentSatisfied && (
                       <div className="flex items-start justify-between gap-4 flex-wrap pb-4 mb-4 border-b border-stone-200">
                         <div className="min-w-0 max-w-2xl">
                           <h3 className="font-serif text-xl sm:text-2xl font-bold leading-tight text-black">
@@ -1920,7 +1929,7 @@ export function MySubmissions({
                       </div>
                     )}
 
-                    {phase2Enabled && isSubAccepted && sub.payment_status === 'APPROVED' && sub.registration_type === 'Conference with Scopus proceedings' && (
+                    {phase2Enabled && isSubAccepted && paymentSatisfied && (sub.registration_type === 'Conference with Scopus proceedings' || paymentWaived) && (
                       <div className="mt-4 text-center">
                         <button
                           type="button"

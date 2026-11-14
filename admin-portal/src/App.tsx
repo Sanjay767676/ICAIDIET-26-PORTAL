@@ -69,6 +69,11 @@ interface Submission {
   camera_ready_file?: string | null;
   copyright_form_file?: string | null;
   phase2_submitted_at?: string | null;
+  // Set by the organizers when the paper may move to Phase 2 without an
+  // approved registration payment. Such papers are deliberately kept out of
+  // the Camera Ready tab (and its totals) - they stay reviewable in the
+  // reviewer portal's "View Camera Ready" tab instead.
+  phase2_payment_waived?: number | null;
   attendance_mode?: string | null;
   // Track chosen on the Phase 2 form and, for offline attendees, the head count.
   phase2_track?: string | null;
@@ -3284,7 +3289,10 @@ const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && 
     const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED' && !s.phase2_submitted_at);
     // The Camera Ready tab holds exactly the papers that have submitted the
     // Phase 2 package (camera-ready + copyright + attendance + declaration).
-    const cameraReadySubmissionsList = submissions.filter(s => !!s.phase2_submitted_at);
+    // Papers with an organizer payment waiver are "ghosted" here: they still
+    // flow through Phase 2 and are reviewable in the reviewer portal, but they
+    // are neither listed in this tab nor counted in its attendance totals.
+    const cameraReadySubmissionsList = submissions.filter(s => !!s.phase2_submitted_at && !s.phase2_payment_waived);
     const acceptedSubmissionsList = submissions.filter(s => (s.review_decision === 'ACCEPTED' || s.status === 'READY_FOR_REGISTRATION' || s.status === 'READY_FOR_CAMERA_READY') && s.payment_status !== 'APPROVED');
 
     const applyFilters = (list: Submission[]) =>

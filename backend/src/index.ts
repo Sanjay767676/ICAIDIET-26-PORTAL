@@ -1171,8 +1171,18 @@ function xlsxColLetter(i: number): string {
   return s;
 }
 
+// XML 1.0 only permits #x9, #xA, #xD and #x20 upwards. A stray control byte
+// in one paper title (e.g. "Self\u0002Healing") makes Excel reject the whole
+// workbook with "We found a problem with some content", so strip them before
+// escaping. Lone surrogates are replaced as well because they cannot be
+// encoded as UTF-8.
+const XML_INVALID_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]/g;
+const LONE_SURROGATES = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
 function xlsxEscape(value: string): string {
-  return value
+  return String(value ?? '')
+    .replace(XML_INVALID_CHARS, '')
+    .replace(LONE_SURROGATES, '\uFFFD')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -2139,7 +2149,7 @@ app.get('/api/admin/submissions', async (c) => {
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at, s.payment_mail_status, s.payment_mail_sent_at,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
-              s.phase2_track, s.phase2_head_count,
+              s.phase2_track, s.phase2_head_count, s.phase2_payment_waived,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at, s.camera_ready_resubmitted,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
@@ -2364,7 +2374,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     const { results } = await c.env.DB.prepare(
       `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
-              s.phase2_track, s.phase2_head_count,
+              s.phase2_track, s.phase2_head_count, s.phase2_payment_waived,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
@@ -2729,8 +2739,14 @@ async function preparePhase2Submission(
   const clerkEmail = (c.get('clerkEmail') || '').trim();
 
   const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+  // phase2_payment_waived lets the organizers move a specific paper into
+  // Phase 2 without an approved registration payment. It is deliberately
+  // separate from payment_status so the Payments tab keeps showing the real
+  // payment state.
   const submission = await c.env.DB.prepare(
-    `SELECT id, user_id, author_email, status, payment_status, phase2_submitted_at, camera_ready_status, camera_ready_reviewed_at FROM submissions WHERE id = ? AND deleted_at IS NULL`
+    `SELECT id, user_id, author_email, status, payment_status, phase2_submitted_at, camera_ready_status, camera_ready_reviewed_at,
+            phase2_payment_waived
+       FROM submissions WHERE id = ? AND deleted_at IS NULL`
   ).bind(submissionId).first() as {
     id: string;
     user_id: string;
@@ -2740,6 +2756,7 @@ async function preparePhase2Submission(
     phase2_submitted_at: string | null;
     camera_ready_status: string | null;
     camera_ready_reviewed_at: string | null;
+    phase2_payment_waived: number | null;
   } | null;
   if (!submission) {
     return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
@@ -2789,7 +2806,8 @@ async function preparePhase2Submission(
       ),
     };
   }
-  if (submission.payment_status !== 'APPROVED') {
+  // An approved payment OR an explicit organizer waiver unlocks Phase 2.
+  if (submission.payment_status !== 'APPROVED' && !submission.phase2_payment_waived) {
     return {
       ok: false,
       res: c.json(
@@ -2909,7 +2927,8 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'PLAGIARISM' LIMIT 1) AS plagiarism_file,
               (SELECT original_filename FROM submission_files
-               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file
+               WHERE submission_id = s.id AND file_type = 'AI_PLAGIARISM' LIMIT 1) AS ai_plagiarism_file,
+              s.phase2_payment_waived
        FROM submissions s WHERE s.id = ? AND s.deleted_at IS NULL`
     ).bind(submissionId).first() as {
       id: string; user_id: string; author_email: string; title: string | null; submission_code: string | null; status: string; payment_status: string | null;
@@ -2917,6 +2936,7 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
       phase2_track: string | null; phase2_head_count: number | null;
       camera_ready_status: string | null; camera_ready_comments: string | null; camera_ready_reviewed_at: string | null;
       camera_ready_file: string | null; copyright_form_file: string | null;
+      phase2_payment_waived: number | null;
     } | null;
     if (!submission) {
       return c.json({ success: false, error: 'Submission not found.' }, 404);
@@ -2929,7 +2949,7 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
     const settings = await loadSettingsRecord(c.env);
     const phase2Open = settings['phase2_enabled'] === 'true';
     const accepted = ACCEPTED_STATUSES.has(submission.status);
-    const paymentApproved = submission.payment_status === 'APPROVED';
+    const paymentApproved = submission.payment_status === 'APPROVED' || Boolean(submission.phase2_payment_waived);
     const eligible = phase2Open && accepted && paymentApproved;
     // Re-opened only while the reviewer's camera-ready decision asks for
     // minor/major changes; re-submitting clears it and locks the package.
