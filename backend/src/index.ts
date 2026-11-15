@@ -1478,7 +1478,7 @@ app.get('/api/reviewer/submissions/:id/file', requireReviewerAuth, async (c) => 
         'Content-Type': mime,
         'Content-Disposition': `inline; filename*=UTF-8''${safeName}`,
         'Content-Length': String(object.size),
-        'Cache-Control': 'private, max-age=600, must-revalidate',
+        'Cache-Control': 'private, no-store',
       },
     });
   } catch (error) {
@@ -2318,7 +2318,7 @@ app.get('/api/admin/submissions/:id/file', async (c) => {
         'Content-Type': mime,
         'Content-Disposition': `inline; filename*=UTF-8''${safeName}`,
         'Content-Length': String(object.size),
-        'Cache-Control': 'private, max-age=600, must-revalidate',
+        'Cache-Control': 'private, no-store',
       },
     });
   } catch (error) {
@@ -5224,7 +5224,7 @@ app.get('/api/admin/submissions/:id/payment-proof', async (c) => {
       headers: {
         'Content-Type': contentType,
         'Content-Disposition': 'inline',
-        'Cache-Control': 'private, max-age=600, must-revalidate',
+        'Cache-Control': 'private, no-store',
       },
     });
   } catch (err: any) {

@@ -511,43 +511,53 @@ function LoginScreen({ onLogin }: { onLogin: (token: string, email: string) => v
 // ------------------------------------------------------------------
 // PDF viewer modal (fetches the file with the auth token)
 // ------------------------------------------------------------------
-// In-memory cache for fetched document blob URLs so repeat views within a session are instant (0ms delay)
-const pdfBlobCache = new Map<string, string>();
-
+// NOTE: documents are always fetched when the viewer opens. They must never be
+// kept in a session-wide cache: a file URL is stable per (submission, type), so
+// when an author resubmits a replacement document (e.g. a new similarity report)
+// a cached copy would keep showing the superseded file.
 function PdfViewer({ file, token, onClose }: { file: FileView; token: string; onClose: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const objectUrlRef = useRef<string | null>(null);
 
-  const loadPdf = useCallback(async (force = false) => {
+  const releaseObjectUrl = useCallback(() => {
+    if (objectUrlRef.current) {
+      URL.revokeObjectURL(objectUrlRef.current);
+      objectUrlRef.current = null;
+    }
+  }, []);
+
+  const loadPdf = useCallback(async () => {
     if (!file.url) return;
     setError(null);
-    if (!force && pdfBlobCache.has(file.url)) {
-      setPdfUrl(pdfBlobCache.get(file.url)!);
-      return;
-    }
     setLoading(true);
     setPdfUrl(null);
+    releaseObjectUrl();
     try {
-      const res = await fetch(file.url, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await fetch(file.url, {
+        headers: { Authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
       if (!res.ok) {
         setError('Could not load this document. It may have been removed.');
         return;
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      pdfBlobCache.set(file.url, url);
+      objectUrlRef.current = url;
       setPdfUrl(url);
     } catch {
       setError('Network error while loading document.');
     } finally {
       setLoading(false);
     }
-  }, [file.url, token]);
+  }, [file.url, token, releaseObjectUrl]);
 
   useEffect(() => {
     loadPdf();
-  }, [loadPdf]);
+    return releaseObjectUrl;
+  }, [loadPdf, releaseObjectUrl]);
 
   const downloadPdf = async () => {
     if (!pdfUrl) return;
@@ -616,8 +626,7 @@ function PdfViewer({ file, token, onClose }: { file: FileView; token: string; on
             </button>
             <button
               onClick={() => {
-                if (file.url) pdfBlobCache.delete(file.url);
-                loadPdf(true);
+                loadPdf();
               }}
               className="p-1.5 hover:bg-white/10 rounded-lg transition-colors"
               aria-label="Reload"
