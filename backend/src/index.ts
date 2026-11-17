@@ -2466,7 +2466,7 @@ async function loadAuthorEditorSubmission(
   }
 
   const submission = await c.env.DB.prepare(
-    `SELECT id, user_id, author_email, payment_status, authors_finalised_at, deleted_at
+    `SELECT id, user_id, author_email, payment_status, attendance_mode, authors_finalised_at, deleted_at
      FROM submissions WHERE id = ?`
   ).bind(submissionId).first() as any;
   if (!submission || submission.deleted_at) {
@@ -2479,6 +2479,20 @@ async function loadAuthorEditorSubmission(
         {
           success: false,
           error: 'Author details can only be edited after the registration payment is approved.',
+        },
+        403
+      ),
+    };
+  }
+  // Offline attendees do not get the author editor. The user portal hides the
+  // button; enforce the same rule here so a direct API call cannot bypass it.
+  if (submission.attendance_mode === 'OFFLINE') {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error: 'Author details are not editable for papers with offline attendance.',
         },
         403
       ),

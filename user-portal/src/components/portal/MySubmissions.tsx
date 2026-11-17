@@ -1717,8 +1717,9 @@ export function MySubmissions({
 
                 {/* One-time, final author list used for certificate printing.
                     Rendered per submission, so an author with several paid
-                    papers gets a separate Edit Authors button on each card. */}
-                {authorEditsEnabled && sub.payment_status === 'APPROVED' && (
+                    papers gets a separate Edit Authors button on each card.
+                    Offline attendees are excluded — they do not get this option. */}
+                {authorEditsEnabled && sub.payment_status === 'APPROVED' && sub.attendance_mode !== 'OFFLINE' && (
                   <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200 bg-white px-5 py-3 shadow-sm">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
@@ -2091,7 +2092,7 @@ export function MySubmissions({
         />
       )}
 
-      {editingAuthors && authorEditsEnabled && !editingAuthors.authors_finalised_at && (
+      {editingAuthors && authorEditsEnabled && !editingAuthors.authors_finalised_at && editingAuthors.attendance_mode !== 'OFFLINE' && (
         <EditAuthorsModal
           sub={editingAuthors}
           getToken={getToken}
