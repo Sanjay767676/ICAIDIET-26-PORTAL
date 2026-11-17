@@ -154,6 +154,8 @@ export interface SettingsPanelProps {
   setRegistrationOpen: (v: boolean) => void;
   phase2Enabled: boolean;
   setPhase2Enabled: (v: boolean) => void;
+  authorEditsEnabled: boolean;
+  setAuthorEditsEnabled: (v: boolean) => void;
 
   // Access / approved emails
   approvedMailEnabled: boolean;
@@ -487,6 +489,42 @@ export default function SettingsPanel(props: SettingsPanelProps) {
                     {props.phase2Enabled
                       ? 'Eligible authors see the "Move to Phase 2" button in the user portal.'
                       : 'The "Move to Phase 2" button is hidden and the endpoint refuses requests.'}
+                  </span>
+                </CardFooter>
+              </SettingCard>
+
+              {/* Allow Author Edits — final, one-time certificate details */}
+              <SettingCard>
+                <CardHeader
+                  title="Allow Author Edits"
+                  description={
+                    <>
+                      When on, authors of papers whose registration payment is approved see an
+                      &quot;Edit Authors&quot; button on each eligible submission in My Submissions.
+                      They can confirm the final author list (2–6 authors) with name, phone, email,
+                      institution, title and designation for certificate printing. Each confirmed
+                      list is locked permanently — Off by default.
+                    </>
+                  }
+                  right={
+                    <Toggle
+                      checked={props.authorEditsEnabled}
+                      onChange={props.setAuthorEditsEnabled}
+                      disabled={props.savingSettings}
+                      label="Toggle author detail edits"
+                    />
+                  }
+                />
+                <CardFooter>
+                  <StatusPill
+                    active={props.authorEditsEnabled}
+                    activeText="Author edits open"
+                    inactiveText="Author edits closed"
+                  />
+                  <span className="text-xs text-stone-400">
+                    {props.authorEditsEnabled
+                      ? 'Eligible authors can finalise their author details once, per submission.'
+                      : 'The "Edit Authors" button is hidden and the endpoint refuses requests.'}
                   </span>
                 </CardFooter>
               </SettingCard>

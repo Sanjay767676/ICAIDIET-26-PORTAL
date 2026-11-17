@@ -2522,6 +2522,9 @@ export default function App() {
   // Phase 2 (camera-ready + copyright) open switch. Defaults to OFF; an absent
   // setting key also reads as OFF everywhere (see phase2 gate in the backend).
   const [phase2Enabled, setPhase2Enabled] = useState<boolean>(false);
+  // Final, one-time author-detail edits for certificate printing. OFF by
+  // default; an absent setting key also reads as OFF in the backend gate.
+  const [authorEditsEnabled, setAuthorEditsEnabled] = useState<boolean>(false);
   // Addresses allowed to submit/edit while paper acceptance is OFF. Only
   // meaningful in that state -- see userPortalGate in backend/src/index.ts.
   const [approvedMailEnabled, setApprovedMailEnabled] = useState<boolean>(false);
@@ -2646,6 +2649,9 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
         setFileEditsEnabled(s.file_edits_enabled !== 'false');
         // Absent key means OFF — Phase 2 stays closed until switched on.
         setPhase2Enabled(s.phase2_enabled === 'true');
+        // Absent key means OFF — authors cannot finalise their details until
+        // this is explicitly opened in Settings.
+        setAuthorEditsEnabled(s.author_edits_enabled === 'true');
         setApprovedMailEnabled(s.approved_mail_ids_enabled === 'true');
         setApprovedMailIds(s.approved_mail_ids || '');
         // The server's canonical copy, kept apart from the textarea so the
@@ -2682,6 +2688,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
           maintenance_review_until: mtReviewUntil,
           file_edits_enabled: fileEditsEnabled,
           phase2_enabled: phase2Enabled,
+          author_edits_enabled: authorEditsEnabled,
           registration_config: registrationConfig,
         })
       });
@@ -4202,6 +4209,8 @@ Duplicates
             setRegistrationOpen={setRegistrationOpen}
             phase2Enabled={phase2Enabled}
             setPhase2Enabled={setPhase2Enabled}
+            authorEditsEnabled={authorEditsEnabled}
+            setAuthorEditsEnabled={setAuthorEditsEnabled}
             approvedMailEnabled={approvedMailEnabled}
             setApprovedMailEnabled={setApprovedMailEnabled}
             approvedMailIds={approvedMailIds}

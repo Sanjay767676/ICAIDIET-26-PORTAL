@@ -16,6 +16,7 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
+import { EditAuthorsModal } from './EditAuthorsModal';
 import { CONFERENCE_TRACKS } from '../../data/conferenceTracks';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -71,6 +72,9 @@ interface MySubmission {
   camera_ready_status?: string | null;
   camera_ready_comments?: string | null;
   camera_ready_reviewed_at?: string | null;
+  // Set once the author confirms the final author list used for certificates.
+  // After this, the Edit Authors button is disabled for that submission.
+  authors_finalised_at?: string | null;
 }
 
 export interface BankAccount {
@@ -102,6 +106,9 @@ interface MySubmissionsProps {
   // Admin "Phase 2" switch — the Move to Phase 2 button only appears while
   // this is on (absent setting reads as OFF, matching the backend).
   phase2Enabled?: boolean;
+  // Admin "Allow Author Edits" switch. Absent reads as OFF, matching the
+  // backend gate; the button/endpoint stay closed until it is turned on.
+  authorEditsEnabled?: boolean;
   // Opens the Phase 2 page for one of the author's submissions.
   onPhase2?: (submissionId: string) => void;
   // False when this author may not start another paper (already submitted, the
@@ -1224,8 +1231,9 @@ function EditFilesModal({
             <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Paper Title</div>
             <h3 className="font-serif text-lg font-bold leading-snug break-words mt-1">{sub.title}</h3>
             <p className="text-xs text-brand-text/60 mt-2">
-              You can only replace the files you uploaded. Submission details (title, abstract, authors, track)
-              cannot be changed.
+              You can only replace the files you uploaded. Submission details (title, abstract, track) cannot be
+              changed. Author details can be changed only through the separate &quot;Edit Authors&quot; option,
+              and only once while it is open.
             </p>
           </div>
 
@@ -1315,6 +1323,7 @@ export function MySubmissions({
   registration = null,
   fileEditsEnabled = true,
   phase2Enabled = false,
+  authorEditsEnabled = false,
   onPhase2,
   canStartSubmission = true,
   approvedScopusMailIds = '',
@@ -1323,6 +1332,7 @@ export function MySubmissions({
   const [subs, setSubs] = useState<MySubmission[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<MySubmission | null>(null);
+  const [editingAuthors, setEditingAuthors] = useState<MySubmission | null>(null);
   const [popup, setPopup] = useState<PopupInfo | null>(null);
   const [expandedPaymentIds, setExpandedPaymentIds] = useState<Record<string, boolean>>({});
 
@@ -1395,6 +1405,16 @@ export function MySubmissions({
         : 'Your uploaded files have been replaced with the edited versions.',
     });
     setEditing(null);
+    loadSubmissions();
+  };
+
+  const handleAuthorsSaved = () => {
+    setPopup({
+      type: 'success',
+      title: 'Author Details Finalised',
+      message: 'Your author details have been saved for certificate generation. They can no longer be changed.',
+    });
+    setEditingAuthors(null);
     loadSubmissions();
   };
 
@@ -1692,6 +1712,41 @@ export function MySubmissions({
                         Move to Phase 2 <ChevronRight className="w-4 h-4" />
                       </button>
                     </div>
+                  </div>
+                )}
+
+                {/* One-time, final author list used for certificate printing.
+                    Rendered per submission, so an author with several paid
+                    papers gets a separate Edit Authors button on each card. */}
+                {authorEditsEnabled && sub.payment_status === 'APPROVED' && (
+                  <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200 bg-white px-5 py-3 shadow-sm">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
+                        Author details for certificates
+                      </p>
+                      <p className="text-xs text-black/60 mt-0.5">
+                        {sub.authors_finalised_at
+                          ? `Finalised on ${new Date(sub.authors_finalised_at).toLocaleDateString()} — no further changes can be made.`
+                          : 'Confirm the author names, titles and designations that will appear on your certificates.'}
+                      </p>
+                    </div>
+                    {sub.authors_finalised_at ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-xl text-sm font-semibold opacity-50 cursor-not-allowed"
+                      >
+                        <CheckCircle2 className="w-4 h-4" /> Author Details Finalised
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setEditingAuthors(sub)}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-xl text-sm font-semibold hover:bg-gray-800 transition-all shadow-md"
+                      >
+                        <Pencil className="w-4 h-4" /> Edit Authors
+                      </button>
+                    )}
                   </div>
                 )}
 
@@ -2033,6 +2088,15 @@ export function MySubmissions({
           getToken={getToken}
           onClose={() => setEditing(null)}
           onSaved={handleSaved}
+        />
+      )}
+
+      {editingAuthors && authorEditsEnabled && !editingAuthors.authors_finalised_at && (
+        <EditAuthorsModal
+          sub={editingAuthors}
+          getToken={getToken}
+          onClose={() => setEditingAuthors(null)}
+          onSaved={handleAuthorsSaved}
         />
       )}
 

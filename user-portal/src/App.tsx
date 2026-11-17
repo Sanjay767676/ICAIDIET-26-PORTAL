@@ -86,6 +86,9 @@ export default function App() {
   // Admin "Phase 2" switch. Absent setting reads as OFF, so the Move to Phase 2
   // button stays hidden until it is explicitly turned on.
   const [phase2Enabled, setPhase2Enabled] = useState<boolean>(false);
+  // Admin switch for the one-time, final author-detail editor. Absent reads as
+  // OFF, so no "Edit Authors" button appears until the admin opens it.
+  const [authorEditsEnabled, setAuthorEditsEnabled] = useState<boolean>(false);
   // Which submission the Phase 2 page is opened for. The portal has no URL
   // routing — views are in-memory state — so this can only be set by clicking
   // Move to Phase 2 on one of the author's own submissions; the backend
@@ -139,6 +142,8 @@ export default function App() {
           if (data.registration) setRegistration(data.registration);
           setFileEditsEnabled(s.file_edits_enabled !== 'false');
           setPhase2Enabled(s.phase2_enabled === 'true');
+          // Absent key means OFF — author edits stay closed by default.
+          setAuthorEditsEnabled(s.author_edits_enabled === 'true');
           // Absent key means the call for papers is open (matching the backend),
           // so only the explicit 'false' closes the public view.
           setPaperAcceptanceOpen(s.paper_acceptance_enabled !== 'false');
@@ -329,6 +334,7 @@ export default function App() {
               registration={registration}
               fileEditsEnabled={fileEditsEnabled}
               phase2Enabled={phase2Enabled}
+              authorEditsEnabled={authorEditsEnabled}
               onPhase2={(id) => {
                 setPhase2SubmissionId(id);
                 navigate('phase2');

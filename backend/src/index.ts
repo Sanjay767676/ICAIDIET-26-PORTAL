@@ -2376,6 +2376,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
               s.phase2_track, s.phase2_head_count, s.phase2_payment_waived,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
+              s.authors_finalised_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2428,6 +2429,228 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     return c.json({ success: true, submissions });
   } catch (error) {
     console.error('Fetch my submissions error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// User: one-time author-list edit for certificate printing.
+//
+// Master gate: the admin "Allow Author Edits" setting (OFF by default, seeded
+// by migration 0041). Only payment-approved submissions qualify, and only a
+// signed-in account that owns / is listed on that submission may read or write
+// the list. Once confirmed, `authors_finalised_at` locks it permanently.
+// ------------------------------------------------------------------
+const AUTHOR_TITLE_OPTIONS = ['Mrs', 'Mr', 'Ms', 'Dr'];
+const AUTHOR_DESIGNATION_OPTIONS = [
+  'Student',
+  'HoD',
+  'Assistant Professor',
+  'Associate Professor',
+  'Other',
+];
+
+async function loadAuthorEditorSubmission(
+  c: Context<AppEnv>,
+  submissionId: string
+): Promise<{ ok: true; submission: any } | { ok: false; res: Response }> {
+  const settings = await loadSettingsRecord(c.env);
+  if (settings['author_edits_enabled'] !== 'true') {
+    return {
+      ok: false,
+      res: c.json(
+        { success: false, error: 'Author editing is not open yet.', author_edits_enabled: false },
+        403
+      ),
+    };
+  }
+
+  const submission = await c.env.DB.prepare(
+    `SELECT id, user_id, author_email, payment_status, authors_finalised_at, deleted_at
+     FROM submissions WHERE id = ?`
+  ).bind(submissionId).first() as any;
+  if (!submission || submission.deleted_at) {
+    return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
+  }
+  if (submission.payment_status !== 'APPROVED') {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error: 'Author details can only be edited after the registration payment is approved.',
+        },
+        403
+      ),
+    };
+  }
+  if (submission.authors_finalised_at) {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error: 'Author details have already been finalised and cannot be changed.',
+          authors_finalised_at: submission.authors_finalised_at,
+        },
+        409
+      ),
+    };
+  }
+
+  const clerkUserId = c.get('clerkUserId') as string;
+  const clerkEmail = (c.get('clerkEmail') || '').trim();
+  const userId = await ensureUserForClerk(c, clerkUserId, clerkEmail);
+  if (!(await isAuthorizedForSubmission(c.env, submission, userId, clerkUserId, clerkEmail))) {
+    return {
+      ok: false,
+      res: c.json({ success: false, error: 'You do not have access to this submission.' }, 403),
+    };
+  }
+
+  return { ok: true, submission };
+}
+
+app.get('/api/submissions/:id/authors', requireClerkAuth, async (c) => {
+  try {
+    const gate = await loadAuthorEditorSubmission(c, c.req.param('id') || '');
+    if (!gate.ok) return gate.res;
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, is_primary, first_name, last_name, phone, email, college, title, designation
+       FROM authors WHERE submission_id = ? ORDER BY is_primary DESC, created_at ASC`
+    ).bind(gate.submission.id).all();
+
+    return c.json({ success: true, authors: results });
+  } catch (error) {
+    console.error('Fetch authors for author edit error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+app.post('/api/submissions/:id/authors', requireClerkAuth, async (c) => {
+  try {
+    const gate = await loadAuthorEditorSubmission(c, c.req.param('id') || '');
+    if (!gate.ok) return gate.res;
+    if (!rateLimit(c, 'edit-authors', 10, 60000)) {
+      return c.json({ success: false, error: 'Too many attempts. Please wait a minute and try again.' }, 429);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const raw = Array.isArray(body?.authors) ? body.authors : null;
+    if (!raw || raw.length < 2 || raw.length > 6) {
+      return c.json({ success: false, error: 'Please provide between 2 and 6 authors.' }, 400);
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const authors: any[] = [];
+    for (let i = 0; i < raw.length; i++) {
+      const a = raw[i] || {};
+      const name = typeof a.name === 'string' ? a.name.trim().replace(/\s+/g, ' ') : '';
+      if (!name) {
+        return c.json({ success: false, error: `Author ${i + 1}: name is required.` }, 400);
+      }
+      const parts = name.split(' ');
+      const phone = normalizePhone(a.phone);
+      const email = typeof a.email === 'string' ? a.email.trim() : '';
+      const college = typeof a.college === 'string' ? a.college.trim() : '';
+      const title = typeof a.title === 'string' ? a.title.trim() : '';
+      const designation = typeof a.designation === 'string' ? a.designation.trim() : '';
+      const otherDesignation =
+        typeof a.other_designation === 'string' ? a.other_designation.trim() : '';
+
+      if (!isValidPhone(phone)) {
+        return c.json(
+          { success: false, error: `Author ${i + 1}: phone number must be ${PHONE_RULE}.` },
+          400
+        );
+      }
+      if (!emailRegex.test(email)) {
+        return c.json({ success: false, error: `Author ${i + 1}: a valid email address is required.` }, 400);
+      }
+      if (!college) {
+        return c.json(
+          { success: false, error: `Author ${i + 1}: institution / organisation name is required.` },
+          400
+        );
+      }
+      if (!AUTHOR_TITLE_OPTIONS.includes(title)) {
+        return c.json({ success: false, error: `Author ${i + 1}: please select a valid title.` }, 400);
+      }
+      if (!AUTHOR_DESIGNATION_OPTIONS.includes(designation)) {
+        return c.json(
+          { success: false, error: `Author ${i + 1}: please select a valid designation.` },
+          400
+        );
+      }
+      if (designation === 'Other' && !otherDesignation) {
+        return c.json(
+          { success: false, error: `Author ${i + 1}: please enter your designation.` },
+          400
+        );
+      }
+
+      authors.push({
+        is_primary: i === 0 ? 1 : 0,
+        first_name: parts.shift() as string,
+        last_name: parts.join(' '),
+        phone,
+        email,
+        college,
+        title,
+        designation: designation === 'Other' ? otherDesignation : designation,
+      });
+    }
+
+    const emails = authors.map((a) => a.email.toLowerCase());
+    if (new Set(emails).size !== emails.length) {
+      return c.json({ success: false, error: 'Each author must have a different email address.' }, 400);
+    }
+
+    const primary = authors[0];
+    const now = new Date().toISOString();
+    const statements: D1PreparedStatement[] = [
+      c.env.DB.prepare(`DELETE FROM authors WHERE submission_id = ?`).bind(gate.submission.id),
+    ];
+    for (const a of authors) {
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO authors
+            (id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          gate.submission.id,
+          a.is_primary,
+          a.first_name,
+          a.last_name,
+          a.phone,
+          a.email,
+          a.college,
+          a.title,
+          a.designation,
+          now
+        )
+      );
+    }
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE submissions
+         SET author_name = ?, author_email = ?, authors_finalised_at = ?, updated_at = ?
+         WHERE id = ? AND authors_finalised_at IS NULL`
+      ).bind(`${primary.first_name} ${primary.last_name}`.trim(), primary.email, now, now, gate.submission.id)
+    );
+
+    await c.env.DB.batch(statements);
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT id, is_primary, first_name, last_name, phone, email, college, title, designation
+       FROM authors WHERE submission_id = ? ORDER BY is_primary DESC, created_at ASC`
+    ).bind(gate.submission.id).all();
+
+    return c.json({ success: true, authors: results, authors_finalised_at: now });
+  } catch (error) {
+    console.error('Save author details error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });
@@ -3451,16 +3674,39 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
       return c.json({ success: false, error: 'The primary author must have an email address.' }, 400);
     }
 
+    // Certificate details (title / designation) are collected once by the
+    // author. An admin name/phone/email correction must never wipe them, so
+    // carry them over from the row with the same email address.
+    const previous = await c.env.DB.prepare(
+      `SELECT email, title, designation FROM authors WHERE submission_id = ?`
+    ).bind(submissionId).all();
+    const previousByEmail = new Map(
+      ((previous.results as any[]) || []).map((a) => [(a.email || '').trim().toLowerCase(), a])
+    );
+
     const now = new Date().toISOString();
     const statements: D1PreparedStatement[] = [
       c.env.DB.prepare(`DELETE FROM authors WHERE submission_id = ?`).bind(submissionId),
     ];
     for (const a of authors) {
+      const old = previousByEmail.get((a.email || '').toLowerCase());
       statements.push(
         c.env.DB.prepare(
-          `INSERT INTO authors (id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(crypto.randomUUID(), submissionId, a.is_primary, a.first_name, a.last_name, a.phone, a.email, a.college, now)
+          `INSERT INTO authors (id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          submissionId,
+          a.is_primary,
+          a.first_name,
+          a.last_name,
+          a.phone,
+          a.email,
+          a.college,
+          (old?.title as string) || '',
+          (old?.designation as string) || '',
+          now
+        )
       );
     }
     statements.push(
@@ -3632,6 +3878,19 @@ const EXPORT_COLUMNS: { id: string; label: string; pick: (s: any) => string }[] 
   { id: 'author_email', label: 'Primary Author Email', pick: (s) => s.author_email || '' },
   { id: 'author_phone', label: 'Primary Author Phone', pick: (s) => (exportPrimaryAuthor(s)?.phone || '') as string },
   { id: 'author_institution', label: 'Primary Author Institution', pick: (s) => (exportPrimaryAuthor(s)?.college || '') as string },
+  // Certificate data: title + designation come from the author's one-time,
+  // final "Edit Authors" submission (migration 0041).
+  { id: 'author_title', label: 'Primary Author Title', pick: (s) => (exportPrimaryAuthor(s)?.title || '') as string },
+  { id: 'author_designation', label: 'Primary Author Designation', pick: (s) => (exportPrimaryAuthor(s)?.designation || '') as string },
+  { id: 'certificate_author_details', label: 'Author Details for Certificates', pick: (s) => (s.authors || [])
+      .map((a: any) => {
+        const name = `${a.first_name || ''} ${a.last_name || ''}`.trim();
+        const prefix = a.title ? `${a.title} ` : '';
+        const suffix = a.designation ? ` (${a.designation})` : '';
+        return name ? `${prefix}${name}${suffix}` : '';
+      })
+      .filter(Boolean)
+      .join('; ') },
   { id: 'co_authors', label: 'Co-Authors', pick: (s) => exportCoAuthors(s).map((a: any) => `${a.first_name} ${a.last_name}`.trim()).filter(Boolean).join('; ') },
   { id: 'co_author_emails', label: 'Co-Author Emails', pick: (s) => exportCoAuthors(s).map((a: any) => a.email || '').filter(Boolean).join('; ') },
   { id: 'submitted_at', label: 'Submitted At', pick: (s) => fmtExportDate(s.submitted_at) },
@@ -3798,7 +4057,7 @@ app.post('/api/admin/export', async (c) => {
         chunks.map(async (chunk) => {
           const placeholders = chunk.map(() => '?').join(',');
           const res = await c.env.DB.prepare(
-            `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college
+            `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation
              FROM authors
              WHERE submission_id IN (${placeholders})
              ORDER BY is_primary DESC, created_at ASC`
@@ -4822,6 +5081,18 @@ app.post('/api/admin/settings', async (c) => {
           `INSERT INTO settings (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value`
         ).bind('phase2_enabled', body.phase2_enabled.toString())
+      );
+    }
+
+    // Author-details editor. OFF by default; authors only see "Edit Authors"
+    // on payment-approved papers when this is explicitly switched on, and the
+    // server-side endpoint refuses every request while it is off.
+    if (typeof body.author_edits_enabled === 'boolean') {
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO settings (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value`
+        ).bind('author_edits_enabled', body.author_edits_enabled.toString())
       );
     }
 
