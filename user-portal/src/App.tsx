@@ -299,7 +299,7 @@ export default function App() {
                 <SubmissionClosedNotice
                   message={
                     submitBlockMessage ||
-                    'New submissions are currently closed. Please contact the conference team if you need to submit a paper.'
+                    'New submissions are currently closed.'
                   }
                   email={submitEmail}
                 />

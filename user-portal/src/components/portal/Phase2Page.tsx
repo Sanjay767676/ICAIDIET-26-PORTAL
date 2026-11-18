@@ -678,8 +678,7 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
               {status.locked ? (
                 <div className="mt-3 rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-xs text-black/70">
                   <span className="font-semibold text-black/80">Locked.</span> Your Phase 2 package
-                  has been accepted/finalised — editing is not allowed. Contact the organizers if a
-                  change is required.
+                  has been accepted/finalised — editing is not allowed.
                 </div>
               ) : (
                 <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
@@ -738,7 +737,7 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
                   </div>
                   <p className="mt-2.5 text-[11px] text-black/55">
                     Saved with your first Phase 2 submission and kept unchanged when you upload
-                    corrected files. Contact the organizers if it needs to be changed.
+                    corrected files.
                   </p>
                 </div>
               ) : (

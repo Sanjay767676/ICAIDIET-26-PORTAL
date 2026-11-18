@@ -2778,7 +2778,7 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
       return c.json(
         {
           success: false,
-          error: 'File updates have been closed by the conference team. Please contact us if you need to make a correction.',
+          error: 'File updates are closed at the moment.',
           file_edits_enabled: false,
         },
         403
@@ -2817,7 +2817,7 @@ app.post('/api/submissions/:id/files', requireClerkAuth, async (c) => {
           locked: true,
           phase2_locked: true,
           error:
-            'Your camera-ready submission is final, so the paper files can no longer be changed. Please contact the organizers if a correction is required.',
+            'Your camera-ready submission is final, so the paper files can no longer be changed.',
         },
         409
       );
@@ -3105,7 +3105,7 @@ async function preparePhase2Submission(
         {
           success: false,
           error:
-            'Your Phase 2 submission has already been submitted and can no longer be edited. Please contact the organizers if a change is required.',
+            'Your Phase 2 submission has already been submitted and can no longer be edited.',
           locked: true,
         },
         409
@@ -3503,7 +3503,7 @@ app.get('/api/phase2/templates/:kind', async (c) => {
 
     const object = await c.env.PHASE2_BUCKET.get(template.key);
     if (!object) {
-      return c.json({ success: false, error: 'That template is not available yet. Please contact the organizers.' }, 404);
+      return c.json({ success: false, error: 'That template is not available yet.' }, 404);
     }
 
     return new Response(object.body, {
@@ -4803,7 +4803,7 @@ function userPortalGate(
         success: false,
         code: 'EMAIL_UNAVAILABLE',
         error:
-          'We could not read the email address of your signed-in account, so the approved list cannot be checked. Please sign out and sign in again, or contact the conference team.',
+          'We could not read the email address of your signed-in account, so the approved list cannot be checked. Please sign out and sign in again.',
         maintenance_until: until,
       },
     };
@@ -4817,8 +4817,8 @@ function userPortalGate(
         code: 'NOT_APPROVED',
         error:
           action === 'submit'
-            ? 'New submissions are currently limited to specific email addresses. Please contact the conference team if you need to be added to the list.'
-            : 'File updates are currently limited to specific email addresses. Please contact the conference team if you need to be added to the list.',
+            ? 'New submissions are currently limited to specific email addresses.'
+            : 'File updates are currently limited to specific email addresses.',
         maintenance_until: until,
       },
     };
@@ -4868,7 +4868,7 @@ async function registrationEligible(
 
   const hasAccess = isRegistrationOpen || Boolean(row.has_grant) || row.payment_status === 'APPROVED' || row.payment_status === 'PENDING';
   if (!hasAccess) {
-    return { ok: false, error: 'Payment access has not been granted for this paper. Contact admin.' };
+    return { ok: false, error: 'Payment access has not been granted for this paper.' };
   }
   return { ok: true };
 }

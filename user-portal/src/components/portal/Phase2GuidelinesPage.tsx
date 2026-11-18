@@ -249,7 +249,7 @@ export function Phase2GuidelinesPage({ onBack }: Phase2GuidelinesPageProps) {
                 11
               </span>
               <div className="text-sm text-black/85 leading-relaxed">
-                <strong>Citations</strong> must be numbered inside <strong>square brackets</strong> in order of appearance, for example <code className="bg-stone-200 text-black px-1.5 py-0.5 rounded font-mono font-semibold text-xs">[1]</code>, <code className="bg-stone-200 text-black px-1.5 py-0.5 rounded font-mono font-semibold text-xs">[2]</code>, <code className="bg-stone-200 text-black px-1.5 py-0.5 rounded font-mono font-semibold text-xs">[3]</code>. The template also mentions author-date citations, such as <em>(Aggarwal, 2026)</em> or <em>Sodhi (2026)</em>, so authors should confirm with the organisers which style to follow.
+                <strong>Citations</strong> must be numbered inside <strong>square brackets</strong> in order of appearance, for example <code className="bg-stone-200 text-black px-1.5 py-0.5 rounded font-mono font-semibold text-xs">[1]</code>, <code className="bg-stone-200 text-black px-1.5 py-0.5 rounded font-mono font-semibold text-xs">[2]</code>, <code className="bg-stone-200 text-black px-1.5 py-0.5 rounded font-mono font-semibold text-xs">[3]</code>. The template also mentions author-date citations, such as <em>(Aggarwal, 2026)</em> or <em>Sodhi (2026)</em>. Follow the numbered square-bracket style for this conference.
               </div>
             </div>
 

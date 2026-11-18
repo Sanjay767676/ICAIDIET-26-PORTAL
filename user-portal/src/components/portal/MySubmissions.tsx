@@ -1486,8 +1486,7 @@ export function MySubmissions({
             </button>
           ) : (
             <p className="text-sm font-medium text-amber-800 bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 inline-block">
-              New paper submissions are currently closed. Please contact the conference team
-              (icaidiet26@gmail.com) if you need to submit a paper.
+              New paper submissions are currently closed.
             </p>
           )}
         </div>
@@ -1660,8 +1659,7 @@ export function MySubmissions({
 
                   {!maintenanceMode && !fileEditsEnabled && (
                     <div className="mt-3 text-xs text-red-800 bg-red-50 border border-red-200 rounded-lg p-2.5">
-                      File updates are closed for now. If you need to correct your paper, please contact the
-                      conference team.
+                      File updates are closed for now.
                     </div>
                   )}
                 </div>
@@ -2071,7 +2069,7 @@ export function MySubmissions({
                         </h4>
                         <p className="text-sm text-red-700 max-w-xl mx-auto leading-relaxed font-medium">
                           Registration is currently closed. Your paper is accepted, but the payment form
-                          has not been opened for it yet. Contact Admin for access 7358981203 | icaidiet26@gmail.com
+                          has not been opened for it yet.
                         </p>
                         {isPaymentApproved && (
                           <div className="mt-4 px-4 py-2 bg-green-100 text-green-800 border border-green-300 rounded-lg text-sm font-semibold">
