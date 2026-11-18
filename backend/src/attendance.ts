@@ -11,7 +11,7 @@
 // The QR key never leaves the Worker, so a QR cannot be forged, and any other
 // QR (UPI, URLs, another event) is rejected by the scanner and the server.
 //
-// Flow: scanner (no sign-in, GPS-fenced to SNS College of Technology)
+// Flow: scanner (no sign-in, no location check)
 //   POST /api/attendance/scan  -> paper details + a 15-minute signed ticket
 //   POST /api/attendance/mark  -> ticket + which authors are present
 // paper_attendance.submission_id is the PRIMARY KEY, so a paper is marked
@@ -50,30 +50,17 @@ const ELIGIBLE_SQL = `s.deleted_at IS NULL AND (s.attendance_mode = 'OFFLINE' OR
 ).join(',')}))`;
 
 // ------------------------------------------------------------------
-// Venue geofence. Centre = SNS College of Technology, Vazhiyampalayam,
-// Coimbatore (decoded from its India Post DIGIPIN M9F-KL7-KF33). Can be
-// overridden without a deploy via the `attendance_scanner_config` settings row
-// (POST /api/admin/attendance/config).
+// Scanner settings. There is no location check: the scanner works anywhere.
+// `scanning_enabled` lets the organisers pause scanning without a deploy
+// (POST /api/admin/attendance/config {"scanning_enabled": false}).
 // ------------------------------------------------------------------
 type ScannerConfig = {
-  // Off by default (organisers' decision, 19 Nov). Turn on with
-  // POST /api/admin/attendance/config {"geofence_enabled": true}.
-  geofence_enabled: boolean;
   venue_name: string;
-  venue_lat: number;
-  venue_lng: number;
-  radius_m: number;
-  max_accuracy_m: number;
   scanning_enabled: boolean;
 };
 
 const DEFAULT_CONFIG: ScannerConfig = {
-  geofence_enabled: false,
   venue_name: 'SNS College of Technology, Coimbatore',
-  venue_lat: 11.09991,
-  venue_lng: 77.02656,
-  radius_m: 700,
-  max_accuracy_m: 250,
   scanning_enabled: true,
 };
 
@@ -86,14 +73,8 @@ function parseConfig(raw: unknown): ScannerConfig {
   } catch {
     o = {};
   }
-  const n = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
   return {
-    geofence_enabled: o.geofence_enabled === true,
     venue_name: typeof o.venue_name === 'string' && o.venue_name.trim() ? o.venue_name.trim().slice(0, 120) : DEFAULT_CONFIG.venue_name,
-    venue_lat: n(o.venue_lat, DEFAULT_CONFIG.venue_lat),
-    venue_lng: n(o.venue_lng, DEFAULT_CONFIG.venue_lng),
-    radius_m: Math.min(5000, Math.max(50, n(o.radius_m, DEFAULT_CONFIG.radius_m))),
-    max_accuracy_m: Math.min(2000, Math.max(20, n(o.max_accuracy_m, DEFAULT_CONFIG.max_accuracy_m))),
     scanning_enabled: o.scanning_enabled !== false,
   };
 }
@@ -104,31 +85,6 @@ async function loadConfig(env: Env, fresh = false): Promise<ScannerConfig> {
   const value = parseConfig(row?.value ?? null);
   configCache = { value, at: Date.now() };
   return value;
-}
-
-function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371000;
-  const r = (d: number) => (d * Math.PI) / 180;
-  const a = Math.sin(r(lat2 - lat1) / 2) ** 2 + Math.cos(r(lat1)) * Math.cos(r(lat2)) * Math.sin(r(lng2 - lng1) / 2) ** 2;
-  return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
-}
-
-function checkGeofence(cfg: ScannerConfig, lat: unknown, lng: unknown, acc: unknown) {
-  if (!cfg.geofence_enabled) return { ok: true as const, distance_m: null };
-  const la = Number(lat);
-  const ln = Number(lng);
-  const ac = Number(acc);
-  if (lat === null || lng === null || lat === undefined || lng === undefined || !Number.isFinite(la) || !Number.isFinite(ln) || Math.abs(la) > 90 || Math.abs(ln) > 180) {
-    return { ok: false as const, code: 'NO_LOCATION', error: 'Turn on GPS and allow location access to use the scanner.' };
-  }
-  if (!Number.isFinite(ac) || ac <= 0 || ac > cfg.max_accuracy_m) {
-    return { ok: false as const, code: 'WEAK_GPS', error: 'GPS signal is too weak. Move near a window or outdoors and try again.' };
-  }
-  const d = distanceMeters(la, ln, cfg.venue_lat, cfg.venue_lng);
-  if (d > cfg.radius_m + Math.min(ac, 75)) {
-    return { ok: false as const, code: 'OUTSIDE_VENUE', error: 'This geolocation is not accessible.', distance_m: Math.round(d) };
-  }
-  return { ok: true as const, distance_m: Math.round(d) };
 }
 
 // ------------------------------------------------------------------
@@ -312,8 +268,7 @@ function log(c: any, row: { submission_id?: string | null; result: string; detai
 // routes
 // ------------------------------------------------------------------
 export function registerAttendanceRoutes(app: Hono<any>, deps: AttendanceDeps) {
-  // Public: the scanner reads the fence so it can block the camera off-campus.
-  // The server checks again on every scan and every mark.
+  // Public: the scanner reads whether scanning is paused.
   app.get('/api/attendance/config', async (c) => {
     const cfg = await loadConfig(c.env as Env);
     return c.json({ success: true, ...cfg });
@@ -329,11 +284,6 @@ export function registerAttendanceRoutes(app: Hono<any>, deps: AttendanceDeps) {
     const cfg = await loadConfig(env);
     if (!cfg.scanning_enabled) return c.json({ success: false, code: 'PAUSED', error: 'Attendance scanning is paused by the organisers.' }, 403);
 
-    const geo = checkGeofence(cfg, lat, lng, accuracy);
-    if (!geo.ok) {
-      log(c, { result: geo.code, lat, lng, acc: accuracy });
-      return c.json({ success: false, ...geo }, 403);
-    }
 
     const token = await verifyQr(env, body?.qr);
     if (!token) {
@@ -368,11 +318,6 @@ export function registerAttendanceRoutes(app: Hono<any>, deps: AttendanceDeps) {
     const { lat, lng, accuracy } = body || {};
     const cfg = await loadConfig(env);
     if (!cfg.scanning_enabled) return c.json({ success: false, code: 'PAUSED', error: 'Attendance scanning is paused by the organisers.' }, 403);
-    const geo = checkGeofence(cfg, lat, lng, accuracy);
-    if (!geo.ok) {
-      log(c, { result: 'MARK_' + geo.code, lat, lng, acc: accuracy });
-      return c.json({ success: false, ...geo }, 403);
-    }
 
     const v = await deps.verifyToken(c, String(body?.ticket || ''));
     if (!v.ok || !v.subject?.startsWith('attscan:')) {

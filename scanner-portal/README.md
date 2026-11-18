@@ -12,10 +12,9 @@ Backend: `backend/src/attendance.ts` + migration `0043_paper_attendance.sql`.
 - **Only this scanner reads it.** The QR is `ICD26.<token>.<HMAC signature>`; the
   signing key never leaves the Worker, so QRs cannot be forged and any other QR is
   rejected.
-- **Campus only.** The phone's GPS must be within the radius of SNS College of
-  Technology, Coimbatore (centre 11.09991, 77.02656, radius 700 m). Outside it the
-  scanner shows "This geolocation is not accessible". The server checks the
-  location again on every scan and every mark.
+- **No location check.** The scanner never asks for GPS and works anywhere.
+- **Camera asked once.** After the first "Start scanning" (or if camera access
+  is already allowed) the scanner opens straight to the camera on later visits.
 - **Marking.** After a verified scan the phone vibrates and shows the paper title,
   each author (title, first and last name) with Present / Absent buttons, the
   College / Industry name, the head count from the camera-ready form (read only)
@@ -37,4 +36,4 @@ Backend: `backend/src/attendance.ts` + migration `0043_paper_attendance.sql`.
 - `GET /api/admin/attendance` – every eligible paper with its status and roster
 - `GET /api/admin/attendance/export` – Excel report
 - `POST /api/admin/attendance/:submissionId/reset` – undo a mistaken mark
-- `GET|POST /api/admin/attendance/config` – adjust venue centre / radius / pause
+- `GET|POST /api/admin/attendance/config` – pause / resume scanning
