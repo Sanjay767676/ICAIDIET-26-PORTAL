@@ -20,6 +20,7 @@ export type Paper = {
   };
 };
 export type VenueConfig = {
+  geofence_enabled: boolean;
   venue_name: string;
   venue_lat: number;
   venue_lng: number;

@@ -56,6 +56,9 @@ const ELIGIBLE_SQL = `s.deleted_at IS NULL AND (s.attendance_mode = 'OFFLINE' OR
 // (POST /api/admin/attendance/config).
 // ------------------------------------------------------------------
 type ScannerConfig = {
+  // Off by default (organisers' decision, 19 Nov). Turn on with
+  // POST /api/admin/attendance/config {"geofence_enabled": true}.
+  geofence_enabled: boolean;
   venue_name: string;
   venue_lat: number;
   venue_lng: number;
@@ -65,6 +68,7 @@ type ScannerConfig = {
 };
 
 const DEFAULT_CONFIG: ScannerConfig = {
+  geofence_enabled: false,
   venue_name: 'SNS College of Technology, Coimbatore',
   venue_lat: 11.09991,
   venue_lng: 77.02656,
@@ -84,6 +88,7 @@ function parseConfig(raw: unknown): ScannerConfig {
   }
   const n = (v: unknown, d: number) => (typeof v === 'number' && Number.isFinite(v) ? v : d);
   return {
+    geofence_enabled: o.geofence_enabled === true,
     venue_name: typeof o.venue_name === 'string' && o.venue_name.trim() ? o.venue_name.trim().slice(0, 120) : DEFAULT_CONFIG.venue_name,
     venue_lat: n(o.venue_lat, DEFAULT_CONFIG.venue_lat),
     venue_lng: n(o.venue_lng, DEFAULT_CONFIG.venue_lng),
@@ -109,6 +114,7 @@ function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number):
 }
 
 function checkGeofence(cfg: ScannerConfig, lat: unknown, lng: unknown, acc: unknown) {
+  if (!cfg.geofence_enabled) return { ok: true as const, distance_m: null };
   const la = Number(lat);
   const ln = Number(lng);
   const ac = Number(acc);
@@ -406,9 +412,9 @@ export function registerAttendanceRoutes(app: Hono<any>, deps: AttendanceDeps) {
         paper.colleges.join('; '),
         now,
         istDay(),
-        Number(lat),
-        Number(lng),
-        Number(accuracy),
+        Number.isFinite(Number(lat)) && lat !== null ? Number(lat) : null,
+        Number.isFinite(Number(lng)) && lng !== null ? Number(lng) : null,
+        Number.isFinite(Number(accuracy)) && accuracy !== null ? Number(accuracy) : null,
         ip(c),
         (c.req.header('User-Agent') || '').slice(0, 200)
       )

@@ -16,6 +16,7 @@ type Toast = { title: string; detail: string };
 const SAME_CODE_COOLDOWN_MS = 3000;
 
 function geoGate(cfg: VenueConfig | null, fix: Fix | null) {
+  if (cfg && !cfg.geofence_enabled) return { ok: true as const, d: 0, acc: 0 };
   if (!cfg || !fix) return null;
   const d = distanceMeters(fix.lat, fix.lng, cfg.venue_lat, cfg.venue_lng);
   if (fix.accuracy > cfg.max_accuracy_m) return { ok: false as const, reason: 'weak' as const, d, acc: fix.accuracy };
@@ -37,8 +38,9 @@ export default function Scanner() {
   const recent = useRef(new Map<string, number>());
   const busyRef = useRef(false);
 
-  const { state: geo, latest: fixRef } = useGeolocation(true);
   const [cfg, setCfg] = useState<VenueConfig | null>(null);
+  // GPS is only requested when the organisers turn the location check on.
+  const { state: geo, latest: fixRef } = useGeolocation(!!cfg?.geofence_enabled);
   const [cfgError, setCfgError] = useState<string | null>(null);
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [present, setPresent] = useState<Set<string>>(new Set());
@@ -263,6 +265,7 @@ export default function Scanner() {
   // ---- what blocks scanning right now -------------------------------------
   let blocker: { title: string; body: string; icon: 'pin' | 'locate'; retry?: () => void } | null = null;
   if (cfgError) blocker = { title: 'Server not reachable', body: cfgError, icon: 'pin', retry: loadCfg };
+  else if (cfg && !cfg.geofence_enabled) blocker = cfg.scanning_enabled ? null : { title: 'Scanning is paused', body: 'The organisers have paused attendance scanning.', icon: 'pin' };
   else if (geo.status === 'denied' || geo.status === 'unavailable')
     blocker = { title: 'This geolocation is not accessible', body: geo.message, icon: 'pin', retry: reload };
   else if (!cfg || geo.status === 'waiting') blocker = { title: 'Finding your location', body: 'Hold on while GPS gets a fix.', icon: 'locate' };
@@ -284,7 +287,7 @@ export default function Scanner() {
           <h1 className="font-serif text-[16px] leading-tight font-bold truncate">ICAIDIET Attendance Scanner</h1>
           <p className="text-xs text-white/60 truncate">{cfg?.venue_name || 'SNS College of Technology, Coimbatore'}</p>
         </div>
-        {gate?.ok && (
+        {gate?.ok && cfg?.geofence_enabled && (
           <span title="On campus" className="flex items-center justify-center rounded-full bg-brand-accent text-black w-9 h-9 shrink-0">
             <LocateFixed className="w-4 h-4" />
             <span className="sr-only">On campus</span>
@@ -320,7 +323,7 @@ export default function Scanner() {
         {onCampus && !started && !blocker && (
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center px-8 bg-brand-bg text-black">
             <img src="/favicon.png" alt="" className="h-28 w-auto" />
-            <h2 className="font-serif text-2xl font-bold mt-4">You are on campus</h2>
+            <h2 className="font-serif text-2xl font-bold mt-4">{cfg?.geofence_enabled ? 'You are on campus' : 'Ready to scan'}</h2>
             <p className="mt-2 text-[15px] text-black/75 max-w-xs">Allow the camera when asked. The phone vibrates when a QR is verified.</p>
             <button
               onClick={() => {
