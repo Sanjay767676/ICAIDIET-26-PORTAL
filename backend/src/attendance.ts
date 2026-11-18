@@ -406,6 +406,71 @@ export function registerAttendanceRoutes(app: Hono<any>, deps: AttendanceDeps) {
     }
   });
 
+  // Lightweight author-facing poll: answers only "has this paper been marked?".
+  // The full endpoint above bundles the QR generation into every call, which
+  // meant every status poll re-ran syncAttendanceQrs() (two queries + an HMAC)
+  // and ensureUserForClerk() (a scan of the whole users table). The QR is
+  // already on the author's screen and never changes, so none of that is
+  // needed just to read paper_attendance.
+  //
+  // Ownership is checked straight from the Clerk email. If that cannot prove
+  // ownership, the client is told to use the full endpoint, whose user_id
+  // check remains the safety net — no author loses access.
+  // Read-only: nothing here touches the scan / mark flow or either QR table.
+  app.get('/api/submissions/:id/attendance/status', deps.requireClerkAuth, async (c) => {
+    try {
+      const env = c.env as Env;
+      const submission = (await env.DB.prepare(
+        `SELECT s.id, s.user_id, s.author_email, s.deleted_at,
+                CASE WHEN ${ELIGIBLE_SQL} THEN 1 ELSE 0 END AS eligible
+         FROM submissions s WHERE s.id = ?`
+      ).bind(c.req.param('id')).first()) as any;
+      if (!submission || submission.deleted_at) {
+        return c.json({ success: false, error: 'Submission not found.' }, 404);
+      }
+      if (!submission.eligible) return c.json({ success: true, eligible: false });
+
+      const clerkEmail = (((c as any).get('clerkEmail') as string) || '').trim().toLowerCase();
+      const clerkUserId = (c as any).get('clerkUserId') as string;
+
+      let authorized = false;
+      if (clerkEmail) {
+        if ((submission.author_email || '').trim().toLowerCase() === clerkEmail) {
+          authorized = true;
+        } else {
+          const inAuthors = await env.DB.prepare(
+            `SELECT 1 FROM authors WHERE submission_id = ? AND lower(trim(email)) = ? LIMIT 1`
+          ).bind(submission.id, clerkEmail).first();
+          authorized = !!inAuthors;
+        }
+      }
+      if (!authorized && clerkUserId) {
+        const placeholder = await env.DB.prepare(
+          `SELECT 1 FROM users WHERE id = ? AND email = ? || '@clerk.local' LIMIT 1`
+        ).bind(String(submission.user_id || ''), clerkUserId).first();
+        authorized = !!placeholder;
+      }
+      if (!authorized) {
+        return c.json({ success: false, code: 'USE_FULL_CHECK' }, 403);
+      }
+
+      const marked = (await env.DB.prepare(
+        `SELECT marked_at, presented_count FROM paper_attendance WHERE submission_id = ?`
+      ).bind(submission.id).first()) as any;
+
+      return c.json({
+        success: true,
+        eligible: true,
+        marked: !!marked,
+        marked_at: marked?.marked_at ?? null,
+        presented_count: marked?.presented_count ?? null,
+      });
+    } catch (e) {
+      console.error('attendance status', e);
+      return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+    }
+  });
+
   // ---- admin (guarded by the /api/admin/* middleware in index.ts) ---------
   app.get('/api/admin/attendance', async (c) => {
     const env = c.env as Env;

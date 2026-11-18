@@ -39,8 +39,13 @@ export function AttendanceQR({
   const marked = useRef(false);
   const mounted = useRef(true);
   const timer = useRef<number | undefined>(undefined);
+  // First load uses the full endpoint to obtain the QR. Later checks only
+  // need the tiny status endpoint. If that endpoint cannot authorise an
+  // author, fall back to the full endpoint for the rest of this session.
+  const hasQr = useRef(false);
+  const useFullPolling = useRef(false);
 
-  const check = useCallback(async () => {
+  const check = useCallback(async (forceFull = false) => {
     if (!mounted.current || marked.current || inFlight.current) return;
     inFlight.current = true;
     if (timer.current !== undefined) {
@@ -60,11 +65,25 @@ export function AttendanceQR({
         return;
       }
 
-      const res = await fetch(`${API_URL}/api/submissions/${submissionId}/attendance`, {
-        headers: { Authorization: `Bearer ${token}` },
-        cache: 'no-store',
-      });
-      const data = await res.json().catch(() => null);
+      // Full endpoint once (delivers the QR), tiny status endpoint thereafter.
+      const request = async (full: boolean) => {
+        const url = full
+          ? `${API_URL}/api/submissions/${submissionId}/attendance`
+          : `${API_URL}/api/submissions/${submissionId}/attendance/status`;
+        const r = await fetch(url, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: 'no-store',
+        });
+        return { res: r, data: await r.json().catch(() => null) };
+      };
+
+      let { res, data } = await request(forceFull || !hasQr.current || useFullPolling.current);
+      if (!forceFull && !useFullPolling.current && hasQr.current && res.status === 403 && data?.code === 'USE_FULL_CHECK') {
+        // The status endpoint could not prove ownership from the Clerk email;
+        // the full endpoint's user_id check is the safety net.
+        useFullPolling.current = true;
+        ({ res, data } = await request(true));
+      }
 
       // Backend without the attendance feature yet: show nothing.
       if (res.status === 404 && !data) {
@@ -96,11 +115,14 @@ export function AttendanceQR({
         return;
       }
 
+      // A status-only reply has no QR field: the image already on screen stays.
+      if (!data.qr) return;
       const image = await QRCode.toDataURL(data.qr, {
         errorCorrectionLevel: 'M',
         margin: 2,
         width: 560,
       });
+      hasQr.current = true;
       setState((prev) => (prev.kind === 'qr' && prev.image === image ? prev : { kind: 'qr', image }));
     } catch {
       setState((prev) =>
@@ -162,6 +184,8 @@ export function AttendanceQR({
   // A different paper means a fresh, unmarked status to watch.
   useEffect(() => {
     marked.current = false;
+    hasQr.current = false;
+    useFullPolling.current = false;
     setState({ kind: 'loading' });
     void checkRef.current();
   }, [submissionId]);
@@ -180,7 +204,7 @@ export function AttendanceQR({
     return (
       <div className="bg-white rounded-2xl p-5 shadow-lg border-2 border-red-300 text-red-700 text-sm flex items-center justify-between gap-3">
         <span>{state.message}</span>
-        <button onClick={() => void check()} className="inline-flex items-center gap-1.5 font-bold underline">
+        <button onClick={() => void check(true)} className="inline-flex items-center gap-1.5 font-bold underline">
           <RefreshCw className="w-4 h-4" /> Retry
         </button>
       </div>
