@@ -32,6 +32,9 @@ interface Phase2Status {
   // for changes. Locked otherwise (including while awaiting review).
   can_edit: boolean;
   locked: boolean;
+  // Attendance mode / head count / track are saved at the first submission and
+  // stay locked even when a reviewer reopens the files for corrections.
+  attendance_locked: boolean;
   phase2: {
     submitted_at: string;
     attendance_mode: string | null;
@@ -219,17 +222,21 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
 
   const submit = async () => {
     setFormError('');
-    if (!attendance) {
-      setFormError('Please select whether you will attend Online or Offline.');
-      return;
-    }
-    if (attendance === 'OFFLINE' && !headCount) {
-      setFormError('Please select how many people will be attending (1 to 6).');
-      return;
-    }
-    if (!track) {
-      setFormError('Please select the track you will be attending for.');
-      return;
+    // Attendance is immutable after the first submission, so the locked
+    // read-only view has no attendance fields to validate or send.
+    if (!status?.attendance_locked) {
+      if (!attendance) {
+        setFormError('Please select whether you will attend Online or Offline.');
+        return;
+      }
+      if (attendance === 'OFFLINE' && !headCount) {
+        setFormError('Please select how many people will be attending (1 to 6).');
+        return;
+      }
+      if (!track) {
+        setFormError('Please select the track you will be attending for.');
+        return;
+      }
     }
     if (!cameraReady) {
       setFormError('Please attach the camera-ready manuscript as a PDF file.');
@@ -263,9 +270,11 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
       const token = await getToken();
       if (!token) throw new Error('Please sign in again.');
       const fd = new FormData();
-      fd.append('attendance_mode', attendance);
-      fd.append('track', track);
-      if (attendance === 'OFFLINE') fd.append('head_count', headCount);
+      if (!status?.attendance_locked) {
+        fd.append('attendance_mode', attendance);
+        fd.append('track', track);
+        if (attendance === 'OFFLINE') fd.append('head_count', headCount);
+      }
       fd.append('declaration', 'true');
       fd.append('camera_ready', cameraReady);
       fd.append('copyright_form', copyrightForm);
@@ -675,8 +684,8 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
               ) : (
                 <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-xs text-amber-800">
                   <span className="font-semibold">Editing available.</span> The reviewer requested
-                  changes, so you can upload corrected files below. Re-submitting locks the package
-                  again.
+                  changes, so you can upload corrected files below. Your attendance details stay
+                  locked as first submitted; re-submitting locks the files again.
                 </div>
               )}
             </div>
@@ -693,95 +702,138 @@ export function Phase2Page({ submissionId, getToken, onBack, onGuidelines }: Pha
                   : 'All fields below are compulsory.'}
               </p>
 
-              {/* Mode of Attending (compulsory) */}
-              <div className="mb-5">
-                <div className="text-sm font-semibold text-black mb-2 flex items-center gap-2">
-                  Mode of Attending <span className="text-red-600">*</span>
-                  <span className="text-[10px] font-bold uppercase tracking-wide text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
-                    Important
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {(
-                    [
-                      { value: 'ONLINE', label: 'Online', icon: <Wifi className="w-4 h-4" /> },
-                      { value: 'OFFLINE', label: 'Offline', icon: <MapPin className="w-4 h-4" /> },
-                    ] as { value: AttendanceMode; label: string; icon: React.ReactNode }[]
-                  ).map((opt) => (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => {
-                        setAttendance(opt.value);
-                        // Head count only applies to offline attendance.
-                        if (opt.value === 'ONLINE') setHeadCount('');
-                      }}
-                      className={`inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border-2 transition-all ${
-                        attendance === opt.value
-                          ? 'bg-black text-white border-black'
-                          : 'bg-white text-black border-stone-300 hover:border-stone-500'
-                      }`}
-                    >
-                      {opt.icon} {opt.label}
-                    </button>
-                  ))}
-                </div>
-                <p className="mt-1.5 text-[11px] text-black/55">
-                  Please choose carefully — this decides how your paper will be presented.
-                </p>
-              </div>
-
-              {/* Offline attendees first tell us how many people are coming. */}
-              {attendance === 'OFFLINE' && (
-                <div className="mb-5">
-                  <label
-                    htmlFor="phase2-head-count"
-                    className="block text-sm font-semibold text-black mb-2"
-                  >
-                    Head Count Attending *
-                  </label>
-                  <select
-                    id="phase2-head-count"
-                    value={headCount}
-                    onChange={(e) => setHeadCount(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-white text-black border-2 border-stone-300 focus:border-black focus:ring-2 focus:ring-black/10 outline-none transition-all"
-                  >
-                    <option value="">Select head count</option>
-                    {HEAD_COUNT_OPTIONS.map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1.5 text-[11px] text-black/55">
-                    Total number of people attending the conference, including you.
+              {/* Attendance is a one-time choice. Reviewer-driven resubmissions
+                  may replace the files, but cannot reopen mode / head count. */}
+              {status.attendance_locked ? (
+                <div className="mb-5 rounded-xl border-2 border-stone-300 bg-stone-50 px-4 py-3">
+                  <div className="text-sm font-semibold text-black mb-2 flex items-center gap-2">
+                    Attendance details
+                    <span className="text-[10px] font-bold uppercase tracking-wide text-black/70 bg-stone-200 border border-stone-300 rounded-full px-2 py-0.5">
+                      Locked
+                    </span>
+                  </div>
+                  <div className="space-y-1.5 text-xs text-black/75">
+                    <div className="flex items-start justify-between gap-3">
+                      <span>Mode of Attending</span>
+                      <span className="font-semibold text-black text-right">
+                        {status.phase2?.attendance_mode === 'OFFLINE' ? 'Offline' : 'Online'}
+                      </span>
+                    </div>
+                    {status.phase2?.attendance_mode === 'OFFLINE' && (
+                      <div className="flex items-start justify-between gap-3">
+                        <span>Head Count Attending</span>
+                        <span className="font-semibold text-black">
+                          {status.phase2.head_count ?? '—'}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-start justify-between gap-3">
+                      <span>Track</span>
+                      <span className="font-semibold text-black text-right">
+                        {CONFERENCE_TRACKS.find((t) => t.value === status.phase2?.track)?.label ||
+                          status.phase2?.track ||
+                          '—'}
+                      </span>
+                    </div>
+                  </div>
+                  <p className="mt-2.5 text-[11px] text-black/55">
+                    Saved with your first Phase 2 submission and kept unchanged when you upload
+                    corrected files. Contact the organizers if it needs to be changed.
                   </p>
                 </div>
-              )}
+              ) : (
+                <>
+                  {/* Mode of Attending (compulsory) */}
+                  <div className="mb-5">
+                    <div className="text-sm font-semibold text-black mb-2 flex items-center gap-2">
+                      Mode of Attending <span className="text-red-600">*</span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-red-700 bg-red-100 border border-red-300 rounded-full px-2 py-0.5">
+                        Important
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      {(
+                        [
+                          { value: 'ONLINE', label: 'Online', icon: <Wifi className="w-4 h-4" /> },
+                          { value: 'OFFLINE', label: 'Offline', icon: <MapPin className="w-4 h-4" /> },
+                        ] as { value: AttendanceMode; label: string; icon: React.ReactNode }[]
+                      ).map((opt) => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => {
+                            setAttendance(opt.value);
+                            // Head count only applies to offline attendance.
+                            if (opt.value === 'ONLINE') setHeadCount('');
+                          }}
+                          className={`inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl text-sm font-semibold border-2 transition-all ${
+                            attendance === opt.value
+                              ? 'bg-black text-white border-black'
+                              : 'bg-white text-black border-stone-300 hover:border-stone-500'
+                          }`}
+                        >
+                          {opt.icon} {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-black/55">
+                      Please choose carefully — this decides how your paper will be presented.
+                    </p>
+                  </div>
 
-              {/* Track: online asks right away, offline asks after the head count. */}
-              {attendance && (
-                <div className="mb-5">
-                  <label htmlFor="phase2-track" className="block text-sm font-semibold text-black mb-2">
-                    Track *
-                  </label>
-                  <select
-                    id="phase2-track"
-                    value={track}
-                    onChange={(e) => setTrack(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-white text-black border-2 border-stone-300 focus:border-black focus:ring-2 focus:ring-black/10 outline-none transition-all"
-                  >
-                    <option value="">Select a track</option>
-                    {CONFERENCE_TRACKS.map((t) => (
-                      <option key={t.value} value={t.value}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="mt-1.5 text-[11px] text-black/55">
-                    Select the track you will be attending for.
-                  </p>
-                </div>
+                  {/* Offline attendees first tell us how many people are coming. */}
+                  {attendance === 'OFFLINE' && (
+                    <div className="mb-5">
+                      <label
+                        htmlFor="phase2-head-count"
+                        className="block text-sm font-semibold text-black mb-2"
+                      >
+                        Head Count Attending *
+                      </label>
+                      <select
+                        id="phase2-head-count"
+                        value={headCount}
+                        onChange={(e) => setHeadCount(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-white text-black border-2 border-stone-300 focus:border-black focus:ring-2 focus:ring-black/10 outline-none transition-all"
+                      >
+                        <option value="">Select head count</option>
+                        {HEAD_COUNT_OPTIONS.map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1.5 text-[11px] text-black/55">
+                        Total number of people attending the conference, including you.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Track: online asks right away, offline asks after the head count. */}
+                  {attendance && (
+                    <div className="mb-5">
+                      <label htmlFor="phase2-track" className="block text-sm font-semibold text-black mb-2">
+                        Track *
+                      </label>
+                      <select
+                        id="phase2-track"
+                        value={track}
+                        onChange={(e) => setTrack(e.target.value)}
+                        className="w-full px-4 py-3 rounded-xl bg-white text-black border-2 border-stone-300 focus:border-black focus:ring-2 focus:ring-black/10 outline-none transition-all"
+                      >
+                        <option value="">Select a track</option>
+                        {CONFERENCE_TRACKS.map((t) => (
+                          <option key={t.value} value={t.value}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="mt-1.5 text-[11px] text-black/55">
+                        Select the track you will be attending for.
+                      </p>
+                    </div>
+                  )}
+                </>
               )}
 
               {/* PDF uploads: Camera-Ready and Copyright Form are compulsory.

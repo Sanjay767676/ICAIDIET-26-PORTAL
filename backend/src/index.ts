@@ -3026,6 +3026,20 @@ const PHASE2_TRACKS = new Set([
 // Offline attendees must say how many people are coming (1-6).
 const PHASE2_HEAD_COUNTS = new Set([1, 2, 3, 4, 5, 6]);
 
+// Attendance is chosen once, at the first Phase 2 submission. A reviewer can
+// reopen the package for minor/major changes, but that must not let the author
+// switch OFFLINE <-> ONLINE (or change the head count), because that silently
+// changes the offline attendee totals the organizers already published.
+function phase2AttendanceLocked(submission: {
+  phase2_submitted_at?: string | null;
+  attendance_mode?: string | null;
+}): boolean {
+  return (
+    !!submission.phase2_submitted_at &&
+    (submission.attendance_mode === 'ONLINE' || submission.attendance_mode === 'OFFLINE')
+  );
+}
+
 // Shared gate for the Phase 2 submit: maintenance + approved list (via
 // userPortalGate 'edit'), the phase2_enabled switch, ownership of the
 // submission, "the paper is actually in an accepted state", and an approved
@@ -3055,7 +3069,7 @@ async function preparePhase2Submission(
   // payment state.
   const submission = await c.env.DB.prepare(
     `SELECT id, user_id, author_email, status, payment_status, phase2_submitted_at, camera_ready_status, camera_ready_reviewed_at,
-            phase2_payment_waived
+            phase2_payment_waived, attendance_mode, phase2_track, phase2_head_count
        FROM submissions WHERE id = ? AND deleted_at IS NULL`
   ).bind(submissionId).first() as {
     id: string;
@@ -3063,6 +3077,9 @@ async function preparePhase2Submission(
     author_email: string;
     status: string;
     payment_status: string | null;
+    attendance_mode: string | null;
+    phase2_track: string | null;
+    phase2_head_count: number | null;
     phase2_submitted_at: string | null;
     camera_ready_status: string | null;
     camera_ready_reviewed_at: string | null;
@@ -3285,6 +3302,9 @@ app.get('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
       // the reviewer sent the package back for changes.
       can_edit: !submission.phase2_submitted_at || editableAfterReview,
       locked: !!submission.phase2_submitted_at && !editableAfterReview,
+      // Attendance is a one-time choice. Even while the files are editable
+      // after a review, the mode/head count/track stay as first submitted.
+      attendance_locked: phase2AttendanceLocked(submission),
       phase2: submission.phase2_submitted_at
         ? {
             submitted_at: submission.phase2_submitted_at,
@@ -3329,29 +3349,42 @@ app.post('/api/submissions/:id/phase2', requireClerkAuth, async (c) => {
 
     const submission = gate.submission;
 
+    // Once chosen at the first submission, attendance details are immutable —
+    // even when a reviewer reopens the package for minor/major changes. Ignore
+    // the client's values on a resubmission and keep what is already stored.
+    const attendanceLocked = phase2AttendanceLocked(submission);
     const formData = await c.req.parseBody();
 
-    const attendance = String(formData['attendance_mode'] || '').trim().toUpperCase();
-    if (!PHASE2_ATTENDANCE_MODES.has(attendance)) {
-      return c.json({ success: false, error: 'Please select whether you will attend Online or Offline.' }, 400);
-    }
-
-    // Track is compulsory for both modes; offline attendees also give a head
-    // count. Online submissions always store a NULL head count.
-    const phase2Track = String(formData['track'] || '').trim();
-    if (!PHASE2_TRACKS.has(phase2Track)) {
-      return c.json({ success: false, error: 'Please select the track you will be attending for.' }, 400);
-    }
-    let headCount: number | null = null;
-    if (attendance === 'OFFLINE') {
-      const rawHeadCount = Number(String(formData['head_count'] || '').trim());
-      if (!Number.isInteger(rawHeadCount) || !PHASE2_HEAD_COUNTS.has(rawHeadCount)) {
-        return c.json(
-          { success: false, error: 'Please select how many people will be attending (1 to 6).' },
-          400
-        );
+    let attendance: string;
+    let phase2Track: string;
+    let headCount: number | null;
+    if (attendanceLocked) {
+      attendance = submission.attendance_mode as string;
+      phase2Track = String(submission.phase2_track || '');
+      headCount = attendance === 'OFFLINE' ? submission.phase2_head_count ?? null : null;
+    } else {
+      attendance = String(formData['attendance_mode'] || '').trim().toUpperCase();
+      if (!PHASE2_ATTENDANCE_MODES.has(attendance)) {
+        return c.json({ success: false, error: 'Please select whether you will attend Online or Offline.' }, 400);
       }
-      headCount = rawHeadCount;
+
+      // Track is compulsory for both modes; offline attendees also give a head
+      // count. Online submissions always store a NULL head count.
+      phase2Track = String(formData['track'] || '').trim();
+      if (!PHASE2_TRACKS.has(phase2Track)) {
+        return c.json({ success: false, error: 'Please select the track you will be attending for.' }, 400);
+      }
+      headCount = null;
+      if (attendance === 'OFFLINE') {
+        const rawHeadCount = Number(String(formData['head_count'] || '').trim());
+        if (!Number.isInteger(rawHeadCount) || !PHASE2_HEAD_COUNTS.has(rawHeadCount)) {
+          return c.json(
+            { success: false, error: 'Please select how many people will be attending (1 to 6).' },
+            400
+          );
+        }
+        headCount = rawHeadCount;
+      }
     }
 
     const declared = formData['declaration'];
