@@ -2361,16 +2361,16 @@ async function isAuthorizedForSubmission(
 // ------------------------------------------------------------------
 // Author-editor variant. One switch, shared by the list and the endpoints:
 //
-//   'OFFLINE' (live now): only offline-attendance papers plus the specially
-//     listed paper 1271 get the editor. Their author count is FIXED and they
-//     must confirm they joined the WhatsApp group before finalising.
-//   'ONLINE' (held for later): online / not-yet-in-Phase-2 papers (except 1271)
-//     get the editor, may add authors up to 6, and have no WhatsApp step.
+//   'ONLINE' (live now): online-attendance papers AND papers still in the
+//     payment tab (no attendance mode yet), except paper 1271, get the editor.
+//     They may grow the list to 2-6 authors and have no WhatsApp step.
+//   'OFFLINE' (previous phase): offline-attendance papers plus paper 1271 got
+//     a fixed-count editor with a required WhatsApp group confirmation.
 //
-// When asked to switch over, flip AUTHOR_EDIT_MODE to 'ONLINE'.
+// To go back to the offline phase, flip AUTHOR_EDIT_MODE to 'OFFLINE'.
 // ------------------------------------------------------------------
 type AuthorEditMode = 'OFFLINE' | 'ONLINE';
-const AUTHOR_EDIT_MODE: AuthorEditMode = 'OFFLINE';
+const AUTHOR_EDIT_MODE: AuthorEditMode = 'ONLINE';
 const AUTHOR_EDIT_SPECIAL_PAPER_ID = '1271';
 const AUTHOR_EDIT_WHATSAPP_URL = 'https://chat.whatsapp.com/EI0ZkOXPaGvI8S72cOqkgd';
 
