@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+/* Same palette and type as the ICAIDIET'26 conference portal */
+@theme {
+  --color-brand-bg: #fdf08a;
+  --color-brand-card: #ffbf00;
+  --color-brand-text: #000000;
+  --color-brand-accent: #ffbf00;
+  --color-brand-footer: #000000;
+
+  --font-serif: "Libre Baskerville", serif;
+  --font-sans: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  html, body, #root { height: 100%; }
+  body {
+    background-color: var(--color-brand-bg);
+    color: var(--color-brand-text);
+    font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
+  h1, h2, h3, h4 { font-family: var(--font-serif); }
+}
+
+/* Viewfinder corner brackets */
+.finder::before, .finder::after,
+.finder > i::before, .finder > i::after {
+  content: ""; position: absolute; width: 34px; height: 34px;
+  border-color: var(--color-brand-accent); border-style: solid;
+}
+.finder::before { top: 0; left: 0; border-width: 5px 0 0 5px; border-top-left-radius: 14px; }
+.finder::after { top: 0; right: 0; border-width: 5px 5px 0 0; border-top-right-radius: 14px; }
+.finder > i::before { bottom: 0; left: 0; border-width: 0 0 5px 5px; border-bottom-left-radius: 14px; }
+.finder > i::after { bottom: 0; right: 0; border-width: 0 5px 5px 0; border-bottom-right-radius: 14px; }
+
+@keyframes sweep { 0% { top: 6%; } 50% { top: 92%; } 100% { top: 6%; } }
+.sweep { animation: sweep 2.4s ease-in-out infinite; }
+
+@keyframes pop { 0% { transform: scale(.92); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
+.pop { animation: pop .14s ease-out; }
+
+/* Attendance slip: a perforated top edge, like a tear-off register ticket */
+.perforation {
+  height: 14px;
+  border-radius: 28px 28px 0 0;
+  background:
+    radial-gradient(circle at 7px -2px, #000 5px, transparent 5.5px) repeat-x 0 0 / 18px 14px,
+    var(--color-brand-accent);
+}
+@keyframes slip-in { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+.slip-in { animation: slip-in .2s ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sweep, .pop, .slip-in { animation: none; }
+}

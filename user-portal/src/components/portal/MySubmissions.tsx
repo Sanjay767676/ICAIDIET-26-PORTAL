@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Popup, PopupInfo } from '../Popup';
 import { EditAuthorsModal } from './EditAuthorsModal';
+import { AttendanceQR } from './AttendanceQR';
 import { CONFERENCE_TRACKS } from '../../data/conferenceTracks';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -1800,6 +1801,13 @@ export function MySubmissions({
                     The Phase 2 (camera-ready) submission page will unlock for this paper once your
                     registration payment is approved.
                   </div>
+                )}
+
+                {/* Conference attendance QR (offline papers + paper 1271), shown
+                    above the Phase 2 card to every author of the paper. The
+                    component fetches eligibility and renders nothing otherwise. */}
+                {(sub.attendance_mode === 'OFFLINE' || sub.paper_id === '1271') && (
+                  <AttendanceQR submissionId={sub.id} getToken={getToken} />
                 )}
 
                 {/* Phase 2 submitted — replaces the Move to Phase 2 button with

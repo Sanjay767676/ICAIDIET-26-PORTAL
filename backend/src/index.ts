@@ -1,6 +1,7 @@
 import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { verifyToken as clerkVerifyToken } from '@clerk/backend';
+import { registerAttendanceRoutes, syncAttendanceQrs } from './attendance';
 
 type Bindings = {
   DB: D1Database;
@@ -12,6 +13,9 @@ type Bindings = {
   RESEND_API_KEY?: string;
   MAIL_FROM_EMAIL?: string;
   MAIL_FROM_NAME?: string;
+  // Optional dedicated key for attendance QR signatures (wrangler secret put
+  // QR_SIGNING_SECRET). Falls back to a key derived from AUTH_SECRET.
+  QR_SIGNING_SECRET?: string;
 };
 
 type Variables = {
@@ -37,6 +41,7 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:5175',
+  'http://localhost:5176', // scanner-portal (vite dev)
   'http://localhost:8787',
 ];
 
@@ -5680,9 +5685,30 @@ async function processMailQueue(env: Bindings) {
   }
 }
 
+// ------------------------------------------------------------------
+// ICAIDIET Attendance Scanner (see attendance.ts): one secret QR per
+// offline paper, the geofenced scan + mark endpoints used by the scanner,
+// the author-facing QR endpoint and admin analysis / export endpoints.
+// ------------------------------------------------------------------
+registerAttendanceRoutes(app, {
+  signToken,
+  verifyToken,
+  rateLimit,
+  generateXlsx,
+  requireClerkAuth,
+  ensureUserForClerk,
+  isAuthorizedForSubmission,
+});
+
 async function scheduled(_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
   await purgeExpiredDeleted(env);
   await processMailQueue(env);
+  // Keep one stored attendance QR per offline paper (new offline papers get theirs).
+  try {
+    await syncAttendanceQrs(env);
+  } catch (e) {
+    console.error('attendance QR sync failed', e);
+  }
 }
 
 export default {

@@ -5,6 +5,7 @@
     "backend",
     "user-portal",
     "admin-portal",
-    "reviewer-portal"
+    "reviewer-portal",
+    "scanner-portal"
   ]
 }
