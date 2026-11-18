@@ -42,6 +42,9 @@ const DEFAULT_ALLOWED_ORIGINS = [
   'http://localhost:5174',
   'http://localhost:5175',
   'http://localhost:5176', // scanner-portal (vite dev)
+  // Attendance scanner. Listed in code (not only in ALLOWED_ORIGINS) so the
+  // scanner keeps working even if the deployed vars are out of date.
+  'https://scanner.icaidiet26.tech',
   'http://localhost:8787',
 ];
 

@@ -60,7 +60,7 @@ export default function Scanner() {
         setCfgError(null);
       } else setCfgError('Could not load the scanner settings.');
     } catch {
-      setCfgError('No internet connection. Connect to the internet and try again.');
+      setCfgError("Can't reach the ICAIDIET server. Check the internet connection and try again. If this continues, the backend has not been updated for the scanner yet.");
     }
   }, []);
   useEffect(() => {
@@ -262,7 +262,7 @@ export default function Scanner() {
 
   // ---- what blocks scanning right now -------------------------------------
   let blocker: { title: string; body: string; icon: 'pin' | 'locate'; retry?: () => void } | null = null;
-  if (cfgError) blocker = { title: 'Scanner is offline', body: cfgError, icon: 'pin', retry: loadCfg };
+  if (cfgError) blocker = { title: 'Server not reachable', body: cfgError, icon: 'pin', retry: loadCfg };
   else if (geo.status === 'denied' || geo.status === 'unavailable')
     blocker = { title: 'This geolocation is not accessible', body: geo.message, icon: 'pin', retry: reload };
   else if (!cfg || geo.status === 'waiting') blocker = { title: 'Finding your location', body: 'Hold on while GPS gets a fix.', icon: 'locate' };
