@@ -2359,6 +2359,33 @@ async function isAuthorizedForSubmission(
 }
 
 // ------------------------------------------------------------------
+// Author-editor variant. One switch, shared by the list and the endpoints:
+//
+//   'OFFLINE' (live now): only offline-attendance papers plus the specially
+//     listed paper 1271 get the editor. Their author count is FIXED and they
+//     must confirm they joined the WhatsApp group before finalising.
+//   'ONLINE' (held for later): online / not-yet-in-Phase-2 papers (except 1271)
+//     get the editor, may add authors up to 6, and have no WhatsApp step.
+//
+// When asked to switch over, flip AUTHOR_EDIT_MODE to 'ONLINE'.
+// ------------------------------------------------------------------
+type AuthorEditMode = 'OFFLINE' | 'ONLINE';
+const AUTHOR_EDIT_MODE: AuthorEditMode = 'OFFLINE';
+const AUTHOR_EDIT_SPECIAL_PAPER_ID = '1271';
+const AUTHOR_EDIT_WHATSAPP_URL = 'https://chat.whatsapp.com/EI0ZkOXPaGvI8S72cOqkgd';
+
+function authorEditModeFor(submission: {
+  attendance_mode?: string | null;
+  paper_id?: string | null;
+}): AuthorEditMode | null {
+  const isSpecial = String(submission.paper_id || '').trim() === AUTHOR_EDIT_SPECIAL_PAPER_ID;
+  if (AUTHOR_EDIT_MODE === 'OFFLINE') {
+    return submission.attendance_mode === 'OFFLINE' || isSpecial ? 'OFFLINE' : null;
+  }
+  return submission.attendance_mode !== 'OFFLINE' && !isSpecial ? 'ONLINE' : null;
+}
+
+// ------------------------------------------------------------------
 // User: Get the signed-in user's own submissions only.
 // ------------------------------------------------------------------
 app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
@@ -2422,7 +2449,12 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
        ORDER BY s.created_at DESC`
     ).bind(registrationOpen ? 1 : 0, userId, clerkUserId, clerkEmail, clerkEmail, clerkEmail).all();
 
-    const submissions = (results as any[]) || [];
+    // Let the client show the right editor (and the right rules) per card.
+    // The endpoints independently re-check this; this field only drives UI.
+    const submissions = ((results as any[]) || []).map((s: any) => ({
+      ...s,
+      author_edit_mode: authorEditModeFor(s),
+    }));
 
     // Removed self-heal logic that inadvertently transferred ownership when an author logs in
 
@@ -2453,7 +2485,7 @@ const AUTHOR_DESIGNATION_OPTIONS = [
 async function loadAuthorEditorSubmission(
   c: Context<AppEnv>,
   submissionId: string
-): Promise<{ ok: true; submission: any } | { ok: false; res: Response }> {
+): Promise<{ ok: true; submission: any; mode: AuthorEditMode } | { ok: false; res: Response }> {
   const settings = await loadSettingsRecord(c.env);
   if (settings['author_edits_enabled'] !== 'true') {
     return {
@@ -2466,7 +2498,7 @@ async function loadAuthorEditorSubmission(
   }
 
   const submission = await c.env.DB.prepare(
-    `SELECT id, user_id, author_email, payment_status, attendance_mode, authors_finalised_at, deleted_at
+    `SELECT id, user_id, author_email, paper_id, payment_status, attendance_mode, authors_finalised_at, deleted_at
      FROM submissions WHERE id = ?`
   ).bind(submissionId).first() as any;
   if (!submission || submission.deleted_at) {
@@ -2484,15 +2516,16 @@ async function loadAuthorEditorSubmission(
       ),
     };
   }
-  // Offline attendees do not get the author editor. The user portal hides the
-  // button; enforce the same rule here so a direct API call cannot bypass it.
-  if (submission.attendance_mode === 'OFFLINE') {
+  // Which variant this paper is in right now. The list endpoint computes the
+  // same value for the button; re-check here so a direct call cannot bypass it.
+  const mode = authorEditModeFor(submission);
+  if (!mode) {
     return {
       ok: false,
       res: c.json(
         {
           success: false,
-          error: 'Author details are not editable for papers with offline attendance.',
+          error: 'Author editing is not currently available for this paper.',
         },
         403
       ),
@@ -2522,7 +2555,7 @@ async function loadAuthorEditorSubmission(
     };
   }
 
-  return { ok: true, submission };
+  return { ok: true, submission, mode };
 }
 
 app.get('/api/submissions/:id/authors', requireClerkAuth, async (c) => {
@@ -2535,7 +2568,13 @@ app.get('/api/submissions/:id/authors', requireClerkAuth, async (c) => {
        FROM authors WHERE submission_id = ? ORDER BY is_primary DESC, created_at ASC`
     ).bind(gate.submission.id).all();
 
-    return c.json({ success: true, authors: results });
+    return c.json({
+      success: true,
+      authors: results,
+      mode: gate.mode,
+      author_count_locked: gate.mode === 'OFFLINE',
+      whatsapp_group_url: gate.mode === 'OFFLINE' ? AUTHOR_EDIT_WHATSAPP_URL : null,
+    });
   } catch (error) {
     console.error('Fetch authors for author edit error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
@@ -2552,7 +2591,33 @@ app.post('/api/submissions/:id/authors', requireClerkAuth, async (c) => {
 
     const body = await c.req.json().catch(() => null);
     const raw = Array.isArray(body?.authors) ? body.authors : null;
-    if (!raw || raw.length < 2 || raw.length > 6) {
+
+    if (gate.mode === 'OFFLINE') {
+      // Offline papers (and paper 1271) may only correct the details of the
+      // authors already on record — no adding or removing authors.
+      const current = await c.env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM authors WHERE submission_id = ?`
+      ).bind(gate.submission.id).first() as any;
+      const expected = Number(current?.n || 0);
+      if (!raw || raw.length !== expected) {
+        return c.json(
+          {
+            success: false,
+            error: 'The author count cannot be changed for this paper. Please update only the existing author details.',
+          },
+          400
+        );
+      }
+      if (body?.whatsapp_joined !== true) {
+        return c.json(
+          {
+            success: false,
+            error: 'Please join the WhatsApp group and tick the confirmation before submitting.',
+          },
+          400
+        );
+      }
+    } else if (!raw || raw.length < 2 || raw.length > 6) {
       return c.json({ success: false, error: 'Please provide between 2 and 6 authors.' }, 400);
     }
 

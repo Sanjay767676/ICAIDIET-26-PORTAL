@@ -75,6 +75,9 @@ interface MySubmission {
   // Set once the author confirms the final author list used for certificates.
   // After this, the Edit Authors button is disabled for that submission.
   authors_finalised_at?: string | null;
+  // Which author-editor variant this paper is in, computed by the server from
+  // the current phase switch (offline now, online later). Null = no editor.
+  author_edit_mode?: 'OFFLINE' | 'ONLINE' | null;
 }
 
 export interface BankAccount {
@@ -1718,8 +1721,9 @@ export function MySubmissions({
                 {/* One-time, final author list used for certificate printing.
                     Rendered per submission, so an author with several paid
                     papers gets a separate Edit Authors button on each card.
-                    Offline attendees are excluded — they do not get this option. */}
-                {authorEditsEnabled && sub.payment_status === 'APPROVED' && sub.attendance_mode !== 'OFFLINE' && (
+                    Which papers qualify is decided by the server's current
+                    phase switch (author_edit_mode). */}
+                {authorEditsEnabled && sub.payment_status === 'APPROVED' && !!sub.author_edit_mode && (
                   <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200 bg-white px-5 py-3 shadow-sm">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">
@@ -2092,7 +2096,7 @@ export function MySubmissions({
         />
       )}
 
-      {editingAuthors && authorEditsEnabled && !editingAuthors.authors_finalised_at && editingAuthors.attendance_mode !== 'OFFLINE' && (
+      {editingAuthors && authorEditsEnabled && !editingAuthors.authors_finalised_at && !!editingAuthors.author_edit_mode && (
         <EditAuthorsModal
           sub={editingAuthors}
           getToken={getToken}

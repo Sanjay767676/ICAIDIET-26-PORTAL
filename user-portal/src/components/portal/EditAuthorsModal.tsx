@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react';
+import { AlertCircle, CheckCircle2, ExternalLink, Loader2, MessageCircle, X } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
+
+// Offline papers must join this group before their author details are accepted.
+const WHATSAPP_GROUP_URL = 'https://chat.whatsapp.com/EI0ZkOXPaGvI8S72cOqkgd';
+type AuthorEditMode = 'OFFLINE' | 'ONLINE';
 
 const TITLE_OPTIONS = ['Mrs', 'Mr', 'Ms', 'Dr'];
 const DESIGNATION_OPTIONS = [
@@ -60,15 +64,25 @@ export function EditAuthorsModal({
   onClose,
   onSaved,
 }: {
-  sub: { id: string; title?: string; submission_code?: string; paper_id?: string };
+  sub: {
+    id: string;
+    title?: string;
+    submission_code?: string;
+    paper_id?: string;
+    author_edit_mode?: AuthorEditMode | null;
+  };
   getToken: () => Promise<string | null>;
   onClose: () => void;
   onSaved: () => void;
 }) {
+  // The server already decided which variant applies to this paper. Offline
+  // papers keep their original author count and need a WhatsApp confirmation.
+  const countLocked = sub.author_edit_mode === 'OFFLINE';
   const [drafts, setDrafts] = useState<AuthorDraft[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [joinedWhatsApp, setJoinedWhatsApp] = useState(false);
   const [stage, setStage] = useState<'edit' | 'confirm'>('edit');
 
   useEffect(() => {
@@ -98,7 +112,9 @@ export function EditAuthorsModal({
           otherDesignation:
             a.designation && !DESIGNATION_OPTIONS.includes(a.designation) ? a.designation : '',
         }));
-        while (rows.length < 2) rows.push(emptyDraft());
+        // Offline papers may only edit the authors already on record; online
+        // papers start from the wizard minimum of two and can grow to six.
+        if (!countLocked) while (rows.length < 2) rows.push(emptyDraft());
         setDrafts(rows);
       } catch (err) {
         if (!cancelled) {
@@ -112,7 +128,7 @@ export function EditAuthorsModal({
     return () => {
       cancelled = true;
     };
-  }, [sub.id, getToken]);
+  }, [sub.id, getToken, countLocked]);
 
   const update = (index: number, patch: Partial<AuthorDraft>) =>
     setDrafts((rows) => rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
@@ -154,6 +170,10 @@ export function EditAuthorsModal({
       setError(problem);
       return;
     }
+    if (countLocked && !joinedWhatsApp) {
+      setError('Please join the WhatsApp group and tick "I have joined the WhatsApp Group" to continue.');
+      return;
+    }
     setError(null);
     setStage('confirm');
   };
@@ -162,6 +182,11 @@ export function EditAuthorsModal({
     const problem = validate();
     if (problem) {
       setError(problem);
+      setStage('edit');
+      return;
+    }
+    if (countLocked && !joinedWhatsApp) {
+      setError('Please join the WhatsApp group and tick "I have joined the WhatsApp Group" to continue.');
       setStage('edit');
       return;
     }
@@ -186,6 +211,7 @@ export function EditAuthorsModal({
             designation: a.designation,
             other_designation: a.designation === 'Other' ? a.otherDesignation.trim() : '',
           })),
+          whatsapp_joined: countLocked ? joinedWhatsApp : false,
         }),
       });
       const data = await res.json().catch(() => null);
@@ -237,26 +263,78 @@ export function EditAuthorsModal({
             </div>
           ) : stage === 'edit' ? (
             <>
-              <div className="flex flex-wrap items-center gap-3 mb-5 rounded-xl bg-stone-100 px-4 py-3">
-                <label htmlFor="author-count" className="text-sm font-semibold text-black">
-                  Number of Authors
-                </label>
-                <select
-                  id="author-count"
-                  value={drafts.length}
-                  onChange={(e) => changeCount(parseInt(e.target.value, 10))}
-                  className="px-3.5 py-2 bg-white border border-stone-300 rounded-lg outline-none focus:border-black focus:ring-2 focus:ring-black/10 text-sm font-semibold text-black"
-                >
-                  {AUTHOR_COUNTS.map((n) => (
-                    <option key={n} value={n}>
-                      {n} Author{n > 1 ? 's' : ''}
-                    </option>
-                  ))}
-                </select>
-                <span className="text-xs text-black/50">
-                  All fields are required. The first author is the corresponding author.
-                </span>
-              </div>
+              {countLocked && (
+                <div className="mb-5 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4">
+                  <div className="flex items-start gap-2">
+                    <MessageCircle className="w-5 h-5 shrink-0 text-emerald-700 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-emerald-900">
+                        Offline participants — join the WhatsApp group
+                      </p>
+                      <p className="text-xs text-emerald-800 mt-1">
+                        Please join the group before finalising your author details. The link opens
+                        WhatsApp in a new tab.
+                      </p>
+                    </div>
+                  </div>
+                  <a
+                    href={WHATSAPP_GROUP_URL}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 mt-3 px-4 py-2 bg-[#25D366] text-black rounded-lg text-sm font-bold hover:brightness-95"
+                  >
+                    <MessageCircle className="w-4 h-4" /> Join WhatsApp Group{' '}
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                  <label className="flex items-start gap-2 mt-4 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={joinedWhatsApp}
+                      onChange={(e) => {
+                        setJoinedWhatsApp(e.target.checked);
+                        if (e.target.checked) setError(null);
+                      }}
+                      className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-700"
+                    />
+                    <span className="text-sm font-semibold text-emerald-900">
+                      I have joined the WhatsApp Group *
+                    </span>
+                  </label>
+                </div>
+              )}
+
+              {countLocked ? (
+                <div className="flex flex-wrap items-center gap-2 mb-5 rounded-xl bg-stone-100 px-4 py-3">
+                  <span className="text-sm font-semibold text-black">
+                    Number of Authors: {drafts.length}
+                  </span>
+                  <span className="text-xs text-black/50">
+                    The author count is fixed for this paper. You can only update the details of the
+                    authors already listed.
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-3 mb-5 rounded-xl bg-stone-100 px-4 py-3">
+                  <label htmlFor="author-count" className="text-sm font-semibold text-black">
+                    Number of Authors
+                  </label>
+                  <select
+                    id="author-count"
+                    value={drafts.length}
+                    onChange={(e) => changeCount(parseInt(e.target.value, 10))}
+                    className="px-3.5 py-2 bg-white border border-stone-300 rounded-lg outline-none focus:border-black focus:ring-2 focus:ring-black/10 text-sm font-semibold text-black"
+                  >
+                    {AUTHOR_COUNTS.map((n) => (
+                      <option key={n} value={n}>
+                        {n} Author{n > 1 ? 's' : ''}
+                      </option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-black/50">
+                    All fields are required. The first author is the corresponding author.
+                  </span>
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-center gap-2 p-3 mb-4 bg-red-50 text-red-700 border border-red-200 rounded-xl text-sm font-medium">
