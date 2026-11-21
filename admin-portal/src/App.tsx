@@ -1463,6 +1463,9 @@ function FilterPanel({
   dateFilter,
   onDateFilterChange,
   dates,
+  scopeFilter,
+  onScopeFilterChange,
+  scopeOptions,
   resultCount,
   totalCount,
   onClear,
@@ -1478,11 +1481,16 @@ function FilterPanel({
   dateFilter?: string;
   onDateFilterChange?: (v: string) => void;
   dates?: string[];
+  scopeFilter?: string;
+  onScopeFilterChange?: (v: string) => void;
+  scopeOptions?: { value: string; label: string }[];
   resultCount: number;
   totalCount: number;
   onClear: () => void;
 }) {
-  const filtersActive = !!(searchTerm.trim() || trackFilter || paperIdFilter || dateFilter);
+  const filtersActive = !!(
+    searchTerm.trim() || trackFilter || paperIdFilter || dateFilter || (scopeFilter && scopeFilter !== 'all')
+  );
   return (
     <div className="bg-white rounded-xl shadow-sm border-2 border-brand-accent p-4 mb-4">
       <div className="flex flex-col lg:flex-row gap-3">
@@ -1538,6 +1546,20 @@ function FilterPanel({
             ))}
           </select>
         )}
+        {scopeOptions && scopeOptions.length > 0 && onScopeFilterChange && (
+          <select
+            value={scopeFilter || 'all'}
+            onChange={(e) => onScopeFilterChange(e.target.value)}
+            className="w-full lg:w-64 px-3 py-2 rounded-lg border border-brand-text/20 text-sm text-brand-text bg-white focus:outline-none focus:ring-2 focus:ring-brand-accent"
+            aria-label="Filter payments by scope"
+          >
+            {scopeOptions.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        )}
         {filtersActive && (
           <button
             onClick={onClear}
@@ -1580,6 +1602,9 @@ function SubmissionListing({
   dateFilter,
   onDateFilterChange,
   dates,
+  scopeFilter,
+  onScopeFilterChange,
+  scopeOptions,
   onClear,
   token,
   refresh,
@@ -1621,6 +1646,9 @@ function SubmissionListing({
   dateFilter?: string;
   onDateFilterChange?: (v: string) => void;
   dates?: string[];
+  scopeFilter?: string;
+  onScopeFilterChange?: (v: string) => void;
+  scopeOptions?: { value: string; label: string }[];
   onClear: () => void;
   token: string;
   refresh: () => void;
@@ -1727,6 +1755,9 @@ function SubmissionListing({
         dateFilter={dateFilter}
         onDateFilterChange={onDateFilterChange}
         dates={dates}
+        scopeFilter={scopeFilter}
+        onScopeFilterChange={onScopeFilterChange}
+        scopeOptions={scopeOptions}
         resultCount={rows.length}
         totalCount={total}
         onClear={onClear}
@@ -2506,6 +2537,9 @@ export default function App() {
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
   const [dateFilter, setDateFilter] = useState('');
+  // Payments tab scope: every approved payment, or only the ones whose
+  // camera-ready package was accepted by the reviewer.
+  const [paymentScopeFilter, setPaymentScopeFilter] = useState<'all' | 'cameraReadyApproved'>('all');
   const [mailStatusFilter, setMailStatusFilter] = useState('');
   const [reviewDateFilter, setReviewDateFilter] = useState('');
   const [mtUserEnabled, setMtUserEnabled] = useState<boolean>(false);
@@ -3293,16 +3327,22 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
     a.localeCompare(b)
   );
   const q = searchTerm.trim().toLowerCase();
-  const filtersActive = !!(q || trackFilter || paperIdFilter || dateFilter || mailStatusFilter || reviewDateFilter);
+  const filtersActive = !!(
+    q || trackFilter || paperIdFilter || dateFilter || mailStatusFilter || reviewDateFilter ||
+    (activeTab === 'payments' && paymentScopeFilter !== 'all')
+  );
 const mainSubmissionsList = submissions.filter(s => s.status === 'SUBMITTED' && s.payment_status !== 'APPROVED');
     const minorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MINOR_CHANGES' && s.payment_status !== 'APPROVED');
     const majorSubmissionsList = submissions.filter(s => s.review_decision === 'ACCEPTED_WITH_MAJOR_CHANGES' && s.payment_status !== 'APPROVED');
     // All papers whose payment was approved by admin (for conference dashboard revenue & stats).
     const allApprovedPaymentsList = submissions.filter(s => s.payment_status === 'APPROVED');
-    // Payments tab = accepted papers whose payment was approved, EXCLUDING the
-    // ones that have already submitted the Phase 2 package. Once an author submits Phase 2,
-    // they automatically move out of Payments tab and into the Camera Ready tab!
-    const paymentsSubmissionsList = submissions.filter(s => s.payment_status === 'APPROVED' && !s.phase2_submitted_at);
+    // Payments tab scope options. "All" shows every approved payment (including
+    // papers that already moved to Camera Ready); the camera-ready option keeps
+    // only papers whose Phase 2 package was accepted by the reviewer.
+    const cameraReadyApprovedPaymentsList = allApprovedPaymentsList.filter(s => s.camera_ready_status === 'ACCEPTED');
+    const paymentScopeList = paymentScopeFilter === 'cameraReadyApproved'
+      ? cameraReadyApprovedPaymentsList
+      : allApprovedPaymentsList;
     // The Camera Ready tab holds exactly the papers that have submitted the
     // Phase 2 package (camera-ready + copyright + attendance + declaration).
     // Papers with an organizer payment waiver are "ghosted" here: they still
@@ -3341,7 +3381,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     const filteredSubmissions = masterApply(mainSubmissionsList, submissions);
     const filteredMinor = masterApply(minorSubmissionsList, submissions);
     const filteredMajor = masterApply(majorSubmissionsList, submissions);
-    const filteredPayments = masterApply(paymentsSubmissionsList);
+    const filteredPayments = masterApply(paymentScopeList);
     const filteredCameraReady = masterApply(cameraReadySubmissionsList);
 
     // Camera Ready attendance totals for the tab header: offline papers
@@ -3361,6 +3401,11 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
       if (!s.payment_submitted_at) return '';
       return s.payment_submitted_at.split('T')[0];
     }).filter(Boolean))).sort((a, b) => b.localeCompare(a));
+
+    const paymentScopeOptions = [
+      { value: 'all', label: `All payments (total ${allApprovedPaymentsList.length} payments)` },
+      { value: 'cameraReadyApproved', label: `Camera ready approved (${cameraReadyApprovedPaymentsList.length})` },
+    ];
     
     const reviewDates = Array.from(new Set(submissions.map(s => {
       if (!s.review_updated_at) return '';
@@ -3396,6 +3441,7 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
     setTrackFilter('');
     setPaperIdFilter('');
     setDateFilter('');
+    setPaymentScopeFilter('all');
     setMailStatusFilter('');
     setReviewDateFilter('');
   };
@@ -3509,9 +3555,9 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'payments' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
                 >
                   Payments
-                  {paymentsSubmissionsList.length > 0 && (
+                  {allApprovedPaymentsList.length > 0 && (
                     <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'payments' ? 'bg-green-500 text-white' : 'bg-green-600 text-white'}`}>
-                      {paymentsSubmissionsList.length}
+                      {allApprovedPaymentsList.length}
                     </span>
                   )}
                 </button>
@@ -3696,7 +3742,7 @@ Duplicates
                     : 'border-transparent text-brand-text/60 hover:text-brand-text'
                 }`}
               >
-                Payments List ({paymentsSubmissionsList.length})
+                Payments List ({paymentScopeList.length})
               </button>
               <button
                 onClick={() => setPaymentViewMode('dashboard')}
@@ -3717,7 +3763,7 @@ Duplicates
             ) : (
               <SubmissionListing
                 rows={filteredPayments}
-                total={paymentsSubmissionsList.length}
+                total={paymentScopeList.length}
                 loading={loading}
                 error={error ? `Error loading submissions: ${error}` : null}
                 filtersActive={filtersActive}
@@ -3734,6 +3780,9 @@ Duplicates
                 dateFilter={dateFilter}
                 onDateFilterChange={setDateFilter}
                 dates={paymentDates}
+                scopeFilter={paymentScopeFilter}
+                onScopeFilterChange={(v) => setPaymentScopeFilter(v as 'all' | 'cameraReadyApproved')}
+                scopeOptions={paymentScopeOptions}
                 onClear={clearFilters}
                 token={token}
                 refresh={fetchSubmissions}
