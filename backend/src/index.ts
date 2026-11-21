@@ -2155,7 +2155,7 @@ app.get('/api/admin/submissions', async (c) => {
     }
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at, s.payment_mail_status, s.payment_mail_sent_at,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.author_email, s.created_at, s.updated_at, s.deleted_at, s.enquired, s.no_corrections, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_account, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier, s.acceptance_mail_sent_at, s.payment_mail_status, s.payment_mail_sent_at,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
               s.phase2_track, s.phase2_head_count, s.phase2_payment_waived,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at, s.camera_ready_resubmitted,
@@ -2407,7 +2407,7 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
     const registrationOpen = settings['registration_open'] === 'true';
 
     const { results } = await c.env.DB.prepare(
-      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
+      `SELECT s.id, s.submission_code, s.paper_id, s.title, s.abstract, s.track, s.status, s.author_name, s.created_at, s.updated_at, s.registration_type, s.author_type, s.payment_proof_url, s.utr_transaction_id, s.payment_account, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.fee_amount, s.fee_tier,
               s.phase2_submitted_at, s.attendance_mode, s.declaration_confirmed,
               s.phase2_track, s.phase2_head_count, s.phase2_payment_waived,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
@@ -3649,6 +3649,41 @@ app.post('/api/admin/submissions/:id/status', async (c) => {
 });
 
 // ------------------------------------------------------------------
+// Admin: clear every "Enquired" tick on approved payments at once.
+// Registered before the dynamic /:id/enquired route so Hono resolves the
+// static path correctly. Only payment-approved papers are affected; the
+// same flag on other tabs' submissions is left as it was.
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/enquired/reset', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) {
+      return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    }
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const result = await c.env.DB.prepare(
+      `UPDATE submissions
+       SET enquired = 0, updated_at = ?
+       WHERE deleted_at IS NULL AND payment_status = 'APPROVED' AND enquired = 1`
+    ).bind(new Date().toISOString()).run();
+
+    const cleared = result.meta.changes;
+    return c.json({
+      success: true,
+      cleared,
+      message: cleared === 0 ? 'No Enquired ticks to clear.' : `Unchecked ${cleared} Enquired tick(s).`,
+    });
+  } catch (error) {
+    console.error('Reset payment enquiry flags error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
 // Admin: Toggle the "Enquired" (contacted) flag of a submission
 // (requires admin Bearer token)
 // Lets the admin track which authors have already been called for
@@ -4033,6 +4068,7 @@ const EXPORT_COLUMNS: { id: string; label: string; pick: (s: any) => string }[] 
   { id: 'fee_amount', label: 'Amount Paid', pick: (s) => s.fee_amount || '' },
   { id: 'fee_tier', label: 'Fee Tier', pick: (s) => (s.fee_tier === 'EARLY' ? 'Early Bird' : s.fee_tier === 'STANDARD' ? 'Standard / Late' : '') },
   { id: 'utr_transaction_id', label: 'UTR / Transaction ID', pick: (s) => s.utr_transaction_id || '' },
+  { id: 'payment_account', label: 'Account Payment Arrived In', pick: (s) => s.payment_account || '' },
   // A Yes/No rather than a filename: payment proofs are stored under a
   // generated R2 key (proof/<id>-<timestamp>.<ext>) and the author's original
   // filename is not kept, so there is no honest name to show.
@@ -4148,7 +4184,7 @@ app.post('/api/admin/export', async (c) => {
               s.author_name, s.author_email, s.created_at AS submitted_at, s.updated_at, s.enquired, s.no_corrections,
               s.attendance_mode, s.phase2_track, s.phase2_head_count,
               s.registration_type, s.author_type, s.fee_amount, s.fee_tier,
-              s.utr_transaction_id, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.payment_proof_url,
+              s.utr_transaction_id, s.payment_account, s.payment_status, s.payment_approved_at, s.payment_submitted_at, s.payment_proof_url,
               s.acceptance_mail_sent_at, s.payment_mail_status, s.payment_mail_sent_at,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
@@ -5669,6 +5705,38 @@ app.post('/api/admin/submissions/:id/payment-status', async (c) => {
   } catch (err: any) {
     console.error('Update payment status error:', err);
     return c.json({ success: false, error: 'Failed to update payment status.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: record the bank account a payment arrived in. Free text so the
+// admin can pick a configured account or type any other one.
+// ------------------------------------------------------------------
+app.post('/api/admin/submissions/:id/payment-account', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) return c.json({ success: false, error: 'Invalid session.' }, 401);
+
+    const submissionId = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+    const account = String(body?.account ?? '').trim().slice(0, 200);
+
+    const exists = await c.env.DB.prepare(`SELECT id FROM submissions WHERE id = ?`)
+      .bind(submissionId).first() as any;
+    if (!exists) {
+      return c.json({ success: false, error: 'Submission not found.' }, 404);
+    }
+
+    await c.env.DB.prepare(
+      `UPDATE submissions SET payment_account = ?, updated_at = ? WHERE id = ?`
+    ).bind(account || null, new Date().toISOString(), submissionId).run();
+
+    return c.json({ success: true, payment_account: account || null });
+  } catch (err: any) {
+    console.error('Update payment account error:', err);
+    return c.json({ success: false, error: 'Failed to update payment account.' }, 500);
   }
 });
 

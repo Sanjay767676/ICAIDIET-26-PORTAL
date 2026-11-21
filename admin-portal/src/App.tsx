@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Eye, AlertCircle, CreditCard, RefreshCw, LogOut, Download, Trash2, Loader2, Phone, X, FileText, RotateCcw, Users, Search, Mail, CheckCircle2, XCircle, Plus, UserRoundCheck, Send, Globe, MapPin } from 'lucide-react';
 import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
-import RegistrationConfigPanel, { RegistrationConfig } from './components/RegistrationConfigPanel';
+import RegistrationConfigPanel, { RegistrationConfig, BankAccount } from './components/RegistrationConfigPanel';
 import SettingsPanel from './components/SettingsPanel';
 import { PaymentDashboard } from './components/PaymentDashboard';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -59,6 +59,7 @@ interface Submission {
   author_type?: string | null;
   payment_proof_url?: string | null;
   utr_transaction_id?: string | null;
+  payment_account?: string | null;
   payment_status?: string | null;
   payment_approved_at?: string | null;
   payment_submitted_at?: string | null;
@@ -406,6 +407,7 @@ function matchesSearch(sub: Submission, q: string) {
     sub.review_decision,
     sub.review_feedback,
     sub.utr_transaction_id,
+    sub.payment_account,
     ...(sub.authors || []).flatMap((a) => [
       a.first_name,
       a.last_name,
@@ -1024,23 +1026,43 @@ function EditAuthorsModal({
 }
 
 
+const OTHER_ACCOUNT = '__other__';
+
+function bankAccountLabel(bank: BankAccount) {
+  return [bank.bank_name, bank.account_number, bank.ifsc].filter(Boolean).join(' · ');
+}
+
 function PaymentModal({
   sub,
   token,
+  banks,
   onClose,
   onOpenPdf,
   onPaymentStatusChanged,
+  onAccountChanged,
   onUnauthorized,
 }: {
   sub: Submission | null;
   token: string;
+  banks?: BankAccount[];
   onClose: () => void;
   onOpenPdf: (id: string, kind: 'paper' | 'plagiarism' | 'ai_plagiarism' | 'payment', filename: string) => void;
   onPaymentStatusChanged: (subId: string, newStatus: string, approvedAt: string | null) => void;
+  onAccountChanged?: (subId: string, account: string | null) => void;
   onUnauthorized: () => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [accountChoice, setAccountChoice] = useState('');
+  const [customAccount, setCustomAccount] = useState('');
+  const [accountSaving, setAccountSaving] = useState(false);
+
+  useEffect(() => {
+    const saved = sub?.payment_account || '';
+    const match = (banks || []).find((b) => bankAccountLabel(b) === saved);
+    setAccountChoice(match ? match.id : saved ? OTHER_ACCOUNT : '');
+    setCustomAccount(match ? '' : saved);
+  }, [sub?.id, sub?.payment_account, banks]);
 
   if (!sub) return null;
 
@@ -1069,6 +1091,36 @@ function PaymentModal({
       setError(err.message || 'Error updating payment status.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSaveAccount = async (value: string, allowEmpty = false) => {
+    const account = value.trim();
+    if (!account && !allowEmpty) {
+      setError('Select an account or type the account it arrived in.');
+      return;
+    }
+    setAccountSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/${sub.id}/payment-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ account }),
+      });
+      if (res.status === 401) {
+        onUnauthorized();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to save the account.');
+      }
+      onAccountChanged?.(sub.id, data.payment_account || null);
+    } catch (err: any) {
+      setError(err.message || 'Error saving the account.');
+    } finally {
+      setAccountSaving(false);
     }
   };
 
@@ -1147,6 +1199,66 @@ function PaymentModal({
                 <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">UTR / Transaction ID</div>
                 <div className="font-mono font-semibold text-sm text-brand-accent mt-0.5 select-all">
                   {sub.utr_transaction_id || '—'}
+                </div>
+              </div>
+
+              <div className="border-t border-brand-accent/30 pt-3">
+                <div className="text-xs text-brand-text/50 uppercase tracking-wide font-medium">Account the payment arrived in</div>
+                <div className="flex flex-col sm:flex-row gap-2 mt-1.5">
+                  <select
+                    value={accountChoice}
+                    onChange={(e) => setAccountChoice(e.target.value)}
+                    disabled={accountSaving}
+                    className="flex-1 px-3 py-2 rounded-lg border border-brand-text/20 bg-white text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent disabled:opacity-50"
+                  >
+                    <option value="">Select an account…</option>
+                    {(banks || []).map((b) => (
+                      <option key={b.id} value={b.id}>{bankAccountLabel(b)}</option>
+                    ))}
+                    <option value={OTHER_ACCOUNT}>Other — type account…</option>
+                  </select>
+                  {accountChoice === OTHER_ACCOUNT && (
+                    <input
+                      type="text"
+                      value={customAccount}
+                      onChange={(e) => setCustomAccount(e.target.value)}
+                      disabled={accountSaving}
+                      placeholder="Type bank name / account number"
+                      className="flex-1 px-3 py-2 rounded-lg border border-brand-text/20 bg-white text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent disabled:opacity-50"
+                    />
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2 mt-2">
+                  {sub.payment_account && (
+                    <span className="text-[11px] text-brand-text/60">
+                      Saved: <span className="font-semibold text-brand-text">{sub.payment_account}</span>
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => handleSaveAccount(
+                      accountChoice === OTHER_ACCOUNT
+                        ? customAccount
+                        : (banks || []).find((b) => b.id === accountChoice)
+                          ? bankAccountLabel((banks || []).find((b) => b.id === accountChoice)!)
+                          : ''
+                    )}
+                    disabled={accountSaving || !accountChoice || (accountChoice === OTHER_ACCOUNT && !customAccount.trim())}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-text text-white text-xs font-semibold hover:bg-brand-accent transition-colors disabled:opacity-50"
+                  >
+                    {accountSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                    Save Account
+                  </button>
+                  {sub.payment_account && (
+                    <button
+                      type="button"
+                      onClick={() => handleSaveAccount('', true)}
+                      disabled={accountSaving}
+                      className="px-2.5 py-1.5 rounded-lg border border-brand-text/20 text-xs font-medium text-brand-text/70 hover:bg-brand-text/5 disabled:opacity-50"
+                    >
+                      Clear
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -2533,6 +2645,8 @@ export default function App() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [enquiredSaving, setEnquiredSaving] = useState<string | null>(null);
+  const [enquiredResetting, setEnquiredResetting] = useState(false);
+  const [enquiredResetMessage, setEnquiredResetMessage] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [trackFilter, setTrackFilter] = useState('');
   const [paperIdFilter, setPaperIdFilter] = useState('');
@@ -3308,6 +3422,42 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
     }
   };
 
+  const handleResetEnquired = async () => {
+    const count = submissions.filter((s) => s.payment_status === 'APPROVED' && s.enquired).length;
+    if (count === 0) return;
+    if (!window.confirm(`Uncheck Enquired for all ${count} approved payments? You can tick them again afterwards.`)) return;
+    setEnquiredResetting(true);
+    setError(null);
+    setEnquiredResetMessage(null);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/submissions/enquired/reset`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to reset Enquired ticks.');
+      }
+      setSubmissions((prev) => prev.map((s) => (
+        s.payment_status === 'APPROVED' && s.enquired ? { ...s, enquired: 0 } : s
+      )));
+      setEnquiredResetMessage(data.message || `Unchecked ${count} ticks.`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to reset Enquired ticks.');
+    } finally {
+      setEnquiredResetting(false);
+    }
+  };
+
+  const handleAccountChanged = (subId: string, account: string | null) => {
+    setSubmissions((prev) => prev.map((s) => (s.id === subId ? { ...s, payment_account: account } : s)));
+    setPaymentTarget((prev) => (prev?.id === subId ? { ...prev, payment_account: account } : prev));
+  };
+
   const authButtons = (
     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 min-w-0">
       <span className="text-xs sm:text-sm text-brand-text/60 truncate max-w-[45vw] sm:max-w-none">{adminEmail}</span>
@@ -3754,6 +3904,24 @@ Duplicates
               >
                 Dashboard
               </button>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 -mt-2 mb-2">
+              <span className="text-xs text-brand-text/60">
+                {allApprovedPaymentsList.filter((s) => s.enquired).length} Enquired tick(s)
+              </span>
+              <button
+                type="button"
+                onClick={handleResetEnquired}
+                disabled={enquiredResetting || !allApprovedPaymentsList.some((s) => s.enquired)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border-2 border-brand-accent bg-white text-xs font-semibold text-brand-text hover:bg-brand-accent/20 transition-colors disabled:opacity-50"
+              >
+                {enquiredResetting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5" />}
+                Uncheck all Enquired
+              </button>
+              {enquiredResetMessage && (
+                <span className="text-xs font-medium text-green-700">{enquiredResetMessage}</span>
+              )}
             </div>
 
             {paymentViewMode === 'dashboard' ? (
@@ -4350,9 +4518,11 @@ Duplicates
       <PaymentModal
         sub={paymentTarget}
         token={token}
+        banks={registrationConfig.banks}
         onClose={() => setPaymentTarget(null)}
         onOpenPdf={openPdf}
         onPaymentStatusChanged={handlePaymentStatusChanged}
+        onAccountChanged={handleAccountChanged}
         onUnauthorized={handleLogout}
       />
 
