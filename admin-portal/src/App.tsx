@@ -1029,7 +1029,8 @@ function EditAuthorsModal({
 const OTHER_ACCOUNT = '__other__';
 
 function bankAccountLabel(bank: BankAccount) {
-  return [bank.bank_name, bank.account_number, bank.ifsc].filter(Boolean).join(' · ');
+  // Only the account name and bank name are stored/shown — no account number.
+  return [bank.beneficiary, bank.bank_name].filter(Boolean).join(', ');
 }
 
 function PaymentModal({
@@ -1054,14 +1055,17 @@ function PaymentModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [accountChoice, setAccountChoice] = useState('');
-  const [customAccount, setCustomAccount] = useState('');
+  const [customAccountName, setCustomAccountName] = useState('');
+  const [customBankName, setCustomBankName] = useState('');
   const [accountSaving, setAccountSaving] = useState(false);
 
   useEffect(() => {
     const saved = sub?.payment_account || '';
     const match = (banks || []).find((b) => bankAccountLabel(b) === saved);
     setAccountChoice(match ? match.id : saved ? OTHER_ACCOUNT : '');
-    setCustomAccount(match ? '' : saved);
+    const parts = match || !saved ? [] : saved.split(',').map((p) => p.trim());
+    setCustomAccountName(parts[0] || '');
+    setCustomBankName(parts.slice(1).join(', ').trim());
   }, [sub?.id, sub?.payment_account, banks]);
 
   if (!sub) return null;
@@ -1094,10 +1098,13 @@ function PaymentModal({
     }
   };
 
+  const customAccountValue = () =>
+    [customAccountName.trim(), customBankName.trim()].filter(Boolean).join(', ');
+
   const handleSaveAccount = async (value: string, allowEmpty = false) => {
     const account = value.trim();
     if (!account && !allowEmpty) {
-      setError('Select an account or type the account it arrived in.');
+      setError('Select an account or enter the account name and bank name.');
       return;
     }
     setAccountSaving(true);
@@ -1215,17 +1222,33 @@ function PaymentModal({
                     {(banks || []).map((b) => (
                       <option key={b.id} value={b.id}>{bankAccountLabel(b)}</option>
                     ))}
-                    <option value={OTHER_ACCOUNT}>Other — type account…</option>
+                    <option value={OTHER_ACCOUNT}>Other — type account &amp; bank…</option>
                   </select>
                   {accountChoice === OTHER_ACCOUNT && (
-                    <input
-                      type="text"
-                      value={customAccount}
-                      onChange={(e) => setCustomAccount(e.target.value)}
-                      disabled={accountSaving}
-                      placeholder="Type bank name / account number"
-                      className="flex-1 px-3 py-2 rounded-lg border border-brand-text/20 bg-white text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent disabled:opacity-50"
-                    />
+                    <div className="flex flex-col sm:flex-row gap-2 flex-1">
+                      <div className="flex-1">
+                        <label className="block text-[11px] text-brand-text/60 mb-1">Name of the account</label>
+                        <input
+                          type="text"
+                          value={customAccountName}
+                          onChange={(e) => setCustomAccountName(e.target.value)}
+                          disabled={accountSaving}
+                          placeholder="Account / beneficiary name"
+                          className="w-full px-3 py-2 rounded-lg border border-brand-text/20 bg-white text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent disabled:opacity-50"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="block text-[11px] text-brand-text/60 mb-1">Bank name</label>
+                        <input
+                          type="text"
+                          value={customBankName}
+                          onChange={(e) => setCustomBankName(e.target.value)}
+                          disabled={accountSaving}
+                          placeholder="Bank name"
+                          className="w-full px-3 py-2 rounded-lg border border-brand-text/20 bg-white text-sm text-brand-text focus:outline-none focus:ring-2 focus:ring-brand-accent disabled:opacity-50"
+                        />
+                      </div>
+                    </div>
                   )}
                 </div>
                 <div className="flex flex-wrap items-center gap-2 mt-2">
@@ -1238,12 +1261,12 @@ function PaymentModal({
                     type="button"
                     onClick={() => handleSaveAccount(
                       accountChoice === OTHER_ACCOUNT
-                        ? customAccount
+                        ? customAccountValue()
                         : (banks || []).find((b) => b.id === accountChoice)
                           ? bankAccountLabel((banks || []).find((b) => b.id === accountChoice)!)
                           : ''
                     )}
-                    disabled={accountSaving || !accountChoice || (accountChoice === OTHER_ACCOUNT && !customAccount.trim())}
+                    disabled={accountSaving || !accountChoice || (accountChoice === OTHER_ACCOUNT && !customAccountValue())}
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-brand-text text-white text-xs font-semibold hover:bg-brand-accent transition-colors disabled:opacity-50"
                   >
                     {accountSaving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
