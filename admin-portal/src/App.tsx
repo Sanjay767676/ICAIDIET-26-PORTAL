@@ -4,6 +4,7 @@ import DownloadPanel from './components/DownloadPanel';
 import MailField from './components/MailField';
 import RegistrationConfigPanel, { RegistrationConfig, BankAccount } from './components/RegistrationConfigPanel';
 import SettingsPanel from './components/SettingsPanel';
+import AuthorVerificationPanel, { type AuthorVerificationRequest } from './components/AuthorVerificationPanel';
 import { PaymentDashboard } from './components/PaymentDashboard';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -2644,10 +2645,14 @@ function ReviewSection({
 export default function App() {
   const [token, setToken] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_token') || '');
   const [adminEmail, setAdminEmail] = useState<string>(() => sessionStorage.getItem('icaidiet_admin_user') || '');
-  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'cameraReady' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
+  const [activeTab, setActiveTab] = useState<'submissions' | 'accepted' | 'minorChanges' | 'majorChanges' | 'payments' | 'cameraReady' | 'authorDetails' | 'duplicates' | 'deleted' | 'downloads' | 'settings'>('submissions');
   const [paymentViewMode, setPaymentViewMode] = useState<'list' | 'dashboard'>('list');
   const [submissions, setSubmissions] = useState<Submission[]>([]);
   const [deletedSubmissions, setDeletedSubmissions] = useState<Submission[]>([]);
+  // Author-detail requests waiting for (or already through) manual verification.
+  const [authorDetailRequests, setAuthorDetailRequests] = useState<AuthorVerificationRequest[]>([]);
+  const [authorDetailRequestsLoading, setAuthorDetailRequestsLoading] = useState(false);
+  const [authorDetailRequestsError, setAuthorDetailRequestsError] = useState<string | null>(null);
   const [stats, setStats] = useState({ total: 0, submitted: 0, underReview: 0, readyForRegistration: 0, readyForCameraReady: 0 });
   const [loading, setLoading] = useState(false);
   const [deletedLoading, setDeletedLoading] = useState(false);
@@ -2746,6 +2751,8 @@ export default function App() {
     setAdminEmail('');
     setSubmissions([]);
     setDeletedSubmissions([]);
+    setAuthorDetailRequests([]);
+    setAuthorDetailRequestsError(null);
     setPdfView({ open: false });
     sessionStorage.removeItem('icaidiet_admin_token');
     sessionStorage.removeItem('icaidiet_admin_user');
@@ -3026,6 +3033,37 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
     }
   };
 
+  const fetchAuthorDetailRequests = async (opts?: { silent?: boolean }) => {
+    const silent = opts?.silent;
+    if (!silent) {
+      setAuthorDetailRequestsLoading(true);
+      setAuthorDetailRequestsError(null);
+    }
+    try {
+      const res = await fetch(`${API_URL}/api/admin/author-detail-requests`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.status === 401) {
+        handleLogout();
+        return;
+      }
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.success) {
+        throw new Error(data?.error || 'Failed to load author detail requests.');
+      }
+      setAuthorDetailRequests(data.requests || []);
+      setAuthorDetailRequestsError(null);
+    } catch (err) {
+      if (silent) {
+        console.error(err);
+      } else {
+        setAuthorDetailRequestsError(err instanceof Error ? err.message : 'Failed to load author detail requests.');
+      }
+    } finally {
+      if (!silent) setAuthorDetailRequestsLoading(false);
+    }
+  };
+
   const fetchDeletedSubmissions = async (opts?: { silent?: boolean }) => {
     const silent = opts?.silent;
     if (!silent) setDeletedLoading(true);
@@ -3278,6 +3316,8 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
   const refreshActiveTab = async (opts?: { silent?: boolean }) => {
     if (['submissions', 'accepted', 'minorChanges', 'majorChanges', 'duplicates', 'payments', 'cameraReady'].includes(activeTab)) {
       await fetchSubmissions(opts);
+    } else if (activeTab === 'authorDetails') {
+      await fetchAuthorDetailRequests(opts);
     } else if (activeTab === 'deleted') {
       await fetchDeletedSubmissions(opts);
     }
@@ -3305,6 +3345,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
       // Prioritize primary dashboard data and settings first
       fetchSubmissions();
       fetchSettings();
+      fetchAuthorDetailRequests({ silent: true });
       fetchMailTemplates({ silent: true });
       const now = Date.now();
       lastUpdatedRef.current = now;
@@ -3317,6 +3358,15 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
   React.useEffect(() => {
     if (token && activeTab === 'deleted') {
       fetchDeletedSubmissions();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, activeTab]);
+
+  // The queue is read silently at login so the tab badge is correct; re-read it
+  // with loading/error UI when the admin actually opens the tab.
+  React.useEffect(() => {
+    if (token && activeTab === 'authorDetails') {
+      fetchAuthorDetailRequests();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, activeTab]);
@@ -3499,6 +3549,7 @@ const handlePaymentStatusChanged = (subId: string, newStatus: string, approvedAt
   const paperIds = Array.from(new Set(submissions.map((s) => s.paper_id).filter(Boolean) as string[])).sort((a, b) =>
     a.localeCompare(b)
   );
+  const pendingAuthorDetailCount = authorDetailRequests.filter((r) => r.status === 'PENDING').length;
   const q = searchTerm.trim().toLowerCase();
   const filtersActive = !!(
     q || trackFilter || paperIdFilter || dateFilter || mailStatusFilter || reviewDateFilter ||
@@ -3742,6 +3793,17 @@ const masterApply = (fallbackList: Submission[], globalSearchList?: Submission[]
                   {cameraReadySubmissionsList.length > 0 && (
                     <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'cameraReady' ? 'bg-purple-500 text-white' : 'bg-purple-600 text-white'}`}>
                       {cameraReadySubmissionsList.length}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => changeTab('authorDetails')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap ${activeTab === 'authorDetails' ? 'bg-brand-text text-white' : 'hover:bg-brand-text/10 text-brand-text'}`}
+                >
+                  Author Verification
+                  {pendingAuthorDetailCount > 0 && (
+                    <span className={`ml-1.5 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full text-[10px] font-bold ${activeTab === 'authorDetails' ? 'bg-amber-500 text-white' : 'bg-amber-600 text-white'}`}>
+                      {pendingAuthorDetailCount}
                     </span>
                   )}
                 </button>
@@ -4317,6 +4379,18 @@ Duplicates
                 })}
             </div>
           </div>
+        )}
+
+        {activeTab === 'authorDetails' && (
+          <AuthorVerificationPanel
+            requests={authorDetailRequests}
+            loading={authorDetailRequestsLoading}
+            error={authorDetailRequestsError}
+            token={token}
+            onOpenPdf={openPdf}
+            onUnauthorized={handleLogout}
+            onRefresh={() => fetchAuthorDetailRequests()}
+          />
         )}
 
         {activeTab === 'duplicates' && (

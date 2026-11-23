@@ -36,6 +36,7 @@ backup_*/
 *~
 # Generated analysis reports (Excel) — contain author names, emails and payment data.
 backend/analysis/
+reports/
 __pycache__/
 *.py[cod]
 backend/scripts/*.json

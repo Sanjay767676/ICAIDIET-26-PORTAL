@@ -73,9 +73,13 @@ interface MySubmission {
   camera_ready_status?: string | null;
   camera_ready_comments?: string | null;
   camera_ready_reviewed_at?: string | null;
-  // Set once the author confirms the final author list used for certificates.
+  // Set once an admin approves the author list used for certificates.
   // After this, the Edit Authors button is disabled for that submission.
   authors_finalised_at?: string | null;
+  // Where the author's submitted list stands in the admin verification queue.
+  // PENDING hides the Edit button; REJECTED brings it back with the admin's note.
+  author_details_request_status?: 'PENDING' | 'APPROVED' | 'REJECTED' | null;
+  author_details_rejection_note?: string | null;
   // Which author-editor variant this paper is in, computed by the server from
   // the current phase switch (offline now, online later). Null = no editor.
   author_edit_mode?: 'OFFLINE' | 'ONLINE' | null;
@@ -1399,6 +1403,21 @@ export function MySubmissions({
     loadSubmissions();
   }, [loadSubmissions]);
 
+  // Pick up an admin's approve/reject decision while this page stays open:
+  // re-read the list when the admin changes it and the author returns to the
+  // tab. No timer, so an idle portal does not spend D1 reads in the background.
+  useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') loadSubmissions();
+    };
+    window.addEventListener('focus', refreshWhenVisible);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refreshWhenVisible);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [loadSubmissions]);
+
   const handleSaved = () => {
     const neededRevisions = editing?.review_decision && editing.review_decision !== 'ACCEPTED';
     setPopup({
@@ -1415,8 +1434,8 @@ export function MySubmissions({
   const handleAuthorsSaved = () => {
     setPopup({
       type: 'success',
-      title: 'Author Details Finalised',
-      message: 'Your author details have been saved for certificate generation. They can no longer be changed.',
+      title: 'Author Details Submitted',
+      message: 'Your author details have been sent to the admin for verification. They will be saved for certificates once approved.',
     });
     setEditingAuthors(null);
     loadSubmissions();
@@ -1493,6 +1512,8 @@ export function MySubmissions({
       ) : (
         <div className="space-y-8">
           {subs.map((sub) => {
+            const authorsAlreadyUpdated =
+              !!sub.authors_finalised_at || sub.author_details_request_status === 'APPROVED';
             const isSubAccepted = isPayablePaper(sub);
             const isPaymentDone =
               sub.payment_status === 'APPROVED' ||
@@ -1729,18 +1750,38 @@ export function MySubmissions({
                         Author details for certificates
                       </p>
                       <p className="text-xs text-black/60 mt-0.5">
-                        {sub.authors_finalised_at
-                          ? `Finalised on ${new Date(sub.authors_finalised_at).toLocaleDateString()} — no further changes can be made.`
+                        {authorsAlreadyUpdated
+                          ? `Author details have been updated${
+                              sub.authors_finalised_at
+                                ? ` on ${new Date(sub.authors_finalised_at).toLocaleDateString()}`
+                                : ''
+                            } — no further changes can be made.`
+                          : sub.author_details_request_status === 'PENDING'
+                          ? 'Submitted for admin verification. You can edit again if the admin asks for changes.'
+                          : sub.author_details_request_status === 'REJECTED'
+                          ? `Your last submission was not approved${
+                              sub.author_details_rejection_note
+                                ? `: ${sub.author_details_rejection_note}`
+                                : ''
+                            }. Please correct the details and submit again.`
                           : 'Confirm the author names, titles and designations that will appear on your certificates.'}
                       </p>
                     </div>
-                    {sub.authors_finalised_at ? (
+                    {authorsAlreadyUpdated ? (
                       <button
                         type="button"
                         disabled
                         className="inline-flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-xl text-sm font-semibold opacity-50 cursor-not-allowed"
                       >
-                        <CheckCircle2 className="w-4 h-4" /> Author Details Finalised
+                        <CheckCircle2 className="w-4 h-4" /> Author Details Updated
+                      </button>
+                    ) : sub.author_details_request_status === 'PENDING' ? (
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center gap-2 px-5 py-2.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-sm font-semibold cursor-not-allowed"
+                      >
+                        <Loader2 className="w-4 h-4" /> Submitted — Awaiting Verification
                       </button>
                     ) : (
                       <button
@@ -1748,7 +1789,10 @@ export function MySubmissions({
                         onClick={() => setEditingAuthors(sub)}
                         className="inline-flex items-center gap-2 px-5 py-2.5 bg-black text-white rounded-xl text-sm font-semibold hover:bg-gray-800 transition-all shadow-md"
                       >
-                        <Pencil className="w-4 h-4" /> Edit Authors
+                        <Pencil className="w-4 h-4" />
+                        {sub.author_details_request_status === 'REJECTED'
+                          ? 'Edit & Resubmit Authors'
+                          : 'Edit Authors'}
                       </button>
                     )}
                   </div>
@@ -2102,7 +2146,12 @@ export function MySubmissions({
         />
       )}
 
-      {editingAuthors && authorEditsEnabled && !editingAuthors.authors_finalised_at && !!editingAuthors.author_edit_mode && (
+      {editingAuthors &&
+        authorEditsEnabled &&
+        !editingAuthors.authors_finalised_at &&
+        editingAuthors.author_details_request_status !== 'PENDING' &&
+        editingAuthors.author_details_request_status !== 'APPROVED' &&
+        !!editingAuthors.author_edit_mode && (
         <EditAuthorsModal
           sub={editingAuthors}
           getToken={getToken}

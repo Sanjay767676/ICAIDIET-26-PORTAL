@@ -2412,6 +2412,8 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
               s.phase2_track, s.phase2_head_count, s.phase2_payment_waived,
               s.camera_ready_status, s.camera_ready_comments, s.camera_ready_reviewed_at,
               s.authors_finalised_at,
+              (SELECT status FROM author_detail_requests adr WHERE adr.submission_id = s.id) AS author_details_request_status,
+              (SELECT rejection_note FROM author_detail_requests adr WHERE adr.submission_id = s.id) AS author_details_rejection_note,
               (SELECT original_filename FROM submission_files
                WHERE submission_id = s.id AND file_type = 'MANUSCRIPT' LIMIT 1) AS manuscript_file,
               (SELECT original_filename FROM submission_files
@@ -2552,6 +2554,39 @@ async function loadAuthorEditorSubmission(
       ),
     };
   }
+  // A submitted list is locked until an admin reviews it. A REJECTED request
+  // leaves authors_finalised_at NULL, so the author can edit and resubmit;
+  // APPROVED (or an admin's direct edit) means the details are already updated.
+  const request = await c.env.DB.prepare(
+    `SELECT status, submitted_at FROM author_detail_requests WHERE submission_id = ?`
+  ).bind(submissionId).first() as any;
+  if (request?.status === 'PENDING') {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error: 'Your author details have been submitted and are awaiting admin verification.',
+          author_details_status: 'PENDING',
+          submitted_at: request.submitted_at,
+        },
+        409
+      ),
+    };
+  }
+  if (request?.status === 'APPROVED') {
+    return {
+      ok: false,
+      res: c.json(
+        {
+          success: false,
+          error: 'These author details have already been updated and cannot be changed.',
+          author_details_status: 'APPROVED',
+        },
+        409
+      ),
+    };
+  }
 
   const clerkUserId = c.get('clerkUserId') as string;
   const clerkEmail = (c.get('clerkEmail') || '').trim();
@@ -2576,12 +2611,29 @@ app.get('/api/submissions/:id/authors', requireClerkAuth, async (c) => {
        FROM authors WHERE submission_id = ? ORDER BY is_primary DESC, created_at ASC`
     ).bind(gate.submission.id).all();
 
+    // After a rejection, start the form from the list the author submitted so
+    // they only have to correct what the admin flagged, not retype everything.
+    const request = await c.env.DB.prepare(
+      `SELECT status, proposed_authors_json, rejection_note FROM author_detail_requests
+       WHERE submission_id = ?`
+    ).bind(gate.submission.id).first() as any;
+    let authors = results as any[];
+    if (request?.status === 'REJECTED' && request.proposed_authors_json) {
+      try {
+        const staged = JSON.parse(request.proposed_authors_json);
+        if (Array.isArray(staged) && staged.length) authors = staged;
+      } catch {
+        /* keep the stored list if the staged JSON is unusable */
+      }
+    }
+
     return c.json({
       success: true,
-      authors: results,
+      authors,
       mode: gate.mode,
       author_count_locked: gate.mode === 'OFFLINE',
       whatsapp_group_url: gate.mode === 'OFFLINE' ? AUTHOR_EDIT_WHATSAPP_URL : null,
+      rejection_note: request?.status === 'REJECTED' ? request.rejection_note || '' : null,
     });
   } catch (error) {
     console.error('Fetch authors for author edit error:', error);
@@ -2694,48 +2746,25 @@ app.post('/api/submissions/:id/authors', requireClerkAuth, async (c) => {
       return c.json({ success: false, error: 'Each author must have a different email address.' }, 400);
     }
 
-    const primary = authors[0];
+    // Stage the validated list for admin verification. Nothing in `authors`
+    // (or authors_finalised_at) changes until an admin approves it against the
+    // camera-ready paper. A resubmission after a rejection replaces the old
+    // request and returns it to PENDING.
     const now = new Date().toISOString();
-    const statements: D1PreparedStatement[] = [
-      c.env.DB.prepare(`DELETE FROM authors WHERE submission_id = ?`).bind(gate.submission.id),
-    ];
-    for (const a of authors) {
-      statements.push(
-        c.env.DB.prepare(
-          `INSERT INTO authors
-            (id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        ).bind(
-          crypto.randomUUID(),
-          gate.submission.id,
-          a.is_primary,
-          a.first_name,
-          a.last_name,
-          a.phone,
-          a.email,
-          a.college,
-          a.title,
-          a.designation,
-          now
-        )
-      );
-    }
-    statements.push(
-      c.env.DB.prepare(
-        `UPDATE submissions
-         SET author_name = ?, author_email = ?, authors_finalised_at = ?, updated_at = ?
-         WHERE id = ? AND authors_finalised_at IS NULL`
-      ).bind(`${primary.first_name} ${primary.last_name}`.trim(), primary.email, now, now, gate.submission.id)
-    );
+    await c.env.DB.prepare(
+      `INSERT INTO author_detail_requests
+         (submission_id, proposed_authors_json, status, submitted_at, reviewed_at, reviewed_by, rejection_note)
+       VALUES (?, ?, 'PENDING', ?, NULL, NULL, NULL)
+       ON CONFLICT(submission_id) DO UPDATE SET
+         proposed_authors_json = excluded.proposed_authors_json,
+         status = 'PENDING',
+         submitted_at = excluded.submitted_at,
+         reviewed_at = NULL,
+         reviewed_by = NULL,
+         rejection_note = NULL`
+    ).bind(gate.submission.id, JSON.stringify(authors), now).run();
 
-    await c.env.DB.batch(statements);
-
-    const { results } = await c.env.DB.prepare(
-      `SELECT id, is_primary, first_name, last_name, phone, email, college, title, designation
-       FROM authors WHERE submission_id = ? ORDER BY is_primary DESC, created_at ASC`
-    ).bind(gate.submission.id).all();
-
-    return c.json({ success: true, authors: results, authors_finalised_at: now });
+    return c.json({ success: true, status: 'PENDING', submitted_at: now });
   } catch (error) {
     console.error('Save author details error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
@@ -3866,8 +3895,20 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
     }
     statements.push(
       c.env.DB.prepare(
-        `UPDATE submissions SET author_name = ?, author_email = ?, updated_at = ? WHERE id = ?`
-      ).bind(`${primary.first_name} ${primary.last_name}`, primary.email, now, submissionId)
+        `UPDATE submissions
+         SET author_name = ?, author_email = ?, authors_finalised_at = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(`${primary.first_name} ${primary.last_name}`, primary.email, now, now, submissionId)
+    );
+    // An admin direct edit supersedes any author-submitted proposal. Close it
+    // out so the queue cannot later overwrite these details, and so the author
+    // portal stays locked through authors_finalised_at.
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE author_detail_requests
+         SET status = 'APPROVED', reviewed_at = ?, reviewed_by = ?, rejection_note = NULL
+         WHERE submission_id = ? AND status = 'PENDING'`
+      ).bind(now, verified.subject || null, submissionId)
     );
 
     await c.env.DB.batch(statements);
@@ -3880,6 +3921,196 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
     return c.json({ success: true, authors: res.results });
   } catch (error) {
     console.error('Update author list error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+// ------------------------------------------------------------------
+// Admin: author-detail verification queue.
+// An author's submitted list is staged in author_detail_requests by the user
+// endpoint. Here the admin sees it beside the camera-ready PDF and the current
+// authors, then approves (writes the list to `authors` + locks it) or rejects
+// (keeps the old list and gives the author the button back).
+// ------------------------------------------------------------------
+app.get('/api/admin/author-detail-requests', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const { results } = await c.env.DB.prepare(
+      `SELECT adr.submission_id, adr.status, adr.submitted_at, adr.reviewed_at, adr.reviewed_by,
+              adr.rejection_note, adr.proposed_authors_json,
+              s.submission_code, s.paper_id, s.title, s.author_name, s.payment_status,
+              s.attendance_mode, s.authors_finalised_at,
+              (SELECT sf.original_filename FROM submission_files sf
+                WHERE sf.submission_id = s.id AND sf.file_type = 'CAMERA_READY' LIMIT 1) AS camera_ready_file
+       FROM author_detail_requests adr
+       JOIN submissions s ON s.id = adr.submission_id
+       WHERE s.deleted_at IS NULL
+       ORDER BY CASE adr.status WHEN 'PENDING' THEN 0 ELSE 1 END, adr.submitted_at DESC`
+    ).all();
+
+    const ids = ((results as any[]) || []).map((r) => r.submission_id as string);
+    const currentBySubmission = new Map<string, any[]>();
+    if (ids.length) {
+      const placeholders = ids.map(() => '?').join(',');
+      const { results: authorRows } = await c.env.DB.prepare(
+        `SELECT submission_id, id, is_primary, first_name, last_name, phone, email, college, title, designation
+         FROM authors WHERE submission_id IN (${placeholders})
+         ORDER BY is_primary DESC, created_at ASC`
+      ).bind(...ids).all();
+      for (const a of ((authorRows as any[]) || [])) {
+        const list = currentBySubmission.get(a.submission_id) || [];
+        list.push(a);
+        currentBySubmission.set(a.submission_id, list);
+      }
+    }
+
+    const requests = ((results as any[]) || []).map((r) => {
+      let proposed: any[] = [];
+      try {
+        const parsed = JSON.parse(r.proposed_authors_json || '[]');
+        if (Array.isArray(parsed)) proposed = parsed;
+      } catch {
+        /* keep the empty list if the staged JSON is unusable */
+      }
+      const { proposed_authors_json, ...rest } = r;
+      return {
+        ...rest,
+        proposed_authors: proposed,
+        current_authors: currentBySubmission.get(r.submission_id) || [],
+      };
+    });
+
+    return c.json({
+      success: true,
+      requests,
+      pending_count: requests.filter((r) => r.status === 'PENDING').length,
+    });
+  } catch (error) {
+    console.error('List author detail requests error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+app.post('/api/admin/author-detail-requests/:submissionId/approve', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const submissionId = c.req.param('submissionId') as string;
+    const request = await c.env.DB.prepare(
+      `SELECT status, proposed_authors_json FROM author_detail_requests WHERE submission_id = ?`
+    ).bind(submissionId).first() as any;
+    if (!request) return c.json({ success: false, error: 'No author detail request found.' }, 404);
+    if (request.status !== 'PENDING') {
+      return c.json({ success: false, error: `This request has already been ${String(request.status).toLowerCase()}.` }, 409);
+    }
+
+    let authors: any[] = [];
+    try {
+      const parsed = JSON.parse(request.proposed_authors_json || '[]');
+      if (Array.isArray(parsed)) authors = parsed;
+    } catch {
+      /* handled by the length check below */
+    }
+    if (!authors.length || authors.length > 6) {
+      return c.json({ success: false, error: 'The submitted author list is invalid.' }, 400);
+    }
+
+    const now = new Date().toISOString();
+    const statements: D1PreparedStatement[] = [
+      c.env.DB.prepare(`DELETE FROM authors WHERE submission_id = ?`).bind(submissionId),
+    ];
+    for (const a of authors) {
+      statements.push(
+        c.env.DB.prepare(
+          `INSERT INTO authors
+            (id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).bind(
+          crypto.randomUUID(),
+          submissionId,
+          a.is_primary ? 1 : 0,
+          String(a.first_name || '').trim(),
+          String(a.last_name || '').trim(),
+          String(a.phone || '').trim(),
+          String(a.email || '').trim(),
+          String(a.college || '').trim(),
+          String(a.title || '').trim(),
+          String(a.designation || '').trim(),
+          now
+        )
+      );
+    }
+    const primary = authors.find((a) => a.is_primary) || authors[0];
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE submissions
+         SET author_name = ?, author_email = ?, authors_finalised_at = ?, updated_at = ?
+         WHERE id = ? AND authors_finalised_at IS NULL`
+      ).bind(
+        `${String(primary.first_name || '').trim()} ${String(primary.last_name || '').trim()}`.trim(),
+        String(primary.email || '').trim(),
+        now,
+        now,
+        submissionId
+      )
+    );
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE author_detail_requests
+         SET status = 'APPROVED', reviewed_at = ?, reviewed_by = ?, rejection_note = NULL
+         WHERE submission_id = ? AND status = 'PENDING'`
+      ).bind(now, verified.subject || null, submissionId)
+    );
+
+    await c.env.DB.batch(statements);
+    return c.json({ success: true, status: 'APPROVED', authors_finalised_at: now });
+  } catch (error) {
+    console.error('Approve author details error:', error);
+    return c.json({ success: false, error: 'Internal Server Error.' }, 500);
+  }
+});
+
+app.post('/api/admin/author-detail-requests/:submissionId/reject', async (c) => {
+  try {
+    const token = getBearer(c);
+    if (!token) return c.json({ success: false, error: 'Unauthorized. Please sign in.' }, 401);
+    const verified = await verifyToken(c, token);
+    if (!verified.ok) {
+      return c.json({ success: false, error: 'Invalid or expired session. Please sign in again.' }, 401);
+    }
+
+    const submissionId = c.req.param('submissionId') as string;
+    const request = await c.env.DB.prepare(
+      `SELECT status FROM author_detail_requests WHERE submission_id = ?`
+    ).bind(submissionId).first() as any;
+    if (!request) return c.json({ success: false, error: 'No author detail request found.' }, 404);
+    if (request.status !== 'PENDING') {
+      return c.json({ success: false, error: `This request has already been ${String(request.status).toLowerCase()}.` }, 409);
+    }
+
+    const body = await c.req.json().catch(() => null);
+    const note = typeof body?.note === 'string' ? body.note.trim().slice(0, 300) : '';
+    const now = new Date().toISOString();
+    await c.env.DB.prepare(
+      `UPDATE author_detail_requests
+       SET status = 'REJECTED', reviewed_at = ?, reviewed_by = ?, rejection_note = ?
+       WHERE submission_id = ? AND status = 'PENDING'`
+    ).bind(now, verified.subject || null, note, submissionId).run();
+
+    return c.json({ success: true, status: 'REJECTED' });
+  } catch (error) {
+    console.error('Reject author details error:', error);
     return c.json({ success: false, error: 'Internal Server Error.' }, 500);
   }
 });

@@ -82,6 +82,7 @@ export function EditAuthorsModal({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [rejectionNote, setRejectionNote] = useState<string | null>(null);
   const [joinedWhatsApp, setJoinedWhatsApp] = useState(false);
   const [stage, setStage] = useState<'edit' | 'confirm'>('edit');
 
@@ -90,6 +91,7 @@ export function EditAuthorsModal({
     const load = async () => {
       setLoading(true);
       setError(null);
+      setRejectionNote(null);
       try {
         const token = await getToken();
         if (!token) throw new Error('Please sign in before editing author details.');
@@ -102,6 +104,9 @@ export function EditAuthorsModal({
         }
         if (cancelled) return;
         const existing: AuthorRecord[] = Array.isArray(data.authors) ? data.authors : [];
+        if (typeof data.rejection_note === 'string' && data.rejection_note.trim()) {
+          setRejectionNote(data.rejection_note.trim());
+        }
         const rows = existing.slice(0, 6).map((a) => ({
           name: `${a.first_name || ''} ${a.last_name || ''}`.trim(),
           phone: a.phone || '',
@@ -119,6 +124,7 @@ export function EditAuthorsModal({
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Could not load your author details.');
+          setRejectionNote(null);
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -263,6 +269,25 @@ export function EditAuthorsModal({
             </div>
           ) : stage === 'edit' ? (
             <>
+              {rejectionNote && (
+                <div className="mb-5 rounded-2xl border-2 border-amber-300 bg-amber-50 p-4">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 shrink-0 text-amber-700 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-amber-900">
+                        Your previous submission was not approved
+                      </p>
+                      <p className="text-xs text-amber-800 mt-1">
+                        Admin note: {rejectionNote}
+                      </p>
+                      <p className="text-xs text-amber-800 mt-1">
+                        We have loaded your submitted details below — correct them and submit again
+                        for verification.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
               {countLocked && (
                 <div className="mb-5 rounded-2xl border-2 border-emerald-200 bg-emerald-50 p-4">
                   <div className="flex items-start gap-2">
@@ -461,12 +486,12 @@ export function EditAuthorsModal({
                   <AlertCircle className="w-6 h-6 shrink-0 text-red-700 mt-0.5" />
                   <div>
                     <h3 className="font-serif font-bold text-lg text-red-900 mb-2">
-                      Please check before you confirm
+                      Please check before you submit for verification
                     </h3>
                     <p className="text-sm font-bold text-red-800 leading-relaxed">
-                      These author details will be final. These author names will appear on your
-                      certificates, so kindly check them once again and confirm. No changes will be
-                      made hereafter.
+                      These author details will be checked by the admin against your camera-ready
+                      paper before they are saved for certificates. After you submit, the Edit
+                      Authors button will be hidden until the admin approves or asks for changes.
                     </p>
                   </div>
                 </div>
@@ -538,7 +563,7 @@ export function EditAuthorsModal({
                 </>
               ) : (
                 <>
-                  <CheckCircle2 className="w-4 h-4" /> Confirm and Submit Author Details
+                  <CheckCircle2 className="w-4 h-4" /> Submit for Verification
                 </>
               )}
             </button>
