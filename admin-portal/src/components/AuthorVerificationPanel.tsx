@@ -295,7 +295,6 @@ export default function AuthorVerificationPanel({
   };
 
   const handleApprove = (request: AuthorVerificationRequest) => {
-    if (!window.confirm(`Approve the submitted author details for "${request.title}"?`)) return;
     void callAction(request, 'approve');
   };
 
