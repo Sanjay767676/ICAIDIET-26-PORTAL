@@ -54,6 +54,7 @@ type Env = {
   CERTIFICATE_SECRET?: string;
   CERT_ID_DIGITS?: string;
   CERT_ENGINE_URL?: string; // Render URL of the certificate engine, e.g. https://icaidiet-certificate-engine.onrender.com
+  CERT_PRIORITY_SUBMISSIONS?: string; // optional comma-separated submission codes to generate first
 };
 
 export type CertificateDeps = {
@@ -251,8 +252,9 @@ export function registerCertificateRoutes(app: Hono<any>, deps: CertificateDeps)
 
   app.get('/api/internal/certificates/stats', async (c) => c.json({ success: true, ...(await stats(c.env as Env)) }));
 
-  // Hands the engine the next batch. PENDING rows from an earlier, interrupted run
-  // come first (same IDs), then new eligible authors get an ID.
+  // Hands the engine the next batch. Optional CERT_PRIORITY_SUBMISSIONS (comma-separated
+  // submission codes) are generated first; then interrupted PENDING rows (same IDs),
+  // then the rest. This lets one paper be checked before the full run.
   app.post('/api/internal/certificates/claim', async (c) => {
     const env = c.env as Env;
     const body = (await c.req.json().catch(() => ({}))) as any;
@@ -281,48 +283,82 @@ export function registerCertificateRoutes(app: Hono<any>, deps: CertificateDeps)
                AND NOT EXISTS (SELECT 1 FROM certificates c2 WHERE c2.author_id = a.id))`
     ).run();
 
-    const rows = ((await env.DB.prepare(
-      `SELECT c.cert_id, ${cols}
-       FROM certificates c JOIN authors a ON a.id = c.author_id JOIN submissions s ON s.id = a.submission_id
-       WHERE c.status = 'PENDING' AND ${CERT_ELIGIBLE_SQL}
-       ORDER BY c.claimed_at LIMIT ?`
-    ).bind(limit).all()).results || []) as any[];
+    const priorityCodes = String(env.CERT_PRIORITY_SUBMISSIONS || '')
+      .split(',')
+      .map((v) => v.trim().toUpperCase())
+      .filter(Boolean)
+      .slice(0, 20);
+    const marks = priorityCodes.map(() => '?').join(', ');
+    const priorityWhere = priorityCodes.length ? `AND upper(s.submission_code) IN (${marks})` : '';
+    const otherWhere = priorityCodes.length
+      ? `AND (s.submission_code IS NULL OR upper(s.submission_code) NOT IN (${marks}))`
+      : '';
 
-    if (rows.length < limit) {
-      const fresh = ((await env.DB.prepare(
+    const fetchPending = async (whereSql: string, binds: any[], take: number): Promise<any[]> => {
+      if (take <= 0) return [];
+      const result = await env.DB.prepare(
+        `SELECT c.cert_id, ${cols}
+         FROM certificates c JOIN authors a ON a.id = c.author_id JOIN submissions s ON s.id = a.submission_id
+         WHERE c.status = 'PENDING' AND ${CERT_ELIGIBLE_SQL} ${whereSql}
+         ORDER BY c.claimed_at LIMIT ?`
+      ).bind(...binds, take).all();
+      return (result.results || []) as any[];
+    };
+
+    let used: Set<string> | null = null;
+    const addFresh = async (whereSql: string, binds: any[], take: number): Promise<string | null> => {
+      if (take <= 0) return null;
+      const result = await env.DB.prepare(
         `SELECT ${cols}
          FROM authors a JOIN submissions s ON s.id = a.submission_id
-         WHERE ${CERT_ELIGIBLE_SQL} AND NOT EXISTS (SELECT 1 FROM certificates c WHERE c.author_id = a.id)
+         WHERE ${CERT_ELIGIBLE_SQL} AND NOT EXISTS (SELECT 1 FROM certificates c WHERE c.author_id = a.id) ${whereSql}
          ORDER BY s.created_at, s.id, a.is_primary DESC, a.created_at, a.id
          LIMIT ?`
-      ).bind(limit - rows.length).all()).results || []) as any[];
+      ).bind(...binds, take).all();
+      const fresh = (result.results || []) as any[];
+      if (!fresh.length) return null;
 
-      if (fresh.length) {
-        const digits = idDigits(env);
-        const capacity = 10 ** digits;
-        const used = new Set(
+      if (!used) {
+        used = new Set(
           (((await env.DB.prepare(`SELECT cert_id FROM certificates`).all()).results || []) as any[]).map((r) => r.cert_id)
         );
-        if (used.size + fresh.length > capacity * 0.9) {
-          return c.json({ success: false, error: `Certificate IDs with ${digits} digits are almost used up (${used.size}/${capacity}). Raise CERT_ID_DIGITS.` }, 409);
+      }
+      const digits = idDigits(env);
+      const capacity = 10 ** digits;
+      if (used.size + fresh.length > capacity * 0.9) {
+        return `Certificate IDs with ${digits} digits are almost used up (${used.size}/${capacity}). Raise CERT_ID_DIGITS.`;
+      }
+      for (const a of fresh) {
+        let certId = '';
+        for (let tries = 0; tries < 100_000 && !certId; tries++) {
+          const candidate = CERT_PREFIX + randomDigits(digits);
+          if (!used.has(candidate)) certId = candidate;
         }
-        for (const a of fresh) {
-          let certId = '';
-          for (let tries = 0; tries < 100_000 && !certId; tries++) {
-            const candidate = CERT_PREFIX + randomDigits(digits);
-            if (!used.has(candidate)) certId = candidate;
-          }
-          if (!certId) return c.json({ success: false, error: 'Could not allocate a certificate ID.' }, 500);
-          const res = await env.DB.prepare(
-            `INSERT OR IGNORE INTO certificates (cert_id, author_id, author_email, submission_id, paper_id, status, claimed_at)
-             VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`
-          ).bind(certId, a.author_id, squash(a.email), a.submission_id, a.paper_id || '', now).run();
-          if (res.meta?.changes) {
-            used.add(certId);
-            rows.push({ cert_id: certId, ...a });
-          }
+        if (!certId) return 'Could not allocate a certificate ID.';
+        const res = await env.DB.prepare(
+          `INSERT OR IGNORE INTO certificates (cert_id, author_id, author_email, submission_id, paper_id, status, claimed_at)
+           VALUES (?, ?, ?, ?, ?, 'PENDING', ?)`
+        ).bind(certId, a.author_id, squash(a.email), a.submission_id, a.paper_id || '', now).run();
+        if (res.meta?.changes) {
+          used.add(certId);
+          rows.push({ cert_id: certId, ...a });
         }
       }
+      return null;
+    };
+
+    const rows: any[] = [];
+    if (priorityCodes.length) {
+      rows.push(...(await fetchPending(priorityWhere, priorityCodes, limit)));
+      let error = await addFresh(priorityWhere, priorityCodes, limit - rows.length);
+      if (error) return c.json({ success: false, error }, 409);
+      rows.push(...(await fetchPending(otherWhere, priorityCodes, limit - rows.length)));
+      error = await addFresh(otherWhere, priorityCodes, limit - rows.length);
+      if (error) return c.json({ success: false, error }, 409);
+    } else {
+      rows.push(...(await fetchPending('', [], limit)));
+      const error = await addFresh('', [], limit - rows.length);
+      if (error) return c.json({ success: false, error }, 409);
     }
 
     const items = rows.map((r) => {
