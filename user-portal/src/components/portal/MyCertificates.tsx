@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Award, CheckCircle2, Clock, Download, ExternalLink, Loader2, RefreshCw, XCircle } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
-const VERIFY_URL = import.meta.env.VITE_VERIFY_URL || 'https://verify.icaidiet26.tech';
+// Optional: only show a "Verify" link in the portal if a verifier URL is configured.
+// The certificate PDF itself carries the ID; you can share the verifier URL separately.
+const VERIFY_URL = (import.meta.env.VITE_VERIFY_URL || '').replace(/\/+$/, '');
 
 type AuthorCert = {
   author_id: string;
@@ -162,15 +164,19 @@ export function MyCertificates({
                       {a.cert_id && (
                         <div className="text-xs text-brand-text/60 mt-1">
                           Certificate ID <span className="font-mono font-semibold text-brand-text">{a.cert_id}</span>
-                          {' · '}
-                          <a
-                            href={`${VERIFY_URL}/?id=${a.cert_id}`}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="underline hover:no-underline inline-flex items-center gap-0.5"
-                          >
-                            Verify <ExternalLink className="w-3 h-3" />
-                          </a>
+                          {VERIFY_URL && (
+                            <>
+                              {' · '}
+                              <a
+                                href={`${VERIFY_URL}/?id=${a.cert_id}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="underline hover:no-underline inline-flex items-center gap-0.5"
+                              >
+                                Verify <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </>
+                          )}
                         </div>
                       )}
                     </div>

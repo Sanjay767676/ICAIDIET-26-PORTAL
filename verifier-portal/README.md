@@ -21,8 +21,12 @@ of the root npm workspaces, so it deploys on its own.
 6. Open `https://verify.icaidiet26.tech/?id=<a real certificate ID>` to check.
 
 The Worker already allows this origin (`ALLOWED_ORIGINS` in `backend/wrangler.toml`). If you
-use a different domain, add it there and redeploy the Worker; in the user portal set
-`VITE_VERIFY_URL` to it.
+use a different domain, add it there and redeploy the Worker.
+
+`VITE_VERIFY_URL` in the **user portal** is optional. The PDF already contains the certificate
+ID, so you can share the verifier URL separately. Set `VITE_VERIFY_URL` only if you also want a
+clickable **Verify** link next to the ID in "View My Certificates"; when it is unset, that link
+is hidden.
 
 ## Local
 ```
