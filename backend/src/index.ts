@@ -2,6 +2,7 @@ import { Hono, Context } from 'hono';
 import { cors } from 'hono/cors';
 import { verifyToken as clerkVerifyToken } from '@clerk/backend';
 import { registerAttendanceRoutes, syncAttendanceQrs } from './attendance';
+import { registerCertificateRoutes, triggerCertificateEngine } from './certificates';
 
 type Bindings = {
   DB: D1Database;
@@ -16,6 +17,14 @@ type Bindings = {
   // Optional dedicated key for attendance QR signatures (wrangler secret put
   // QR_SIGNING_SECRET). Falls back to a key derived from AUTH_SECRET.
   QR_SIGNING_SECRET?: string;
+  // Shared secret the certificate engine (Render) sends as X-Certificate-Secret
+  // (npx wrangler secret put CERTIFICATE_SECRET). Certificate ID digits: [vars].
+  CERTIFICATE_SECRET?: string;
+  CERT_ID_DIGITS?: string;
+  // R2 bucket "certificates": generated e-certificate PDFs, one folder per paper.
+  CERT_BUCKET: R2Bucket;
+  // Render URL of the certificate engine; approvals + the hourly cron wake it.
+  CERT_ENGINE_URL?: string;
 };
 
 type Variables = {
@@ -45,6 +54,8 @@ const DEFAULT_ALLOWED_ORIGINS = [
   // Attendance scanner. Listed in code (not only in ALLOWED_ORIGINS) so the
   // scanner keeps working even if the deployed vars are out of date.
   'https://scanner.icaidiet26.tech',
+  'http://localhost:5177', // verifier-portal (vite dev)
+  'https://verify.icaidiet26.tech',
   'http://localhost:8787',
 ];
 
@@ -3912,6 +3923,8 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
     );
 
     await c.env.DB.batch(statements);
+    // Authors are final now: issue / refresh their e-certificates if payment is approved.
+    c.executionCtx.waitUntil(triggerCertificateEngine(c.env, 'admin author edit'));
 
     const res = await c.env.DB.prepare(
       `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
@@ -4074,6 +4087,8 @@ app.post('/api/admin/author-detail-requests/:submissionId/approve', async (c) =>
     );
 
     await c.env.DB.batch(statements);
+    // Edit Authors approved: issue the e-certificates if payment is approved too.
+    c.executionCtx.waitUntil(triggerCertificateEngine(c.env, 'author details approved'));
     return c.json({ success: true, status: 'APPROVED', authors_finalised_at: now });
   } catch (error) {
     console.error('Approve author details error:', error);
@@ -5918,6 +5933,8 @@ app.post('/api/admin/submissions/:id/payment-status', async (c) => {
          SET payment_status = ?, payment_approved_at = ?, payment_mail_status = NULL, payment_mail_sent_at = NULL, updated_at = ?
          WHERE id = ?`
       ).bind(status, approvedAt, new Date().toISOString(), submissionId).run();
+      // Payment approved: issue the e-certificates if Edit Authors is approved too.
+      c.executionCtx.waitUntil(triggerCertificateEngine(c.env, 'payment approved'));
     } else {
       await c.env.DB.prepare(
         `UPDATE submissions
@@ -6035,6 +6052,13 @@ registerAttendanceRoutes(app, {
   isAuthorizedForSubmission,
 });
 
+registerCertificateRoutes(app, {
+  rateLimit,
+  requireClerkAuth,
+  ensureUserForClerk,
+  isAuthorizedForSubmission,
+});
+
 async function scheduled(_controller: ScheduledController, env: Bindings, _ctx: ExecutionContext) {
   await purgeExpiredDeleted(env);
   await processMailQueue(env);
@@ -6044,6 +6068,8 @@ async function scheduled(_controller: ScheduledController, env: Bindings, _ctx: 
   } catch (e) {
     console.error('attendance QR sync failed', e);
   }
+  // Safety net: wake the certificate engine if any eligible author still has no certificate.
+  await triggerCertificateEngine(env as any, 'hourly cron');
 }
 
 export default {

@@ -37,6 +37,9 @@ backup_*/
 # Generated analysis reports (Excel) — contain author names, emails and payment data.
 backend/analysis/
 reports/
+# Local duplicate of the certificate source image. The engine keeps its own
+# assets/template.png; the root copy is only a scratch source for tools.
+certificate Template.png
 __pycache__/
 *.py[cod]
 backend/scripts/*.json

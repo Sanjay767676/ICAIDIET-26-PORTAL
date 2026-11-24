@@ -7,8 +7,9 @@ import { SubmissionWizard } from './components/portal/SubmissionWizard';
 import { MySubmissions, RegistrationConfig } from './components/portal/MySubmissions';
 import { Phase2Page } from './components/portal/Phase2Page';
 import { Phase2GuidelinesPage } from './components/portal/Phase2GuidelinesPage';
+import { MyCertificates } from './components/portal/MyCertificates';
 
-type ViewState = 'home' | 'wizard' | 'submissions' | 'phase2' | 'guidelines';
+type ViewState = 'home' | 'wizard' | 'submissions' | 'certificates' | 'phase2' | 'guidelines';
 
 function SignInRequired({ title, message }: { title: string; message: string }) {
   return (
@@ -237,11 +238,12 @@ export default function App() {
 
   // Existing authors get one tab: My Submissions. Everyone else gets Home and
   // My Submissions, plus Submit Paper only while the window is open to them.
-  const visibleNavViews: ('home' | 'wizard' | 'submissions')[] = authorHasSubmission
-    ? ['submissions']
+  // "View My Certificates" sits next to My Submissions for every signed-in user.
+  const visibleNavViews: ('home' | 'wizard' | 'submissions' | 'certificates')[] = authorHasSubmission
+    ? ['submissions', 'certificates']
     : canStartSubmission
-      ? ['home', 'wizard', 'submissions']
-      : ['home', 'submissions'];
+      ? ['home', 'wizard', 'submissions', 'certificates']
+      : ['home', 'submissions', 'certificates'];
 
   // Land an existing author on their submissions once per sign-in. Guarded by a
   // ref so clicking the logo/Home afterwards is not immediately overridden.
@@ -351,6 +353,20 @@ export default function App() {
                   .join('\n')
               }
             />
+          </Show>
+        )}
+
+        {currentView === 'certificates' && (
+          <Show
+            when="signed-in"
+            fallback={
+              <SignInRequired
+                title="Sign In Required"
+                message="Please sign in to view your certificates."
+              />
+            }
+          >
+            <MyCertificates getToken={getToken} onBack={() => navigate('submissions')} />
           </Show>
         )}
 

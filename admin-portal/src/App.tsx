@@ -6,6 +6,7 @@ import RegistrationConfigPanel, { RegistrationConfig, BankAccount } from './comp
 import SettingsPanel from './components/SettingsPanel';
 import AuthorVerificationPanel, { type AuthorVerificationRequest } from './components/AuthorVerificationPanel';
 import { PaymentDashboard } from './components/PaymentDashboard';
+import CertificatesSection from './components/CertificatesSection';
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
 const PHONE_MIN_DIGITS = 5;
@@ -1364,6 +1365,7 @@ function PaymentModal({
 
 function MoreInfoModal({
   sub,
+  token,
   onClose,
   onViewPayment,
   onEditAuthors,
@@ -1371,6 +1373,7 @@ function MoreInfoModal({
   onDeclinePayment,
 }: {
   sub: Submission | null;
+  token?: string;
   onClose: () => void;
   onViewPayment?: (sub: Submission) => void;
   onEditAuthors?: (sub: Submission) => void;
@@ -1480,6 +1483,8 @@ function MoreInfoModal({
               </div>
             )}
           </div>
+
+          {token && <CertificatesSection submissionId={sub.id} token={token} />}
 
           {(sub.review_decision || sub.review_feedback) && (
             <div>
@@ -4605,6 +4610,7 @@ Duplicates
 
 <MoreInfoModal
         sub={moreInfoTarget}
+        token={token}
         onClose={() => setMoreInfoTarget(null)}
         onViewPayment={setPaymentTarget}
         onEditAuthors={setEditAuthorsTarget}

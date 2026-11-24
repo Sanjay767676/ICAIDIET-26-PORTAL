@@ -4,7 +4,7 @@ import wileyLogoBlack from '../../assets/images/WILEY(BLACK).png';
 import scopusLogo from '../../assets/images/scopus.png';
 import snsctLogo from '../../assets/images/SNSCT.png';
 
-type NavView = 'home' | 'wizard' | 'submissions' | 'guidelines';
+type NavView = 'home' | 'wizard' | 'submissions' | 'certificates' | 'guidelines';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -27,6 +27,7 @@ const NAV_ITEMS: { view: NavView; label: string }[] = [
   { view: 'home', label: 'Home' },
   { view: 'wizard', label: 'Submit Paper' },
   { view: 'submissions', label: 'My Submissions' },
+  { view: 'certificates', label: 'View My Certificates' },
 ];
 
 export function MainLayout({

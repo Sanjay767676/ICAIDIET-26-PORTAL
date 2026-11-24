@@ -1,0 +1,25 @@
+# Render Blueprint for the certificate engine.
+# If this folder is not the repo root, set rootDir to its path in the repo
+# (e.g. certificate-engine) or create the service by hand with the same values.
+services:
+  - type: web
+    name: icaidiet-certificate-engine
+    runtime: node
+    plan: free
+    rootDir: certificate-engine
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    envVars:
+      - key: API_URL            # Cloudflare Worker URL, no trailing slash
+        sync: false
+      - key: CERTIFICATE_SECRET # same value as `wrangler secret put CERTIFICATE_SECRET`
+        sync: false
+      - key: CERT_STYLE
+        value: A_classic
+      - key: BATCH_SIZE
+        value: "20"
+      - key: AUTO_RUN           # generate automatically whenever the service starts and work is waiting
+        value: "true"
+      - key: NODE_VERSION
+        value: "22"

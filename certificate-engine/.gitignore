@@ -1,0 +1,9 @@
+node_modules/
+.env
+samples/
+sample-participants.json
+tools/_font_src/
+
+# Only the master template belongs in git. Generated/preview PNGs stay local.
+*.png
+!assets/template.png

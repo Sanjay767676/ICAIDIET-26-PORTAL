@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+/* Same palette and type as the ICAIDIET'26 conference portal */
+@theme {
+  --color-brand-bg: #fdf08a;
+  --color-brand-card: #ffbf00;
+  --color-brand-text: #000000;
+  --color-brand-accent: #ffbf00;
+
+  --font-serif: "Libre Baskerville", serif;
+  --font-sans: "Plus Jakarta Sans", "Inter", system-ui, sans-serif;
+}
+
+@layer base {
+  html, body, #root { min-height: 100%; }
+  body {
+    background-color: var(--color-brand-bg);
+    color: var(--color-brand-text);
+    font-family: var(--font-sans);
+  }
+  h1, h2, h3 { font-family: var(--font-serif); }
+}
+
+@keyframes rise { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+.rise { animation: rise .25s ease-out; }
+@media (prefers-reduced-motion: reduce) { .rise { animation: none; } }
