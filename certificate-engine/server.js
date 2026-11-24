@@ -57,7 +57,11 @@ function startKeepAlive() {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
-    if (req.method === 'GET' && url.pathname === '/') return send(res, 200, { ok: true, service: 'icaidiet-certificate-engine', running: state.running });
+    // Health check for Render and uptime monitors (UptimeRobot etc.): GET or HEAD on / or /health.
+    if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/health')) {
+      if (req.method === 'HEAD') { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end(); }
+      return send(res, 200, { ok: true, service: 'icaidiet-certificate-engine', running: state.running });
+    }
 
     if (req.method === 'GET' && url.pathname === '/status') {
       // Progress logs and Worker stats describe real authors, so this endpoint
