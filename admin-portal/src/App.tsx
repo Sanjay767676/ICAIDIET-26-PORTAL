@@ -11,6 +11,14 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
 const PHONE_MIN_DIGITS = 5;
 const PHONE_MAX_DIGITS = 15;
+const TITLE_OPTIONS = ['Mrs', 'Mr', 'Ms', 'Dr'];
+const DESIGNATION_OPTIONS = [
+  'Student',
+  'HoD',
+  'Assistant Professor',
+  'Associate Professor',
+  'Other',
+];
 const onlyDigits = (value: string) => String(value ?? '').replace(/\D/g, '').slice(0, PHONE_MAX_DIGITS);
 
 // How often the dashboard re-reads the submission list while the tab is visible.
@@ -31,6 +39,8 @@ interface Author {
   phone: string;
   email: string;
   college: string;
+  title?: string;
+  designation?: string;
   created_at: string;
 }
 
@@ -738,6 +748,9 @@ interface AuthorDraft {
   email: string;
   phone: string;
   college: string;
+  title: string;
+  designation: string;
+  otherDesignation: string;
   is_primary: boolean;
 }
 
@@ -763,14 +776,20 @@ function EditAuthorsModal({
     const existing = sub.authors && sub.authors.length > 0 ? sub.authors : [];
     setDrafts(
       existing.length > 0
-        ? existing.map((a) => ({
-            first_name: a.first_name || '',
-            last_name: a.last_name || '',
-            email: a.email || '',
-            phone: onlyDigits(a.phone || ''),
-            college: a.college || '',
-            is_primary: a.is_primary === 1,
-          }))
+        ? existing.map((a) => {
+            const customDesignation = !!a.designation && !DESIGNATION_OPTIONS.includes(a.designation);
+            return {
+              first_name: a.first_name || '',
+              last_name: a.last_name || '',
+              email: a.email || '',
+              phone: onlyDigits(a.phone || ''),
+              college: a.college || '',
+              title: a.title || '',
+              designation: customDesignation ? 'Other' : a.designation || '',
+              otherDesignation: customDesignation ? a.designation || '' : '',
+              is_primary: a.is_primary === 1,
+            };
+          })
         : [
             {
               first_name: (sub.author_name || '').split(' ')[0] || '',
@@ -778,6 +797,9 @@ function EditAuthorsModal({
               email: sub.author_email || '',
               phone: '',
               college: '',
+              title: '',
+              designation: '',
+              otherDesignation: '',
               is_primary: true,
             },
           ]
@@ -794,7 +816,20 @@ function EditAuthorsModal({
     setDrafts((d) => d.map((row, idx) => ({ ...row, is_primary: idx === i })));
 
   const addAuthor = () =>
-    setDrafts((d) => [...d, { first_name: '', last_name: '', email: '', phone: '', college: '', is_primary: false }]);
+    setDrafts((d) => [
+      ...d,
+      {
+        first_name: '',
+        last_name: '',
+        email: '',
+        phone: '',
+        college: '',
+        title: '',
+        designation: '',
+        otherDesignation: '',
+        is_primary: false,
+      },
+    ]);
 
   const removeAuthor = (i: number) =>
     setDrafts((d) => d.filter((_, idx) => idx !== i));
@@ -807,6 +842,18 @@ function EditAuthorsModal({
     }
     if (drafts.some((a) => !a.first_name.trim() || !a.last_name.trim())) {
       setError('Every author needs a first and last name.');
+      return;
+    }
+    if (drafts.some((a) => !TITLE_OPTIONS.includes(a.title))) {
+      setError('Every author needs a title (Mrs / Mr / Ms / Dr) for the certificate.');
+      return;
+    }
+    if (drafts.some((a) => !DESIGNATION_OPTIONS.includes(a.designation))) {
+      setError('Every author needs a designation.');
+      return;
+    }
+    if (drafts.some((a) => a.designation === 'Other' && !a.otherDesignation.trim())) {
+      setError('Please enter the designation for authors marked Other.');
       return;
     }
     const phoneIssues = drafts
@@ -841,6 +888,9 @@ function EditAuthorsModal({
             email: a.email.trim(),
             phone: onlyDigits(a.phone),
             college: a.college.trim(),
+            title: a.title,
+            designation: a.designation,
+            other_designation: a.designation === 'Other' ? a.otherDesignation.trim() : '',
             is_primary: a.is_primary ? 1 : 0,
           })),
         }),
@@ -879,9 +929,9 @@ function EditAuthorsModal({
 
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
           <p className="text-sm text-brand-text/60 mb-4">
-            <span className="font-semibold text-brand-text">{sub.title}</span> — fill in phone numbers, co-authors and
-            college names. Mark exactly one author as <span className="font-semibold text-brand-text">Primary</span> (the
-            corresponding author).
+            <span className="font-semibold text-brand-text">{sub.title}</span> — check phone numbers, co-authors,
+            college names, title and designation (these print on the certificate). Mark exactly one author as{' '}
+            <span className="font-semibold text-brand-text">Primary</span> (the corresponding author).
           </p>
 
           {error && (
@@ -990,6 +1040,58 @@ function EditAuthorsModal({
                       className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
                     />
                   </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">
+                      Title <span className="text-red-400">*</span>
+                    </label>
+                    <select
+                      value={a.title}
+                      onChange={(e) => update(i, { title: e.target.value })}
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    >
+                      <option value="">-- Select Title --</option>
+                      {TITLE_OPTIONS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-brand-text/70 mb-1">
+                      Designation <span className="text-red-400">*</span>
+                    </label>
+                    <select
+                      value={a.designation}
+                      onChange={(e) =>
+                        update(i, {
+                          designation: e.target.value,
+                          otherDesignation: e.target.value === 'Other' ? a.otherDesignation : '',
+                        })
+                      }
+                      className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                    >
+                      <option value="">-- Select Designation --</option>
+                      {DESIGNATION_OPTIONS.map((d) => (
+                        <option key={d} value={d}>
+                          {d}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {a.designation === 'Other' && (
+                    <div className="col-span-2">
+                      <label className="block text-xs font-medium text-brand-text/70 mb-1">
+                        Enter Designation <span className="text-red-400">*</span>
+                      </label>
+                      <input
+                        value={a.otherDesignation}
+                        onChange={(e) => update(i, { otherDesignation: e.target.value })}
+                        placeholder="Designation"
+                        className="w-full px-3 py-2 rounded-lg border border-stone-300 bg-white text-sm shadow-sm focus:border-brand-accent focus:ring-2 focus:ring-brand-accent/20 outline-none transition-all"
+                      />
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -1454,6 +1556,11 @@ function MoreInfoModal({
                         </span>
                       )}
                     </div>
+                    {(a.title || a.designation) && (
+                      <div className="text-xs text-brand-text/60 mt-0.5">
+                        {[a.title, a.designation].filter(Boolean).join(' · ')}
+                      </div>
+                    )}
                     <div className="text-sm text-brand-text/70 mt-1 space-y-0.5">
                       {a.email && (
                         <div className="flex items-center gap-1.5 break-words">

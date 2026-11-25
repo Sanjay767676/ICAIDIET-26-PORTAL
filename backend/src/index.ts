@@ -2195,7 +2195,7 @@ app.get('/api/admin/submissions', async (c) => {
     let authorsBySubmission: Record<string, any[]> = {};
     if (submissions.length > 0) {
       const { results: allAuthors } = await c.env.DB.prepare(
-        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation, created_at
          FROM authors
          WHERE submission_id IN (SELECT id FROM submissions WHERE deleted_at IS NULL)
          ORDER BY is_primary DESC, created_at ASC`
@@ -2253,7 +2253,7 @@ app.get('/api/admin/submissions/deleted', async (c) => {
     let authorsBySubmission: Record<string, any[]> = {};
     if (submissions.length > 0) {
       const { results: allAuthors } = await c.env.DB.prepare(
-        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+        `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation, created_at
          FROM authors
          WHERE submission_id IN (SELECT id FROM submissions WHERE deleted_at IS NOT NULL)
          ORDER BY is_primary DESC, created_at ASC`
@@ -3842,17 +3842,45 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
       return c.json({ success: false, error: 'Provide at least one author.' }, 400);
     }
 
-    const authors = (raw as any[]).map((a) => ({
-      first_name: typeof a.first_name === 'string' ? a.first_name.trim() : '',
-      last_name: typeof a.last_name === 'string' ? a.last_name.trim() : '',
-      email: typeof a.email === 'string' ? a.email.trim() : '',
-      phone: normalizePhone(a.phone),
-      college: typeof a.college === 'string' ? a.college.trim() : '',
-      is_primary: a.is_primary === true || a.is_primary === 1 || a.is_primary === '1' ? 1 : 0,
-    }));
+    const authors = (raw as any[]).map((a) => {
+      const designation = typeof a.designation === 'string' ? a.designation.trim() : '';
+      const otherDesignation = typeof a.other_designation === 'string' ? a.other_designation.trim() : '';
+      return {
+        first_name: typeof a.first_name === 'string' ? a.first_name.trim() : '',
+        last_name: typeof a.last_name === 'string' ? a.last_name.trim() : '',
+        email: typeof a.email === 'string' ? a.email.trim() : '',
+        phone: normalizePhone(a.phone),
+        college: typeof a.college === 'string' ? a.college.trim() : '',
+        title: typeof a.title === 'string' ? a.title.trim() : '',
+        designation,
+        designationValue: designation === 'Other' ? otherDesignation : designation,
+        is_primary: a.is_primary === true || a.is_primary === 1 || a.is_primary === '1' ? 1 : 0,
+      };
+    });
 
     if (authors.some((a) => !a.first_name || !a.last_name)) {
       return c.json({ success: false, error: 'Every author needs a first and last name.' }, 400);
+    }
+    const badTitleIndex = authors.findIndex((a) => !AUTHOR_TITLE_OPTIONS.includes(a.title));
+    if (badTitleIndex !== -1) {
+      return c.json(
+        { success: false, error: `Author ${badTitleIndex + 1}: please select a valid title.` },
+        400
+      );
+    }
+    const badDesignationIndex = authors.findIndex((a) => !AUTHOR_DESIGNATION_OPTIONS.includes(a.designation));
+    if (badDesignationIndex !== -1) {
+      return c.json(
+        { success: false, error: `Author ${badDesignationIndex + 1}: please select a valid designation.` },
+        400
+      );
+    }
+    const missingOtherIndex = authors.findIndex((a) => a.designation === 'Other' && !a.designationValue);
+    if (missingOtherIndex !== -1) {
+      return c.json(
+        { success: false, error: `Author ${missingOtherIndex + 1}: please enter the designation.` },
+        400
+      );
     }
     const badPhoneIndex = authors.findIndex((a) => !isValidPhone(a.phone));
     if (badPhoneIndex !== -1) {
@@ -3869,9 +3897,9 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
       return c.json({ success: false, error: 'The primary author must have an email address.' }, 400);
     }
 
-    // Certificate details (title / designation) are collected once by the
-    // author. An admin name/phone/email correction must never wipe them, so
-    // carry them over from the row with the same email address.
+    // Certificate details (title / designation) are now editable by the admin.
+    // If an older client omits them, carry the values over from the row with
+    // the same email address so a phone/email-only correction cannot wipe them.
     const previous = await c.env.DB.prepare(
       `SELECT email, title, designation FROM authors WHERE submission_id = ?`
     ).bind(submissionId).all();
@@ -3898,8 +3926,8 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
           a.phone,
           a.email,
           a.college,
-          (old?.title as string) || '',
-          (old?.designation as string) || '',
+          a.title || (old?.title as string) || '',
+          a.designationValue || (old?.designation as string) || '',
           now
         )
       );
@@ -3927,7 +3955,7 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
     c.executionCtx.waitUntil(triggerCertificateEngine(c.env, 'admin author edit'));
 
     const res = await c.env.DB.prepare(
-      `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, created_at
+      `SELECT id, submission_id, is_primary, first_name, last_name, phone, email, college, title, designation, created_at
        FROM authors WHERE submission_id = ? ORDER BY is_primary DESC, created_at ASC`
     ).bind(submissionId).all();
 
