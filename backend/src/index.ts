@@ -2380,9 +2380,10 @@ async function isAuthorizedForSubmission(
 // ------------------------------------------------------------------
 // Author-editor variant. One switch, shared by the list and the endpoints:
 //
-//   'ONLINE' (live now): online-attendance papers AND papers still in the
-//     payment tab (no attendance mode yet), except paper 1271, get the editor.
-//     They may grow the list to 2-6 authors and have no WhatsApp step.
+//   'ONLINE' (live now): online-attendance papers, papers still in the
+//     payment tab (no attendance mode yet), and waived papers (regardless of
+//     attendance mode), except paper 1271, get the editor. They may grow the
+//     list to 2-6 authors and have no WhatsApp step.
 //   'OFFLINE' (previous phase): offline-attendance papers plus paper 1271 got
 //     a fixed-count editor with a required WhatsApp group confirmation.
 //
@@ -2396,8 +2397,12 @@ const AUTHOR_EDIT_WHATSAPP_URL = 'https://chat.whatsapp.com/EI0ZkOXPaGvI8S72cOqk
 function authorEditModeFor(submission: {
   attendance_mode?: string | null;
   paper_id?: string | null;
+  phase2_payment_waived?: number | boolean | null;
 }): AuthorEditMode | null {
   const isSpecial = String(submission.paper_id || '').trim() === AUTHOR_EDIT_SPECIAL_PAPER_ID;
+  // Waived papers still need certificate details, so give them the current
+  // online editor even when their attendance mode is OFFLINE.
+  if (Boolean(submission.phase2_payment_waived)) return 'ONLINE';
   if (AUTHOR_EDIT_MODE === 'OFFLINE') {
     return submission.attendance_mode === 'OFFLINE' || isSpecial ? 'OFFLINE' : null;
   }
@@ -2490,9 +2495,10 @@ app.get('/api/submissions/mine', requireClerkAuth, async (c) => {
 // User: one-time author-list edit for certificate printing.
 //
 // Master gate: the admin "Allow Author Edits" setting (OFF by default, seeded
-// by migration 0041). Only payment-approved submissions qualify, and only a
-// signed-in account that owns / is listed on that submission may read or write
-// the list. Once confirmed, `authors_finalised_at` locks it permanently.
+// by migration 0041). Payment-approved submissions and submissions whose payment
+// the organizers waived qualify, and only a signed-in account that owns / is
+// listed on that submission may read or write the list. Once confirmed,
+// `authors_finalised_at` locks it permanently.
 // ------------------------------------------------------------------
 const AUTHOR_TITLE_OPTIONS = ['Mrs', 'Mr', 'Ms', 'Dr'];
 const AUTHOR_DESIGNATION_OPTIONS = [
@@ -2519,19 +2525,21 @@ async function loadAuthorEditorSubmission(
   }
 
   const submission = await c.env.DB.prepare(
-    `SELECT id, user_id, author_email, paper_id, payment_status, attendance_mode, authors_finalised_at, deleted_at
+    `SELECT id, user_id, author_email, paper_id, payment_status, phase2_payment_waived, attendance_mode, authors_finalised_at, deleted_at
      FROM submissions WHERE id = ?`
   ).bind(submissionId).first() as any;
   if (!submission || submission.deleted_at) {
     return { ok: false, res: c.json({ success: false, error: 'Submission not found.' }, 404) };
   }
-  if (submission.payment_status !== 'APPROVED') {
+  const paymentSatisfied =
+    submission.payment_status === 'APPROVED' || Boolean(submission.phase2_payment_waived);
+  if (!paymentSatisfied) {
     return {
       ok: false,
       res: c.json(
         {
           success: false,
-          error: 'Author details can only be edited after the registration payment is approved.',
+          error: 'Author details can only be edited after the registration payment is approved or waived.',
         },
         403
       ),
@@ -3951,7 +3959,7 @@ app.put('/api/admin/submissions/:id/authors', async (c) => {
     );
 
     await c.env.DB.batch(statements);
-    // Authors are final now: issue / refresh their e-certificates if payment is approved.
+    // Authors are final now: issue / refresh their e-certificates if payment is approved or waived.
     c.executionCtx.waitUntil(triggerCertificateEngine(c.env, 'admin author edit'));
 
     const res = await c.env.DB.prepare(
@@ -4115,7 +4123,7 @@ app.post('/api/admin/author-detail-requests/:submissionId/approve', async (c) =>
     );
 
     await c.env.DB.batch(statements);
-    // Edit Authors approved: issue the e-certificates if payment is approved too.
+    // Edit Authors approved: issue the e-certificates if payment is approved or waived.
     c.executionCtx.waitUntil(triggerCertificateEngine(c.env, 'author details approved'));
     return c.json({ success: true, status: 'APPROVED', authors_finalised_at: now });
   } catch (error) {

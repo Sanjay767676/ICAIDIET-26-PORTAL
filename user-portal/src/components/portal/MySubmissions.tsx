@@ -1739,11 +1739,11 @@ export function MySubmissions({
                 )}
 
                 {/* One-time, final author list used for certificate printing.
-                    Rendered per submission, so an author with several paid
-                    papers gets a separate Edit Authors button on each card.
-                    Which papers qualify is decided by the server's current
-                    phase switch (author_edit_mode). */}
-                {authorEditsEnabled && sub.payment_status === 'APPROVED' && !!sub.author_edit_mode && (
+                    Rendered per submission, so an author with several paid or
+                    waived papers gets a separate Edit Authors button on each
+                    card. Which papers qualify is decided by the server's
+                    current phase switch (author_edit_mode). */}
+                {authorEditsEnabled && (isPaymentApproved || paymentWaived) && !!sub.author_edit_mode && (
                   <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-stone-200 bg-white px-5 py-3 shadow-sm">
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-semibold uppercase tracking-wide text-stone-500">

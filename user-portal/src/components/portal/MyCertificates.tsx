@@ -20,6 +20,7 @@ type PaperCerts = {
   paper_id: string | null;
   paper_title: string;
   payment_approved: boolean;
+  payment_waived?: boolean;
   authors_edited: boolean;
   eligible: boolean;
   authors: AuthorCert[];
@@ -36,7 +37,7 @@ function Condition({ ok, label }: { ok: boolean; label: string }) {
 // "View My Certificates" tab. One card per paper with every author the paper
 // lists. Each author has a "Download My Certificate" button that saves the PDF
 // straight away. Certificates exist only for papers whose payment was approved
-// and whose authors were edited (Edit Authors) and approved by the admin.
+// or waived and whose authors were edited (Edit Authors) and approved by the admin.
 export function MyCertificates({
   getToken,
   onBack,
@@ -149,7 +150,7 @@ export function MyCertificates({
                     Certificates for this paper are generated once both of these are complete:
                   </p>
                   <div className="flex flex-col sm:flex-row gap-2 sm:gap-6">
-                    <Condition ok={paper.payment_approved} label="Payment approved" />
+                    <Condition ok={paper.payment_approved} label={paper.payment_waived ? 'Payment waived' : 'Payment approved'} />
                     <Condition ok={paper.authors_edited} label="Edit Authors completed and approved" />
                   </div>
                 </div>

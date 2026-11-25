@@ -14,6 +14,7 @@ type AuthorCert = {
 
 type PaperCerts = {
   payment_approved: boolean;
+  payment_waived?: boolean;
   authors_edited: boolean;
   eligible: boolean;
   authors: AuthorCert[];
@@ -85,7 +86,8 @@ export default function CertificatesSection({ submissionId, token }: { submissio
             <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm space-y-1">
               <div className="font-semibold text-amber-900">Not eligible for certificates yet</div>
               <div className={`flex items-center gap-1.5 ${data.payment_approved ? 'text-green-800' : 'text-red-700'}`}>
-                {data.payment_approved ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />} Payment approved
+                {data.payment_approved ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />}{' '}
+                {data.payment_waived ? 'Payment waived' : 'Payment approved'}
               </div>
               <div className={`flex items-center gap-1.5 ${data.authors_edited ? 'text-green-800' : 'text-red-700'}`}>
                 {data.authors_edited ? <CheckCircle2 className="w-4 h-4" /> : <XCircle className="w-4 h-4" />} Edit Authors completed and approved

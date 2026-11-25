@@ -2,8 +2,9 @@
 // ICAIDIET'26 participant e-certificates
 //
 // Who gets one: every author of a live paper whose payment the admin approved
-// AND whose author list was edited by the author (Edit Authors) and approved by
-// the admin (submissions.authors_finalised_at is set). One certificate per author.
+// (or which the organizers waived) AND whose author list was edited by the author
+// (Edit Authors) and approved by the admin (submissions.authors_finalised_at is set).
+// One certificate per author.
 //
 // What is printed comes from here, never re-typed by the engine:
 //   name    = <title chosen by the author: Mr./Mrs./Ms./Dr.> <first name> <last name>
@@ -36,8 +37,9 @@
 // Certificate ID = "2026" + CERT_ID_DIGITS random digits (wrangler.toml, 4 -> 10,000 IDs).
 //
 // Automatic generation: triggerCertificateEngine() calls the engine's POST /run
-// (CERT_ENGINE_URL) right after an admin approves a payment, approves Edit Authors,
-// or edits authors, and again from the hourly cron while anything is left. Calling
+// (CERT_ENGINE_URL) right after an admin approves a payment (or waives one),
+// approves Edit Authors, or edits authors, and again from the hourly cron while
+// anything is left. Calling
 // it only wakes Render; the engine starts a run by itself whenever it starts up
 // and work is waiting, so a sleeping free instance still gets the job done.
 //
@@ -74,8 +76,9 @@ const CERT_PREFIX = '2026';
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
 const ID_PATTERN = /^\d{5,12}$/;
 
-// Paper qualifies: not deleted, payment approved by admin, authors edited + approved.
-export const CERT_ELIGIBLE_SQL = `s.deleted_at IS NULL AND s.payment_status = 'APPROVED' AND s.authors_finalised_at IS NOT NULL`;
+// Paper qualifies: not deleted, payment approved by admin or waived by the
+// organizers, authors edited + approved.
+export const CERT_ELIGIBLE_SQL = `s.deleted_at IS NULL AND (s.payment_status = 'APPROVED' OR COALESCE(s.phase2_payment_waived, 0) = 1) AND s.authors_finalised_at IS NOT NULL`;
 
 // A certificate counts only if its author row still exists (authors removed by
 // Edit Authors lose theirs).
@@ -158,7 +161,7 @@ async function stats(env: Env) {
 // Every author of one paper with the certificate state, for the user portal and admin.
 async function paperCertificates(env: Env, submissionId: string) {
   const sub = (await env.DB.prepare(
-    `SELECT s.id, s.paper_id, s.title, s.payment_status, s.authors_finalised_at, s.deleted_at
+    `SELECT s.id, s.paper_id, s.title, s.payment_status, s.phase2_payment_waived, s.authors_finalised_at, s.deleted_at
      FROM submissions s WHERE s.id = ?`
   ).bind(submissionId).first()) as any;
   if (!sub) return null;
@@ -169,13 +172,15 @@ async function paperCertificates(env: Env, submissionId: string) {
      WHERE a.submission_id = ?
      ORDER BY a.is_primary DESC, a.created_at, a.id`
   ).bind(submissionId).all();
-  const paymentApproved = sub.payment_status === 'APPROVED';
+  const paymentWaived = Boolean(sub.phase2_payment_waived);
+  const paymentApproved = sub.payment_status === 'APPROVED' || paymentWaived;
   const authorsEdited = Boolean(sub.authors_finalised_at);
   return {
     submission_id: sub.id,
     paper_id: sub.paper_id,
     paper_title: sub.title,
     payment_approved: paymentApproved,
+    payment_waived: paymentWaived,
     authors_edited: authorsEdited,
     eligible: !sub.deleted_at && paymentApproved && authorsEdited,
     authors: ((results || []) as any[]).map((a) => {
